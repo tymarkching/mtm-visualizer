@@ -1,0 +1,6 @@
+{
+  "name": "Tymark Visualizer Studio",
+  "description": "Premium offline-capable progressive web application for real-time high-fidelity music audioscapes and native video generation.",
+  "requestFramePermissions": [],
+  "majorCapabilities": ["MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"]
+}

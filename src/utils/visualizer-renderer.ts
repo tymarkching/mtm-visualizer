@@ -1,0 +1,2589 @@
+import {
+  VisualizerSettings,
+  ParticleSettings,
+  TitleOverlaySettings,
+  BackgroundSettings,
+} from '../types';
+
+let activeSettings: VisualizerSettings | null = null;
+let activeYPercent: number = 50;
+let hueRotation: number = 0;
+let lastTimeColorCycle: number = Date.now();
+
+// State for scrolling Frequency Spectrogram heatmap history
+let spectrogramHistory: Uint8Array[] = [];
+const MAX_SPECTROGRAM_HISTORY = 60;
+
+// Cached offscreen canvas for Mirror Mode horizontal reflection to prevent frame-by-frame allocation overhead
+let mirrorOffscreenCanvas: HTMLCanvasElement | null = null;
+let mirrorOffscreenCtx: CanvasRenderingContext2D | null = null;
+
+export interface RenderParticle {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  size: number;
+  color: string;
+  alpha: number;
+  life: number;
+  maxLife: number;
+  angle: number;
+  spin: number;
+}
+
+// Color conversion helpers
+export function hexToRgb(hex: string): { r: number; g: number; b: number } | null {
+  const result = /^#?([a-f\d]{2})([a-f\d]{2})([a-f\d]{2})$/i.exec(hex);
+  return result
+    ? {
+        r: parseInt(result[1], 16),
+        g: parseInt(result[2], 16),
+        b: parseInt(result[3], 16),
+      }
+    : null;
+}
+
+function hslToHex(h: number, s: number, l: number): string {
+  h /= 360;
+  s /= 100;
+  l /= 100;
+  let r = l;
+  let g = l;
+  let b = l;
+  if (s !== 0) {
+    const q = l < 0.5 ? l * (1 + s) : l + s - l * s;
+    const p = 2 * l - q;
+    const hue2rgb = (t: number) => {
+      if (t < 0) t += 1;
+      if (t > 1) t -= 1;
+      if (t < 1 / 6) return p + (q - p) * 6 * t;
+      if (t < 1 / 2) return q;
+      if (t < 2 / 3) return p + (q - p) * (2 / 3 - t) * 6;
+      return p;
+    };
+    r = hue2rgb(h + 1 / 3);
+    g = hue2rgb(h);
+    b = hue2rgb(h - 1 / 3);
+  }
+  const toHex = (x: number) => {
+    const hex = Math.round(x * 255).toString(16);
+    return hex.length === 1 ? '0' + hex : hex;
+  };
+  return `#${toHex(r)}${toHex(g)}${toHex(b)}`;
+}
+
+export function shiftHexColorHue(hex: string, degreeOffset: number): string {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return hex;
+
+  // Convert RGB to HSL
+  let r = rgb.r / 255;
+  let g = rgb.g / 255;
+  let b = rgb.b / 255;
+
+  const max = Math.max(r, g, b);
+  const min = Math.min(r, g, b);
+  let h = 0;
+  let s = 0;
+  let l = (max + min) / 2;
+
+  if (max !== min) {
+    const d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch (max) {
+      case r:
+        h = (g - b) / d + (g < b ? 6 : 0);
+        break;
+      case g:
+        h = (b - r) / d + 2;
+        break;
+      case b:
+        h = (r - g) / d + 4;
+        break;
+    }
+    h /= 6;
+  }
+
+  h = (h * 360 + degreeOffset) % 360;
+  if (h < 0) h += 360;
+
+  return hslToHex(h, s * 100, l * 100);
+}
+
+// Initialize particles pool
+export function initParticles(settings: ParticleSettings, width: number, height: number): RenderParticle[] {
+  const particles: RenderParticle[] = [];
+  const count = settings.count;
+  for (let i = 0; i < count; i++) {
+    particles.push(createParticle(settings, width, height, true));
+  }
+  return particles;
+}
+
+// Create a single particle
+export function createParticle(
+  settings: ParticleSettings,
+  width: number,
+  height: number,
+  randomY = false
+): RenderParticle {
+  const size = settings.minSize + Math.random() * (settings.maxSize - settings.minSize);
+  
+  // Starting positions based on gravity
+  let x = Math.random() * width;
+  let y = 0;
+  
+  if (randomY) {
+    y = Math.random() * height;
+  } else {
+    // If gravity is pulling down, spawn at top. If gravity is floating up (negative), spawn at bottom
+    y = settings.gravity >= 0 ? -10 : height + 10;
+  }
+
+  // Velocity
+  const baseSpeed = settings.speed;
+  const angle = (Math.random() * Math.PI * 2);
+  let vx = Math.cos(angle) * (baseSpeed * 0.5) + settings.wind;
+  let vy = Math.sin(angle) * (baseSpeed * 0.5) + settings.gravity;
+
+  // Let types steer velocity slightly differently
+  if (settings.type === 'sparks') {
+    vy = -baseSpeed * (0.5 + Math.random() * 1.5) + settings.gravity;
+    vx = (Math.random() - 0.5) * baseSpeed * 2 + settings.wind;
+  } else if (settings.type === 'bubbles') {
+    vy = -baseSpeed * (0.2 + Math.random() * 0.8) + settings.gravity;
+    vx = Math.sin(Math.random() * Math.PI) * 0.5 + settings.wind;
+  }
+
+  // Lifespan
+  const maxLife = 50 + Math.random() * 100;
+
+  return {
+    x,
+    y,
+    vx,
+    vy,
+    size,
+    color: settings.color,
+    alpha: 0.1 + Math.random() * 0.8,
+    life: maxLife,
+    maxLife,
+    angle: Math.random() * Math.PI * 2,
+    spin: (Math.random() - 0.5) * 0.05,
+  };
+}
+
+// Update particle motions and react to beat
+export function updateParticles(
+  particles: RenderParticle[],
+  settings: ParticleSettings,
+  width: number,
+  height: number,
+  isBeat: boolean,
+  beatIntensity: number
+): RenderParticle[] {
+  const result: RenderParticle[] = [];
+
+  for (let p of particles) {
+    p.life -= 1;
+
+    // React to beats
+    if (isBeat && settings.beatReactive) {
+      p.vx *= 1.3 * (1 + beatIntensity * 0.5);
+      p.vy *= 1.3 * (1 + beatIntensity * 0.5);
+      p.size = Math.min(settings.maxSize * 2, p.size * (1.1 + beatIntensity * 0.2));
+    }
+
+    // Apply winds & gravity
+    p.vx += settings.wind * 0.01;
+    p.vy += settings.gravity * 0.01;
+
+    // Decoloration or drift friction depending on particle type
+    if (settings.type === 'sakura') {
+      // Wind-swept sway
+      p.vx += Math.sin(p.life * 0.05) * 0.05;
+    } else if (settings.type === 'bubbles') {
+      // Bobbing wobble
+      p.vx += Math.sin(p.life * 0.1) * 0.08;
+    }
+
+    p.x += p.vx;
+    p.y += p.vy;
+    p.angle += p.spin;
+
+    // Apply physics boundary bounces (bouncing off walls)
+    if (settings.enablePhysics) {
+      const bMultiplier = 0.85; // coefficient of restitution with walls
+      if (p.x - p.size < 0) {
+        p.x = p.size;
+        p.vx = -p.vx * bMultiplier;
+      } else if (p.x + p.size > width) {
+        p.x = width - p.size;
+        p.vx = -p.vx * bMultiplier;
+      }
+
+      if (p.y - p.size < 0) {
+        p.y = p.size;
+        p.vy = -p.vy * bMultiplier;
+      } else if (p.y + p.size > height) {
+        p.y = height - p.size;
+        p.vy = -p.vy * bMultiplier;
+      }
+    }
+
+    // Fade out as life ends
+    p.alpha = Math.max(0, (p.life / p.maxLife) * 0.8);
+
+    // Filter out dead or off-screen particles, spawn replacements
+    const isOffScreen =
+      p.x < -100 || p.x > width + 100 || p.y < -100 || p.y > height + 100;
+
+    if (p.life > 0 && !isOffScreen) {
+      result.push(p);
+    } else {
+      result.push(createParticle(settings, width, height, false));
+    }
+  }
+
+  // Adjust count if settings changed
+  while (result.length < settings.count) {
+    result.push(createParticle(settings, width, height, true));
+  }
+  if (result.length > settings.count) {
+    result.length = settings.count;
+  }
+
+  // If particle physics is enabled, resolve particle-to-particle collisions
+  if (settings.enablePhysics && result.length > 1) {
+    for (let i = 0; i < result.length; i++) {
+      for (let j = i + 1; j < result.length; j++) {
+        const p1 = result[i];
+        const p2 = result[j];
+
+        const dx = p2.x - p1.x;
+        const dy = p2.y - p1.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const minDist = p1.size + p2.size;
+
+        if (dist < minDist && dist > 0.05) {
+          // Resolve overlap (nudge)
+          const overlap = minDist - dist;
+          const nx = dx / dist;
+          const ny = dy / dist;
+
+          const m1 = p1.size || 1;
+          const m2 = p2.size || 1;
+          const totalMass = m1 + m2;
+
+          p1.x -= nx * overlap * (m2 / totalMass);
+          p1.y -= ny * overlap * (m2 / totalMass);
+          p2.x += nx * overlap * (m1 / totalMass);
+          p2.y += ny * overlap * (m1 / totalMass);
+
+          // Calculate elastic velocities
+          const rvx = p2.vx - p1.vx;
+          const rvy = p2.vy - p1.vy;
+          const velAlongNormal = rvx * nx + rvy * ny;
+
+          // Only bounce if they are moving towards each other
+          if (velAlongNormal < 0) {
+            const restitution = 0.9; // highly elastic bouncy collisions
+            const impulse = -(1 + restitution) * velAlongNormal / (1 / m1 + 1 / m2);
+
+            p1.vx -= nx * (impulse / m1);
+            p1.vy -= ny * (impulse / m1);
+            p2.vx += nx * (impulse / m2);
+            p2.vy += ny * (impulse / m2);
+          }
+        }
+      }
+    }
+
+    // Keep particles inside viewport borders after resolving collisions too
+    for (let p of result) {
+      if (p.x - p.size < 0) { p.x = p.size; p.vx = -p.vx * 0.85; }
+      else if (p.x + p.size > width) { p.x = width - p.size; p.vx = -p.vx * 0.85; }
+      
+      if (p.y - p.size < 0) { p.y = p.size; p.vy = -p.vy * 0.85; }
+      else if (p.y + p.size > height) { p.y = height - p.size; p.vy = -p.vy * 0.85; }
+    }
+  }
+
+  return result;
+}
+
+// DRAW BACKGROUND
+export function drawBackground(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  settings: BackgroundSettings,
+  bgImgElement: HTMLImageElement | null,
+  bgVidElement: HTMLVideoElement | null,
+  beatIntensity?: number,
+  enableBeatPulse?: boolean
+) {
+  ctx.save();
+
+  if (enableBeatPulse && beatIntensity && beatIntensity > 0) {
+    const scaleMultiplier = 1.0 + 0.03 * beatIntensity;
+    ctx.translate(width / 2, height / 2);
+    ctx.scale(scaleMultiplier, scaleMultiplier);
+    ctx.translate(-width / 2, -height / 2);
+  }
+  
+  if (settings.type === 'color') {
+    ctx.fillStyle = settings.color;
+    ctx.fillRect(0, 0, width, height);
+  } else if (settings.type === 'gradient') {
+    const gradient = ctx.createLinearGradient(0, 0, 0, height);
+    gradient.addColorStop(0, settings.gradientStart);
+    gradient.addColorStop(1, settings.gradientEnd);
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, height);
+  } else if (settings.type === 'image' && bgImgElement && bgImgElement.complete) {
+    // Center cover fit
+    const imgRatio = bgImgElement.width / bgImgElement.height;
+    const canvasRatio = width / height;
+    let dWidth = width;
+    let dHeight = height;
+    let dx = 0;
+    let dy = 0;
+
+    if (imgRatio > canvasRatio) {
+      dWidth = height * imgRatio;
+      dx = (width - dWidth) / 2;
+    } else {
+      dHeight = width / imgRatio;
+      dy = (height - dHeight) / 2;
+    }
+
+    if (settings.blur > 0) {
+      ctx.filter = `blur(${settings.blur}px)`;
+    }
+    
+    ctx.drawImage(bgImgElement, dx, dy, dWidth, dHeight);
+    
+    // Dim Overlay
+    ctx.filter = 'none';
+    ctx.fillStyle = `rgba(0, 0, 0, ${1 - settings.opacity})`;
+    ctx.fillRect(0, 0, width, height);
+  } else if (settings.type === 'video' && bgVidElement) {
+    if (bgVidElement.paused) {
+      bgVidElement.play().catch(() => {});
+    }
+    // Video covering
+    const vidRatio = bgVidElement.videoWidth / bgVidElement.videoHeight;
+    const canvasRatio = width / height;
+    let dWidth = width;
+    let dHeight = height;
+    let dx = 0;
+    let dy = 0;
+
+    if (vidRatio > canvasRatio) {
+      dWidth = height * vidRatio;
+      dx = (width - dWidth) / 2;
+    } else {
+      dHeight = width / vidRatio;
+      dy = (height - dHeight) / 2;
+    }
+
+    if (settings.blur > 0) {
+      ctx.filter = `blur(${settings.blur}px)`;
+    }
+
+    ctx.drawImage(bgVidElement, dx, dy, dWidth, dHeight);
+
+    // Dim Overlay
+    ctx.filter = 'none';
+    ctx.fillStyle = `rgba(0, 0, 0, ${1 - settings.opacity})`;
+    ctx.fillRect(0, 0, width, height);
+  } else {
+    // Fallback beautiful soft dark gradient
+    const gradient = ctx.createLinearGradient(0, 0, 0, height);
+    gradient.addColorStop(0, '#0a0a0f');
+    gradient.addColorStop(1, '#020205');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(0, 0, width, height);
+  }
+
+  ctx.restore();
+}
+
+// DRAW PARTICLES
+export function drawParticles(
+  ctx: CanvasRenderingContext2D,
+  particles: RenderParticle[],
+  settings: ParticleSettings,
+  isBeat: boolean,
+  beatIntensity: number
+) {
+  ctx.save();
+
+  for (const p of particles) {
+    ctx.beginPath();
+    ctx.globalAlpha = p.alpha;
+    
+    // Base style representation
+    if (settings.type === 'stars') {
+      // Draw 4-point star or circle
+      ctx.fillStyle = p.color;
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (settings.type === 'bubbles') {
+      ctx.strokeStyle = p.color;
+      ctx.lineWidth = p.size * 0.15;
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.stroke();
+    } else if (settings.type === 'sparks') {
+      // Small fire sparks
+      ctx.fillStyle = p.color;
+      ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size * 2);
+    } else if (settings.type === 'sakura') {
+      // Rotating soft petal shape
+      ctx.fillStyle = p.color;
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.angle);
+      
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.bezierCurveTo(-p.size, -p.size, -p.size * 2, p.size / 2, 0, p.size * 1.5);
+      ctx.bezierCurveTo(p.size * 2, p.size / 2, p.size, -p.size, 0, 0);
+      ctx.fill();
+      
+      // Reset transform
+      ctx.setTransform(1, 0, 0, 1, 0, 0);
+    } else if (settings.type === 'dust') {
+      ctx.fillStyle = p.color;
+      ctx.shadowBlur = isBeat ? 15 : 5;
+      ctx.shadowColor = p.color;
+      ctx.arc(p.x, p.y, p.size * 0.5, 0, Math.PI * 2);
+      ctx.fill();
+    } else if (settings.type === 'digital') {
+      // Falling matrix character or glowing grid node
+      ctx.fillStyle = p.color;
+      ctx.font = `${p.size * 1.5}px monospace`;
+      const char = String.fromCharCode(48 + Math.floor(Math.random() * 2)); // 0 or 1
+      ctx.fillText(char, p.x, p.y);
+    } else if (settings.type === 'hearts') {
+      ctx.save();
+      ctx.fillStyle = p.color;
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.angle || 0);
+      ctx.beginPath();
+      const hSize = p.size * 1.2;
+      ctx.moveTo(0, hSize / 4);
+      ctx.bezierCurveTo(-hSize, -hSize * 0.7, -hSize * 1.5, hSize * 0.2, 0, hSize * 1.3);
+      ctx.bezierCurveTo(hSize * 1.5, hSize * 0.2, hSize, -hSize * 0.7, 0, hSize / 4);
+      ctx.fill();
+      ctx.restore();
+    } else if (settings.type === 'glow-circles') {
+      ctx.save();
+      ctx.beginPath();
+      ctx.shadowBlur = (isBeat ? (p.size * 3) : (p.size * 1.5));
+      ctx.shadowColor = p.color;
+      ctx.fillStyle = p.color;
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    } else if (settings.type === 'spark-stars') {
+      ctx.save();
+      ctx.fillStyle = p.color;
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.angle || 0);
+      const spikes = 5;
+      const outerRadius = p.size * 1.6;
+      const innerRadius = p.size * 0.7;
+      let rot = (Math.PI / 2) * 3;
+      let cx = 0, cy = 0;
+      let sx = cx, sy = cy;
+      const step = Math.PI / spikes;
+
+      ctx.beginPath();
+      ctx.moveTo(cx, cy - outerRadius);
+      for (let i = 0; i < spikes; i++) {
+        sx = cx + Math.cos(rot) * outerRadius;
+        sy = cy + Math.sin(rot) * outerRadius;
+        ctx.lineTo(sx, sy);
+        rot += step;
+
+        sx = cx + Math.cos(rot) * innerRadius;
+        sy = cy + Math.sin(rot) * innerRadius;
+        ctx.lineTo(sx, sy);
+        rot += step;
+      }
+      ctx.lineTo(cx, cy - outerRadius);
+      ctx.closePath();
+      ctx.shadowBlur = 10;
+      ctx.shadowColor = p.color;
+      ctx.fill();
+      ctx.restore();
+    } else if (settings.type === 'snowflakes') {
+      ctx.save();
+      ctx.strokeStyle = p.color;
+      ctx.lineWidth = Math.max(1, p.size * 0.2);
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.angle || 0);
+      for (let i = 0; i < 6; i++) {
+        ctx.rotate(Math.PI / 3);
+        ctx.beginPath();
+        ctx.moveTo(0, 0);
+        ctx.lineTo(0, p.size * 1.3);
+        ctx.moveTo(0, p.size * 0.5);
+        ctx.lineTo(-p.size * 0.35, p.size * 0.85);
+        ctx.moveTo(0, p.size * 0.5);
+        ctx.lineTo(p.size * 0.35, p.size * 0.85);
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+  }
+
+  ctx.restore();
+}
+
+// DRAW VISUALIZER INTERACTIVE STYLES
+export function drawVisualizer(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  settings: VisualizerSettings,
+  analyserData: Uint8Array,
+  waveformData: Uint8Array,
+  beatIntensity: number
+) {
+  const dataLen = analyserData.length;
+  const isWebm = true;
+
+  // Manage spectrogram history
+  if (settings.style === 'frequency-spectrogram') {
+    spectrogramHistory.push(new Uint8Array(analyserData));
+    if (spectrogramHistory.length > MAX_SPECTROGRAM_HISTORY) {
+      spectrogramHistory.shift();
+    }
+  } else if (spectrogramHistory.length > 0) {
+    // Release spectrogram history memory when not active
+    spectrogramHistory = [];
+  }
+
+  let appliedHueShift = false;
+
+  if (settings.cycleColors) {
+    const now = Date.now();
+    let delta = (now - lastTimeColorCycle) / 1000;
+    if (delta < 0 || delta > 1) {
+      delta = 0.016; // fallback to ~60fps frame delta if tab suspended/first frame
+    }
+    lastTimeColorCycle = now;
+
+    // Default speed is 1.0 (corresponds to shifting 25 degrees/sec)
+    const speed = settings.colorCycleSpeed !== undefined ? settings.colorCycleSpeed : 1.0;
+    hueRotation = (hueRotation + delta * 25 * speed) % 360;
+    appliedHueShift = true;
+  } else {
+    lastTimeColorCycle = Date.now();
+  }
+
+  // Handle beat-reactive color shift increment
+  if (settings.beatReactiveColorShift && beatIntensity > 0.05) {
+    const intensity = settings.colorShiftIntensity !== undefined ? settings.colorShiftIntensity : 5.0;
+    // Increment hueRotation based on beat intensity and slider intensity multiplier
+    hueRotation = (hueRotation + beatIntensity * intensity * 15) % 360;
+    appliedHueShift = true;
+  }
+
+  if (appliedHueShift) {
+    settings = {
+      ...settings,
+      primaryColor: shiftHexColorHue(settings.primaryColor, hueRotation),
+      secondaryColor: shiftHexColorHue(settings.secondaryColor, hueRotation),
+    };
+  }
+
+  // Handle strobe-like beat color inversion
+  if (settings.colorInvertOnBeat && beatIntensity > 0.1) {
+    const temp = settings.primaryColor;
+    settings = {
+      ...settings,
+      primaryColor: settings.secondaryColor,
+      secondaryColor: temp,
+    };
+  }
+
+  // Handle on-beat color bursting/exploding with brightness
+  if (settings.colorBurstOnBeat && beatIntensity > 0.05) {
+    const rgb = hexToRgb(settings.primaryColor);
+    if (rgb) {
+      const factor = Math.min(1.0, beatIntensity * 0.95);
+      const r = Math.round(rgb.r + (255 - rgb.r) * factor);
+      const g = Math.round(rgb.g + (255 - rgb.g) * factor);
+      const b = Math.round(rgb.b + (255 - rgb.b) * factor);
+      const toHexVal = (val: number) => {
+        const hex = val.toString(16);
+        return hex.length === 1 ? '0' + hex : hex;
+      };
+      settings = {
+        ...settings,
+        primaryColor: `#${toHexVal(r)}${toHexVal(g)}${toHexVal(b)}`,
+      };
+    }
+  }
+
+  ctx.save();
+
+  // Save settings in module scope
+  activeSettings = settings;
+
+  const primaryRGB = hexToRgb(settings.primaryColor) || { r: 0, g: 255, b: 200 };
+  const secondaryRGB = hexToRgb(settings.secondaryColor) || { r: 255, g: 0, b: 128 };
+
+  // Glow Setup
+  if (settings.glowStrength > 0 || (settings.flashOnBeat && beatIntensity > 0)) {
+    const baseGlow = settings.glowStrength || 0;
+    const flashIntensityVal = settings.flashIntensity !== undefined ? settings.flashIntensity : 0.8;
+
+    if (settings.flashOnBeat && beatIntensity > 0) {
+      // Amplified dynamic shadow blur on beat, scaled by flashIntensityVal
+      ctx.shadowBlur = baseGlow + beatIntensity * 40 * flashIntensityVal;
+
+      // Select dynamic target color
+      const flashColorMode = settings.flashColorMode || 'white';
+      const flashCustomColor = settings.flashCustomColor || '#ffffff';
+
+      let targetColor = '#ffffff';
+      if (flashColorMode === 'white') {
+        targetColor = '#ffffff';
+      } else if (flashColorMode === 'custom') {
+        targetColor = flashCustomColor;
+      } else if (flashColorMode === 'colorA') {
+        targetColor = settings.primaryColor;
+      } else if (flashColorMode === 'glowColor') {
+        targetColor = settings.glowColor || settings.primaryColor || '#00ffcc';
+      }
+
+      // Blend from base glow color (or primary color as fallback) to target color
+      const startColor = settings.glowColor || settings.primaryColor || '#00ffcc';
+      const startRGB = hexToRgb(startColor) || { r: 0, g: 255, b: 200 };
+      const targetRGB = hexToRgb(targetColor) || { r: 255, g: 255, b: 255 };
+
+      // Calculate final blend factor
+      const blendFactor = Math.min(1.0, beatIntensity * flashIntensityVal);
+
+      const r = Math.round(startRGB.r + (targetRGB.r - startRGB.r) * blendFactor);
+      const g = Math.round(startRGB.g + (targetRGB.g - startRGB.g) * blendFactor);
+      const b = Math.round(startRGB.b + (targetRGB.b - startRGB.b) * blendFactor);
+
+      ctx.shadowColor = `rgb(${r}, ${g}, ${b})`;
+    } else {
+      ctx.shadowBlur = settings.glowStrength;
+      ctx.shadowColor = settings.glowColor;
+    }
+  }
+
+  // Color selection configuration
+  const mode = settings.colorMode || 'gradient';
+  let activeStyleColor: string | CanvasGradient;
+
+  if (mode === 'solid') {
+    activeStyleColor = settings.primaryColor;
+  } else if (mode === 'rainbow') {
+    const rainbowGrad = ctx.createLinearGradient(0, 0, width, 0);
+    rainbowGrad.addColorStop(0, 'hsl(0, 100%, 55%)');
+    rainbowGrad.addColorStop(0.2, 'hsl(35, 100%, 55%)');
+    rainbowGrad.addColorStop(0.4, 'hsl(60, 100%, 55%)');
+    rainbowGrad.addColorStop(0.6, 'hsl(125, 100%, 55%)');
+    rainbowGrad.addColorStop(0.8, 'hsl(215, 100%, 55%)');
+    rainbowGrad.addColorStop(1.0, 'hsl(280, 100%, 55%)');
+    activeStyleColor = rainbowGrad;
+  } else {
+    const gradient = ctx.createLinearGradient(0, 0, width, 0);
+    gradient.addColorStop(0, settings.primaryColor);
+    gradient.addColorStop(0.5, settings.secondaryColor);
+    gradient.addColorStop(1, settings.primaryColor);
+    activeStyleColor = gradient;
+  }
+
+  ctx.strokeStyle = activeStyleColor;
+  ctx.fillStyle = activeStyleColor;
+  ctx.lineWidth = settings.lineThickness;
+  ctx.lineCap = 'round';
+  ctx.lineJoin = 'round';
+
+  // DRAW ACCORDING TO VISUALIZER STYLE
+  const placement = settings.placement || 'bottom';
+  const originalWidth = width;
+  const originalHeight = height;
+
+  // Draw-space transformations for side placements
+  if (placement === 'left') {
+    ctx.translate(0, height);
+    ctx.rotate(-Math.PI / 2);
+    width = originalHeight;
+    height = originalWidth;
+  } else if (placement === 'right') {
+    ctx.translate(width, 0);
+    ctx.rotate(Math.PI / 2);
+    width = originalHeight;
+    height = originalWidth;
+  }
+
+  // Dynamic layout coordinates based on vertical and horizontal shifts from sliders
+  const xPercent = settings.waveformOffsetX !== undefined ? settings.waveformOffsetX : 50;
+  const defaultYPercent = placement === 'top' ? 25 : placement === 'bottom' ? 75 : 50;
+  const yPercent = settings.waveformOffsetY !== undefined ? settings.waveformOffsetY : defaultYPercent;
+  activeYPercent = yPercent;
+
+  let centerX = width * (xPercent / 100);
+  let centerY = height * (yPercent / 100);
+  let midY = height * (yPercent / 100);
+
+  // Vertically invert the rendered waveform relative to the center baseline / active baseline coordinate
+  if (settings.flipWaveform) {
+    ctx.translate(0, midY);
+    ctx.scale(1, -1);
+    ctx.translate(0, -midY);
+  }
+
+  if (settings.style === 'waveform') {
+    if (settings.spectrumAnalyzer) {
+      // Replaces standard waveform with a frequency-domain bar chart view
+      const barCount = Math.min(64, dataLen);
+      const spacing = settings.barSpacing !== undefined ? settings.barSpacing : 4;
+      const totalSpacing = spacing * (barCount - 1);
+      const barWidth = (width - totalSpacing) / barCount;
+      const radius = settings.barRoundness !== undefined ? settings.barRoundness : 3;
+
+      for (let i = 0; i < barCount; i++) {
+        // Logarithmic scale mapping to show low and mid frequencies cleanly
+        const idx = Math.floor(Math.pow(i / barCount, 1.3) * (dataLen * 0.75));
+        const value = analyserData[idx] || 0;
+        const barHeight = (value / 255) * (height * 0.65) * settings.sensitivity + 4;
+
+        const x = i * (barWidth + spacing);
+        
+        let y = midY - barHeight;
+        if (yPercent < 40) {
+          y = midY;
+        } else if (placement === 'center') {
+          y = midY - barHeight / 2;
+        }
+
+        ctx.fillStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, i / barCount);
+        
+        ctx.beginPath();
+        if (radius > 0) {
+          if (yPercent < 40) {
+            ctx.roundRect(x, y, barWidth, barHeight, [0, 0, radius, radius]);
+          } else {
+            ctx.roundRect(x, y, barWidth, barHeight, [radius, radius, 0, 0]);
+          }
+        } else {
+          ctx.rect(x, y, barWidth, barHeight);
+        }
+        ctx.fill();
+      }
+    } else {
+      // Smooth flowing bezier wave path
+      ctx.beginPath();
+      const sliceWidth = width / dataLen;
+      let x = 0;
+
+      for (let i = 0; i < dataLen; i++) {
+        // wave value is normalized around 128 (for 8-bit unsigned integer)
+        const v = waveformData[i] / 128.0; 
+        const y = (v * (height / 3)) * settings.sensitivity + midY - (height / 6);
+
+        if (i === 0) {
+          ctx.moveTo(x, y);
+        } else {
+          const prevX = x - sliceWidth;
+          const prevV = waveformData[i - 1]/128.0;
+          const prevY = (prevV * (height / 3)) * settings.sensitivity + midY - (height / 6);
+          ctx.bezierCurveTo(prevX + sliceWidth / 2, prevY, prevX + sliceWidth / 2, y, x, y);
+        }
+        x += sliceWidth;
+      }
+      ctx.stroke();
+    }
+
+  } else if (settings.style === 'bars') {
+    // Traditional frequency visualizer bars
+    const barCount = Math.min(64, dataLen);
+    const spacing = settings.barSpacing;
+    const totalSpacing = spacing * (barCount - 1);
+    const barWidth = (width - totalSpacing) / barCount;
+    const radius = settings.barRoundness;
+
+    for (let i = 0; i < barCount; i++) {
+      // Map index logy to focus on musical bass & mids
+      const idx = Math.floor(Math.pow(i / barCount, 1.3) * (dataLen * 0.7));
+      const value = analyserData[idx] || 0;
+      const barHeight = (value / 255) * (height * 0.6) * settings.sensitivity + 4;
+
+      const x = i * (barWidth + spacing);
+      
+      let y = midY - barHeight;
+      if (yPercent < 40) {
+        y = midY;
+      } else if (placement === 'center') {
+        y = midY - barHeight / 2;
+      }
+
+      ctx.fillStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, i / barCount);
+      
+      // Draw nicely rounded bar rectangles
+      ctx.beginPath();
+      if (radius > 0) {
+        if (yPercent < 40) {
+          ctx.roundRect(x, y, barWidth, barHeight, [0, 0, radius, radius]);
+        } else {
+          ctx.roundRect(x, y, barWidth, barHeight, [radius, radius, 0, 0]);
+        }
+      } else {
+        ctx.rect(x, y, barWidth, barHeight);
+      }
+      ctx.fill();
+    }
+
+  } else if (settings.style === 'circular') {
+    // Glowing pulsating circle of lines matching frequency details
+    const baseRadius = Math.min(width, height) * 0.18 * (1 + beatIntensity * 0.15);
+
+    ctx.beginPath();
+    const pointsCount = Math.min(128, dataLen);
+    
+    for (let i = 0; i < pointsCount; i++) {
+      const idx = Math.floor((i / pointsCount) * (dataLen * 0.5));
+      const val = analyserData[idx] || 0;
+      const waveVal = (waveformData[idx] - 128) / 128; // -1.0 to 1.0
+
+      const radiusOffset = (val / 255) * 120 * settings.sensitivity + (waveVal * 15);
+      const angle = (i / pointsCount) * Math.PI * 2;
+      const r = baseRadius + radiusOffset;
+
+      const x = centerX + Math.cos(angle) * r;
+      const y = centerY + Math.sin(angle) * r;
+
+      if (i === 0) {
+        ctx.moveTo(x, y);
+      } else {
+        ctx.lineTo(x, y);
+      }
+    }
+    ctx.closePath();
+    ctx.stroke();
+
+    // Subtle center cover glowing disc
+    ctx.fillStyle = `rgba(${primaryRGB.r}, ${primaryRGB.g}, ${primaryRGB.b}, 0.1)`;
+    ctx.fill();
+
+  } else if (settings.style === 'radial-bars') {
+    // Beautiful bar lines pointing outwards in circular star configuration
+    const baseRadius = Math.min(width, height) * 0.15;
+    const itemSlots = Math.min(80, dataLen);
+
+    for (let i = 0; i < itemSlots; i++) {
+      const idx = Math.floor((i / itemSlots) * (dataLen * 0.6));
+      const val = analyserData[idx] || 0;
+      const len = (val / 255) * 180 * settings.sensitivity;
+
+      const angle = (i / itemSlots) * Math.PI * 2;
+      const cos = Math.cos(angle);
+      const sin = Math.sin(angle);
+
+      const xStart = centerX + cos * baseRadius;
+      const yStart = centerY + sin * baseRadius;
+      
+      const xEnd = centerX + cos * (baseRadius + len);
+      const yEnd = centerY + sin * (baseRadius + len);
+
+      ctx.strokeStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, i / itemSlots);
+      ctx.lineWidth = Math.max(2, settings.lineThickness);
+      
+      ctx.beginPath();
+      ctx.moveTo(xStart, yStart);
+      ctx.lineTo(xEnd, yEnd);
+      ctx.stroke();
+    }
+
+  } else if (settings.style === 'retro') {
+    // VHS Retro grids and sound wave reflection
+    let localCenterY = midY;
+    let gridY = midY + height * 0.2;
+    if (yPercent < 40) {
+      gridY = midY + height * 0.1; // keep it below the top sun
+    }
+
+    const mode = settings.colorMode || 'gradient';
+    const numBars = 50;
+    const barW = width / numBars;
+
+    // Save state before rendering the retro visualizer wave elements
+    ctx.save();
+
+    for (let i = 0; i < numBars; i++) {
+      // Symmetric sound wave output
+      const rawIdx = Math.abs(i - numBars / 2);
+      const ratio = rawIdx / (numBars / 2); // 0.0 at center (bass), 1.0 at outer edges (treble)
+      const dataIdx = Math.floor(ratio * (dataLen * 0.5));
+      const val = analyserData[dataIdx] || 0;
+      const barH = (val / 255) * 150 * settings.sensitivity;
+
+      // Dynamically resolve bar color based on selected Color Mode
+      const barColor = getDynamicColor(settings.primaryColor, settings.secondaryColor, ratio);
+
+      // Render Main Bar with custom Glow & Alpha
+      ctx.save();
+      const glowStrength = settings.glowStrength !== undefined ? settings.glowStrength : 12;
+      if (glowStrength > 0) {
+        ctx.shadowBlur = glowStrength;
+        ctx.shadowColor = settings.glowColor || barColor;
+      }
+      ctx.globalAlpha = 0.4 + (val / 255) * 0.6;
+      ctx.fillStyle = barColor;
+
+      if (yPercent < 40) {
+        ctx.fillRect(i * barW + 1, gridY, barW - 2, barH);
+      } else {
+        ctx.fillRect(i * barW + 1, gridY - barH, barW - 2, barH);
+      }
+      ctx.restore();
+
+      // Render Reflection Wave with dynamic colors matching the main bar and adjusted opacity
+      ctx.save();
+      if (glowStrength > 0) {
+        ctx.shadowBlur = Math.floor(glowStrength * 0.5); // softer shadow for reflections
+        ctx.shadowColor = settings.glowColor || barColor;
+      }
+      ctx.globalAlpha = (val / 255) * 0.3;
+      ctx.fillStyle = barColor;
+
+      if (yPercent < 40) {
+        ctx.fillRect(i * barW + 1, gridY - barH * 0.5, barW - 2, barH * 0.5);
+      } else {
+        ctx.fillRect(i * barW + 1, gridY, barW - 2, barH * 0.5);
+      }
+      ctx.restore();
+    }
+
+    ctx.restore(); // Restore context back to its original state
+
+    // Render Grid Baseline dynamically styled with color schemes
+    ctx.save();
+    let baselineColor = '#ff007f'; // default classic retro magenta/pink
+    if (mode === 'solid') {
+      baselineColor = settings.primaryColor;
+    } else if (mode === 'gradient') {
+      baselineColor = settings.secondaryColor || settings.primaryColor;
+    } else if (mode === 'rainbow') {
+      baselineColor = 'hsl(300, 100%, 55%)'; // Vibrant magenta endpoint
+    }
+
+    const gridGlowStrength = settings.glowStrength !== undefined ? settings.glowStrength : 12;
+    if (gridGlowStrength > 0) {
+      ctx.shadowBlur = gridGlowStrength;
+      ctx.shadowColor = settings.glowColor || baselineColor;
+    }
+
+    ctx.strokeStyle = baselineColor;
+    ctx.lineWidth = 4;
+    ctx.beginPath();
+    ctx.moveTo(0, gridY);
+    ctx.lineTo(width, gridY);
+    ctx.stroke();
+    ctx.restore();
+
+  } else if (settings.style === 'neon-tunnel') {
+    // Zooming square structures reflecting music levels
+    const maxSquares = 6;
+    
+    for (let i = 0; i < maxSquares; i++) {
+      // Frequency bin
+      const fIdx = Math.floor((i / maxSquares) * (dataLen * 0.3));
+      const rawVal = analyserData[fIdx] || 0;
+      
+      // Base zooming progress offset
+      const progress = ((Date.now() / 1500) % 1) + (i / maxSquares);
+      const modProgress = progress % 1;
+      
+      const maxW = Math.max(width, height) * 0.8;
+      const sqSize = maxW * modProgress * (1 + (rawVal / 255) * 0.25 * settings.sensitivity);
+      
+      ctx.strokeStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, modProgress);
+      ctx.lineWidth = (1 - modProgress) * 5 + 1;
+      ctx.globalAlpha = (1 - modProgress) * 0.7;
+
+      ctx.beginPath();
+      // Centered rectangle
+      ctx.rect(centerX - sqSize / 2, centerY - sqSize / 2, sqSize, sqSize);
+      ctx.stroke();
+    }
+    ctx.globalAlpha = 1.0;
+
+  } else if (settings.style === 'laser-orbit') {
+    // Fast rotating space-laser paths modulated by current frequencies
+    const numLasers = 8;
+    const timeAngle = (Date.now() / 2000) * Math.PI;
+
+    for (let i = 0; i < numLasers; i++) {
+      const idx = Math.floor((i / numLasers) * (dataLen * 0.4));
+      const val = analyserData[idx] || 0;
+      const magnitude = (val / 255) * 300 * settings.sensitivity + 50;
+
+      const baseAngle = (i / numLasers) * Math.PI * 2 + timeAngle;
+      
+      ctx.strokeStyle = getDynamicColor(settings.secondaryColor, '#00ffff', i / numLasers);
+      ctx.lineWidth = 3 + (val / 255) * 5;
+
+      ctx.beginPath();
+      ctx.moveTo(centerX, centerY);
+      const xEnd = centerX + Math.cos(baseAngle) * magnitude;
+      const yEnd = centerY + Math.sin(baseAngle) * magnitude;
+      
+      ctx.lineTo(xEnd, yEnd);
+      ctx.stroke();
+      
+      // Laser tip point
+      ctx.fillStyle = '#ffffff';
+      ctx.beginPath();
+      ctx.arc(xEnd, yEnd, 4 + (val / 255) * 4, 0, Math.PI * 2);
+      ctx.fill();
+    }
+
+  } else if (settings.style === 'wave-matrix') {
+    // Joy Division mountain-style visualizer curves layout
+    const rows = 12;
+    const rowPoints = 40;
+    
+    let startY = midY - height * 0.25;
+    let endY = midY + height * 0.3;
+    if (yPercent < 40) {
+      startY = midY - height * 0.15;
+      endY = midY + height * 0.2;
+    } else if (yPercent > 65) {
+      startY = midY - height * 0.25;
+      endY = midY + height * 0.15;
+    }
+    
+    const stepY = (endY - startY) / rows;
+
+    for (let r = 0; r < rows; r++) {
+      ctx.beginPath();
+      
+      // Audio trigger index offset for this specific landscape row
+      const valIdxOffset = Math.floor((r / rows) * (dataLen * 0.4));
+      
+      const yRow = startY + r * stepY;
+      const stepX = width / rowPoints;
+
+      // Draw curve across
+      for (let i = 0; i <= rowPoints; i++) {
+        // Bell curve weight to keep middle peaks high and side margins flat
+        const x = i * stepX;
+        const normDistFromCenter = Math.abs((i / rowPoints) - 0.5) * 2; // 0 in center, 1 at edges
+        const bellWeight = Math.max(0, 1 - Math.pow(normDistFromCenter, 1.6));
+
+        // Frequency modulation
+        const dataIndex = Math.floor((i / rowPoints) * (dataLen * 0.3)) + valIdxOffset;
+        const rawF = analyserData[dataIndex % dataLen] || 0;
+        
+        const displacement = (rawF / 255) * 120 * bellWeight * settings.sensitivity;
+        const y = yRow - displacement;
+
+        if (i === 0) {
+          ctx.moveTo(x, yRow);
+          ctx.lineTo(x, y);
+        } else {
+          ctx.lineTo(x, y);
+        }
+      }
+
+      ctx.lineTo(width, yRow);
+      
+      // Fill background of this mountain slice to cover previous layers (dense overlapping effect!)
+      ctx.fillStyle = '#06060c';
+      ctx.fill();
+
+      // Stroke color
+      ctx.strokeStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, r / rows);
+      ctx.lineWidth = 1.5;
+      ctx.stroke();
+    }
+
+  } else if (settings.style === 'heartbeat-ekg') {
+    // 1. Draw thin cyan/green neon cardiogram ambient background grid
+    ctx.save();
+    ctx.shadowBlur = 0; // Disable shadow for background grid
+    ctx.strokeStyle = 'rgba(16, 185, 129, 0.05)';
+    ctx.lineWidth = 1;
+    const gridSpacing = 40;
+    
+    for (let x = 0; x < width; x += gridSpacing) {
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      ctx.lineTo(x, height);
+      ctx.stroke();
+    }
+    for (let y = 0; y < height; y += gridSpacing) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(width, y);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // 2. Plot the main EKG cardiogram line
+    ctx.beginPath();
+    const sliceWidth = width / dataLen;
+    let currentX = 0;
+
+    for (let i = 0; i < dataLen; i++) {
+      // Base quiet line resting at center
+      const rawV = (waveformData[i] - 128) / 128.0; // -1 to 1
+      
+      // High-intensity electrostatic spiky deformation
+      let deformation = rawV * (height * 0.28) * settings.sensitivity;
+      
+      // Pin/pinch near margins to make it look like a continuous flat monitoring line that spikes in the center
+      const normX = i / dataLen;
+      const marginPinch = Math.sin(normX * Math.PI); // 0 at edges, 1 in middle
+
+      // Add sudden heartbeat QRS-like sharp spikes at beat intervals
+      let spike = 0;
+      if (beatIntensity > 0.1) {
+        // Create repeating QRS complex spikes using wave math
+        const spikePosition = (normX * 10 - (Date.now() / 250) % 10);
+        const wrappedSpike = (spikePosition + 10) % 10;
+        if (wrappedSpike < 0.6) {
+          // Sharp QRS pattern: minor dip, major spike, minor dip, minor peak
+          const t = wrappedSpike / 0.6;
+          if (t < 0.2) spike = -1.5; // Q-wave (dip)
+          else if (t < 0.5) spike = 5.0; // R-wave (massive sharp spike)
+          else if (t < 0.7) spike = -2.5; // S-wave (deep dip)
+          else spike = 1.0; // T-wave (small rise)
+          spike *= beatIntensity * 25.0 * settings.sensitivity;
+        }
+      }
+
+      const y = midY + (deformation * marginPinch) + spike;
+      
+      if (i === 0) {
+        ctx.moveTo(currentX, y);
+      } else {
+        ctx.lineTo(currentX, y);
+      }
+      currentX += sliceWidth;
+    }
+
+    ctx.strokeStyle = settings.primaryColor;
+    ctx.lineWidth = settings.lineThickness + 1;
+    ctx.stroke();
+
+    // 3. Draw a glowing scan dot tracking the leading edge of the active pulse wave in real time
+    const activeIndex = Math.floor((Date.now() / 15) % dataLen);
+    const dotX = activeIndex * sliceWidth;
+    const dotValue = (waveformData[activeIndex] - 128) / 128.0;
+    const dotY = midY + dotValue * (height * 0.2) * settings.sensitivity;
+
+    ctx.beginPath();
+    ctx.arc(dotX, dotY, 6 + beatIntensity * 6, 0, Math.PI * 2);
+    ctx.fillStyle = '#ffffff';
+    ctx.shadowBlur = 15;
+    ctx.shadowColor = settings.primaryColor;
+    ctx.fill();
+
+    // Small pulsating neon heart icon in top-right corner to reinforce style mood
+    const heartX = width - 60;
+    const heartY = yPercent < 40 ? height - 60 : 60;
+    const heartSize = 12 + beatIntensity * 8;
+    ctx.beginPath();
+    ctx.moveTo(heartX, heartY + heartSize / 4);
+    ctx.bezierCurveTo(heartX, heartY, heartX - heartSize / 2, heartY, heartX - heartSize / 2, heartY + heartSize / 2);
+    ctx.bezierCurveTo(heartX - heartSize / 2, heartY + heartSize, heartX, heartY + heartSize * 1.3, heartX, heartY + heartSize * 1.6);
+    ctx.bezierCurveTo(heartX, heartY + heartSize * 1.3, heartX + heartSize / 2, heartY + heartSize, heartX + heartSize / 2, heartY + heartSize / 2);
+    ctx.bezierCurveTo(heartX + heartSize / 2, heartY, heartX, heartY, heartX, heartY + heartSize / 4);
+    ctx.closePath();
+    ctx.fillStyle = settings.secondaryColor;
+    ctx.fill();
+
+  } else if (settings.style === 'fresnel-wave') {
+    // 3 overlapping fluid interference waves driven by distinct energy bins
+    // Extract multi-band frequency energies
+    let lowEnergy = 0;
+    const lowLimit = Math.floor(dataLen * 0.15) || 4;
+    for (let i = 0; i < lowLimit; i++) lowEnergy += analyserData[i];
+    const lowNormal = lowEnergy / lowLimit / 255;
+
+    let midEnergy = 0;
+    const midLimit = Math.floor(dataLen * 0.55);
+    for (let i = lowLimit; i < midLimit; i++) midEnergy += analyserData[i];
+    const midNormal = midEnergy / (midLimit - lowLimit) / 255;
+
+    let highEnergy = 0;
+    for (let i = midLimit; i < dataLen; i++) highEnergy += analyserData[i];
+    const highNormal = highEnergy / (dataLen - midLimit) / 255;
+
+    const timeSec = Date.now() * 0.001;
+
+    // Wave 1: Bass / Primary Color (Slow, thick, majestic background flow)
+    ctx.save();
+    ctx.beginPath();
+    const phase1 = timeSec * 1.8;
+    const amp1 = lowNormal * (height * 0.28) * settings.sensitivity + 12;
+    for (let x = 0; x <= width; x += 12) {
+      // Pinch ends of the wave to keep the stage border neat
+      const pinch = Math.sin(x * Math.PI / width);
+      const y = midY + Math.sin(x * 0.003 + phase1) * amp1 * pinch;
+      if (x === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = settings.primaryColor;
+    ctx.lineWidth = settings.lineThickness * 2.5;
+    ctx.globalAlpha = 0.55;
+    ctx.stroke();
+    ctx.restore();
+
+    // Wave 2: Midrange / Secondary Color (Medium speed, detailed phase)
+    ctx.save();
+    ctx.beginPath();
+    const phase2 = -timeSec * 2.5;
+    const amp2 = midNormal * (height * 0.2) * settings.sensitivity + 8;
+    for (let x = 0; x <= width; x += 8) {
+      const pinch = Math.sin(x * Math.PI / width);
+      // Double frequency modulation for interference pattern
+      const y = midY + Math.sin(x * 0.009 + phase2) * Math.cos(x * 0.003 + phase2 * 0.5) * amp2 * pinch;
+      if (x === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = settings.secondaryColor;
+    ctx.lineWidth = settings.lineThickness * 1.5;
+    ctx.globalAlpha = 0.75;
+    ctx.stroke();
+    ctx.restore();
+
+    // Wave 3: Treble / Glow Color (Fast, wireframe-thin ripple)
+    ctx.save();
+    ctx.beginPath();
+    const phase3 = timeSec * 4.5;
+    const amp3 = highNormal * (height * 0.12) * settings.sensitivity + 4;
+    for (let x = 0; x <= width; x += 4) {
+      const pinch = Math.sin(x * Math.PI / width);
+      const y = midY + Math.sin(x * 0.025 + phase3) * amp3 * pinch;
+      if (x === 0) ctx.moveTo(x, y);
+      else ctx.lineTo(x, y);
+    }
+    ctx.strokeStyle = settings.glowColor || '#ffffff';
+    ctx.lineWidth = Math.max(1, settings.lineThickness * 0.7);
+    ctx.globalAlpha = 0.9;
+    ctx.stroke();
+    ctx.restore();
+
+  } else if (settings.style === 'dna-helix') {
+    // Elegant rotating Double Helix ladder wave representation
+    const totalRungs = 28;
+    const stepX = width / (totalRungs + 1);
+    const timeRot = Date.now() * 0.0016;
+
+    // Collect base strand paths for drawing smooth outer spiraling ribbons
+    const ribbonAPoints: {x: number, y: number}[] = [];
+    const ribbonBPoints: {x: number, y: number}[] = [];
+
+    for (let i = 0; i <= totalRungs; i++) {
+      const x = (i + 1) * stepX;
+      
+      // Match local frequency bins for progressive wave size
+      const frequencyIndex = Math.floor((i / totalRungs) * (dataLen * 0.55));
+      const val = analyserData[frequencyIndex] || 0;
+      const baseAmplitude = 35 + (val / 255) * (height * 0.22) * settings.sensitivity;
+      
+      // Spatial twisting factor + temporal rotation + beat peak stretch
+      const angle = (i * 0.42) + timeRot + (beatIntensity * 0.4);
+      
+      const yOffset = Math.sin(angle) * baseAmplitude;
+      const zOffset = Math.cos(angle); // Represents depth projection (-1 to +1)
+
+      const y1 = midY + yOffset;
+      const y2 = midY - yOffset;
+
+      ribbonAPoints.push({ x, y: y1 });
+      ribbonBPoints.push({ x, y: y2 });
+
+      // Draw ladder rungs (connections between double strands)
+      ctx.save();
+      ctx.beginPath();
+      ctx.moveTo(x, y1);
+      ctx.lineTo(x, y2);
+      ctx.lineWidth = Math.max(1, settings.lineThickness / 2);
+      // Give 3D alpha cues matching sine rotation depth
+      ctx.globalAlpha = 0.25 + Math.abs(zOffset) * 0.55;
+      ctx.strokeStyle = `rgba(255, 255, 255, 0.4)`;
+      ctx.stroke();
+
+      // Draw shiny atom joints (nucleobase nodes)
+      // Joint A
+      ctx.beginPath();
+      const dotRadiusA = Math.max(3, settings.lineThickness * 1.5 + zOffset * 2.5);
+      ctx.arc(x, y1, dotRadiusA, 0, Math.PI * 2);
+      ctx.fillStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, i / totalRungs);
+      ctx.shadowBlur = dotRadiusA * 1.5;
+      ctx.shadowColor = settings.primaryColor;
+      ctx.fill();
+
+      // Joint B
+      ctx.beginPath();
+      const dotRadiusB = Math.max(3, settings.lineThickness * 1.5 - zOffset * 2.5);
+      ctx.arc(x, y2, dotRadiusB, 0, Math.PI * 2);
+      ctx.fillStyle = getDynamicColor(settings.secondaryColor, settings.primaryColor, i / totalRungs);
+      ctx.shadowBlur = dotRadiusB * 1.5;
+      ctx.shadowColor = settings.secondaryColor;
+      ctx.fill();
+      ctx.restore();
+    }
+
+    // Connect and stroke the main helicoid strands
+    ctx.save();
+    ctx.lineWidth = settings.lineThickness * 1.5;
+    
+    ctx.beginPath();
+    ribbonAPoints.forEach((p, idx) => {
+      if (idx === 0) ctx.moveTo(p.x, p.y);
+      else ctx.lineTo(p.x, p.y);
+    });
+    ctx.strokeStyle = settings.primaryColor;
+    ctx.stroke();
+
+    ctx.beginPath();
+    ribbonBPoints.forEach((p, idx) => {
+      if (idx === 0) ctx.moveTo(p.x, p.y);
+      else ctx.lineTo(p.x, p.y);
+    });
+    ctx.strokeStyle = settings.secondaryColor;
+    ctx.stroke();
+    ctx.restore();
+
+  } else if (settings.style === 'double-mirror-bars') {
+    // Symmetrically upward/downward mirroring frequency bar graphs
+    const barCount = Math.min(64, dataLen);
+    const spacing = settings.barSpacing !== undefined ? settings.barSpacing : 4;
+    const totalSpacing = spacing * (barCount - 1);
+    const barWidth = (width - totalSpacing) / barCount;
+    const radius = settings.barRoundness !== undefined ? settings.barRoundness : 3;
+
+    for (let i = 0; i < barCount; i++) {
+      const idx = Math.floor(Math.pow(i / barCount, 1.3) * (dataLen * 0.7));
+      const value = analyserData[idx] || 0;
+      const barHeight = (value / 255) * (height * 0.35) * settings.sensitivity + 2;
+
+      const x = i * (barWidth + spacing);
+      
+      ctx.fillStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, i / barCount);
+      
+      // Top mirror bar
+      ctx.beginPath();
+      if (radius > 0) {
+        ctx.roundRect(x, midY - barHeight, barWidth, barHeight, [radius, radius, 0, 0]);
+      } else {
+        ctx.rect(x, midY - barHeight, barWidth, barHeight);
+      }
+      ctx.fill();
+
+      // Bottom mirror bar
+      ctx.beginPath();
+      if (radius > 0) {
+        ctx.roundRect(x, midY, barWidth, barHeight, [0, 0, radius, radius]);
+      } else {
+        ctx.rect(x, midY, barWidth, barHeight);
+      }
+      ctx.fill();
+    }
+
+  } else if (settings.style === 'circular-orbit') {
+    // Elegant central orbit ring where frequencies explode outwards
+    const baseRadius = Math.min(width, height) * 0.16 * (1 + beatIntensity * 0.1);
+    const pointsCount = Math.min(128, dataLen);
+    const timeRot = Date.now() * 0.0005;
+
+    // Center circular framework
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, baseRadius, 0, Math.PI * 2);
+    ctx.strokeStyle = settings.primaryColor;
+    ctx.lineWidth = settings.lineThickness;
+    ctx.globalAlpha = 0.25;
+    ctx.stroke();
+    ctx.restore();
+
+    for (let i = 0; i < pointsCount; i++) {
+      const idx = Math.floor((i / pointsCount) * (dataLen * 0.6));
+      const val = analyserData[idx] || 0;
+      const barHeight = (val / 255) * 110 * settings.sensitivity;
+
+      const angle = (i / pointsCount) * Math.PI * 2 + timeRot;
+      const x1 = centerX + Math.cos(angle) * baseRadius;
+      const y1 = centerY + Math.sin(angle) * baseRadius;
+      const x2 = centerX + Math.cos(angle) * (baseRadius + barHeight);
+      const y2 = centerY + Math.sin(angle) * (baseRadius + barHeight);
+
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.strokeStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, i / pointsCount);
+      ctx.lineWidth = settings.lineThickness + 1;
+      ctx.stroke();
+    }
+
+  } else if (settings.style === 'radial-inside-out') {
+    // Symmetrical circle frequency blades targeting inwards
+    const outerRadius = Math.min(width, height) * 0.38;
+    const pointsCount = Math.min(128, dataLen);
+    const timeRot = -Date.now() * 0.0003;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, outerRadius, 0, Math.PI * 2);
+    ctx.strokeStyle = settings.secondaryColor;
+    ctx.lineWidth = 1;
+    ctx.globalAlpha = 0.22;
+    ctx.stroke();
+    ctx.restore();
+
+    for (let i = 0; i < pointsCount; i++) {
+      const idx = Math.floor((i / pointsCount) * (dataLen * 0.6));
+      const val = analyserData[idx] || 0;
+      const maxInnerHeight = outerRadius * 0.85;
+      const barHeight = Math.min(maxInnerHeight, (val / 255) * outerRadius * settings.sensitivity);
+
+      const angle = (i / pointsCount) * Math.PI * 2 + timeRot;
+      const x1 = centerX + Math.cos(angle) * outerRadius;
+      const y1 = centerY + Math.sin(angle) * outerRadius;
+      const x2 = centerX + Math.cos(angle) * (outerRadius - barHeight);
+      const y2 = centerY + Math.sin(angle) * (outerRadius - barHeight);
+
+      ctx.beginPath();
+      ctx.moveTo(x1, y1);
+      ctx.lineTo(x2, y2);
+      ctx.strokeStyle = getDynamicColor(settings.secondaryColor, settings.primaryColor, i / pointsCount);
+      ctx.lineWidth = settings.lineThickness;
+      ctx.stroke();
+    }
+
+    // Epicenter dynamic pulsar
+    ctx.beginPath();
+    ctx.arc(centerX, centerY, 6 + beatIntensity * 8, 0, Math.PI * 2);
+    ctx.fillStyle = settings.primaryColor;
+    ctx.fill();
+
+  } else if (settings.style === 'digital-vu-blocks') {
+    // Segmented, blocky vertical stack indicators like retro hifi stereos
+    const colCount = Math.min(32, dataLen);
+    const spacing = settings.barSpacing !== undefined ? settings.barSpacing : 6;
+    const totalSpacing = spacing * (colCount - 1);
+    const colWidth = (width - totalSpacing) / colCount;
+    const blockRows = 12; 
+    const blockHeight = Math.max(1.5, (height * 0.45) / blockRows - 2.5);
+
+    let drawOffsetMid = midY - height * 0.15;
+    const drawDownwards = yPercent < 40;
+
+    for (let i = 0; i < colCount; i++) {
+      const idx = Math.floor((i / colCount) * (dataLen * 0.6));
+      const val = analyserData[idx] || 0;
+      const activeRows = Math.floor((val / 255) * blockRows * settings.sensitivity);
+
+      const x = i * (colWidth + spacing);
+
+      for (let r = 0; r < blockRows; r++) {
+        const segmentActive = r < activeRows;
+        
+        let y = 0;
+        if (drawDownwards) {
+          y = drawOffsetMid + r * (blockHeight + 2.5);
+        } else {
+          y = (drawOffsetMid + height * 0.35) - r * (blockHeight + 2.5);
+        }
+
+        ctx.fillStyle = segmentActive 
+          ? (r > blockRows * 0.8 ? '#ef4444' : r > blockRows * 0.5 ? '#f59e0b' : '#10b981')
+          : 'rgba(255, 255, 255, 0.05)';
+
+        ctx.beginPath();
+        ctx.rect(x, y, colWidth, blockHeight);
+        ctx.fill();
+      }
+    }
+
+  } else if (settings.style === 'dna-helix-thread') {
+    // Elegant twin intertwined active sine ribbons representing high and low
+    const pointsCount = 40;
+    const stepX = width / (pointsCount - 1);
+    const timeSec = Date.now() * 0.0022;
+
+    ctx.save();
+    for (let i = 0; i < pointsCount; i++) {
+      const x = i * stepX;
+      
+      const freqIdx = Math.floor((i / pointsCount) * (dataLen * 0.5));
+      const val = analyserData[freqIdx] || 0;
+      const amplitude = 15 + (val / 255) * (height * 0.22) * settings.sensitivity;
+
+      const angle = (i * 0.3) + timeSec;
+      const y1 = midY + Math.sin(angle) * amplitude;
+      const y2 = midY - Math.sin(angle) * amplitude;
+
+      const alpha = 0.3 + 0.7 * Math.abs(Math.cos(angle));
+
+      // Connected rungs
+      if (i % 2 === 0) {
+        ctx.beginPath();
+        ctx.moveTo(x, y1);
+        ctx.lineTo(x, y2);
+        ctx.strokeStyle = `rgba(255, 255, 255, ${alpha * 0.28})`;
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+
+      // Strand point A
+      ctx.beginPath();
+      ctx.arc(x, y1, settings.lineThickness + 2, 0, Math.PI * 2);
+      ctx.fillStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, i / pointsCount);
+      ctx.fill();
+
+      // Strand point B
+      ctx.beginPath();
+      ctx.arc(x, y2, settings.lineThickness + 2, 0, Math.PI * 2);
+      ctx.fillStyle = getDynamicColor(settings.secondaryColor, settings.primaryColor, i / pointsCount);
+      ctx.fill();
+    }
+    ctx.restore();
+
+  } else if (settings.style === 'smooth-area-silhouette') {
+    // Solid filled opacity-gradient vector waves with outline
+    const sliceWidth = width / dataLen;
+
+    ctx.save();
+    ctx.beginPath();
+    ctx.moveTo(0, midY);
+
+    for (let i = 0; i < dataLen; i++) {
+      const v = waveformData[i] / 128.0; 
+      const y = (v * (height * 0.28)) * settings.sensitivity + midY - (height * 0.14);
+      ctx.lineTo(i * sliceWidth, y);
+    }
+    
+    ctx.lineTo(width, midY);
+    ctx.closePath();
+
+    let fillStyle: string | CanvasGradient;
+    const mode = settings.colorMode || 'gradient';
+    if (mode === 'solid') {
+      fillStyle = `rgba(${hexToRgb(settings.primaryColor)?.r || 0}, ${hexToRgb(settings.primaryColor)?.g || 255}, ${hexToRgb(settings.primaryColor)?.b || 200}, 0.35)`;
+    } else if (mode === 'rainbow') {
+      const rainbowFillGrad = ctx.createLinearGradient(0, midY - 120, 0, midY + 120);
+      rainbowFillGrad.addColorStop(0, 'hsla(0, 100%, 55%, 0.35)');
+      rainbowFillGrad.addColorStop(0.2, 'hsla(35, 100%, 55%, 0.35)');
+      rainbowFillGrad.addColorStop(0.4, 'hsla(60, 100%, 55%, 0.35)');
+      rainbowFillGrad.addColorStop(0.6, 'hsla(125, 100%, 55%, 0.35)');
+      rainbowFillGrad.addColorStop(0.8, 'hsla(215, 100%, 55%, 0.35)');
+      rainbowFillGrad.addColorStop(1.0, 'hsla(280, 100%, 55%, 0.0)');
+      fillStyle = rainbowFillGrad;
+    } else {
+      const fillGrad = ctx.createLinearGradient(0, midY - 120, 0, midY + 120);
+      fillGrad.addColorStop(0, `rgba(${hexToRgb(settings.primaryColor)?.r || 0}, ${hexToRgb(settings.primaryColor)?.g || 255}, ${hexToRgb(settings.primaryColor)?.b || 200}, 0.35)`);
+      fillGrad.addColorStop(1, `rgba(${hexToRgb(settings.secondaryColor)?.r || 255}, ${hexToRgb(settings.secondaryColor)?.g || 0}, ${hexToRgb(settings.secondaryColor)?.b || 128}, 0.0)`);
+      fillStyle = fillGrad;
+    }
+    
+    ctx.fillStyle = fillStyle;
+    ctx.fill();
+
+    // Sinuous top stroke
+    ctx.beginPath();
+    for (let i = 0; i < dataLen; i++) {
+      const v = waveformData[i] / 128.0; 
+      const y = (v * (height * 0.28)) * settings.sensitivity + midY - (height * 0.14);
+      if (i === 0) ctx.moveTo(0, y);
+      else ctx.lineTo(i * sliceWidth, y);
+    }
+    ctx.strokeStyle = settings.primaryColor;
+    ctx.lineWidth = settings.lineThickness + 1;
+    ctx.stroke();
+    ctx.restore();
+
+  } else if (settings.style === 'floating-matrix-particles') {
+    // Floating glowing dust columns rising based on frequency peaks
+    const colCount = Math.min(40, dataLen);
+    const spacing = settings.barSpacing !== undefined ? settings.barSpacing : 5;
+    const totalSpacing = spacing * (colCount - 1);
+    const colWidth = (width - totalSpacing) / colCount;
+
+    ctx.save();
+    for (let i = 0; i < colCount; i++) {
+      const idx = Math.floor((i / colCount) * (dataLen * 0.5));
+      const val = analyserData[idx] || 0;
+      const heightLimit = (val / 255) * (height * 0.44) * settings.sensitivity;
+
+      const x = i * (colWidth + spacing) + colWidth / 2;
+      const particlesNum = 6;
+
+      for (let p = 0; p < particlesNum; p++) {
+        const ratio = p / (particlesNum - 1);
+        const yOffset = ratio * heightLimit;
+        
+        let y = 0;
+        if (yPercent < 40) {
+          y = midY + yOffset;
+        } else {
+          y = midY - yOffset;
+        }
+
+        const size = Math.max(1, (settings.lineThickness * 1.5) * (1 - ratio * 0.45) + beatIntensity * 2.5);
+        const alpha = (1 - ratio * 0.75) * (val / 255);
+
+        ctx.beginPath();
+        ctx.arc(x, y, size, 0, Math.PI * 2);
+        ctx.fillStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, i / colCount);
+        ctx.globalAlpha = alpha;
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+  } else if (settings.style === 'rounded-pill-bars') {
+    // Modern Rounded Pill Bars with rounded caps
+    const barCount = Math.min(48, dataLen);
+    const spacing = settings.barSpacing !== undefined ? settings.barSpacing : 6;
+    const totalSpacing = spacing * (barCount - 1);
+    const barWidth = (width - totalSpacing) / barCount;
+    const radius = barWidth / 2;
+
+    ctx.save();
+    for (let i = 0; i < barCount; i++) {
+      const idx = Math.floor(Math.pow(i / barCount, 1.3) * (dataLen * 0.7));
+      const value = analyserData[idx] || 0;
+      const barHeight = (value / 255) * (height * 0.6) * settings.sensitivity + 4;
+
+      const x = i * (barWidth + spacing);
+      
+      let y = midY - barHeight;
+      if (yPercent < 40) {
+        y = midY;
+      } else if (placement === 'center') {
+        y = midY - barHeight / 2;
+      }
+
+      ctx.fillStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, i / barCount);
+      ctx.beginPath();
+      if (ctx.roundRect) {
+        ctx.roundRect(x, y, barWidth, barHeight, radius);
+      } else {
+        ctx.rect(x, y, barWidth, barHeight);
+      }
+      ctx.fill();
+    }
+    ctx.restore();
+
+  } else if (settings.style === 'neon-glow-string') {
+    // Neon Glow String Line connected via Bezier with heavy blur
+    const pointsCount = Math.min(32, dataLen);
+    const points: { x: number; y: number }[] = [];
+
+    for (let i = 0; i < pointsCount; i++) {
+      const idx = Math.floor((i / pointsCount) * (dataLen * 0.5));
+      const val = analyserData[idx] || 0;
+      const displacement = (val / 255) * (height * 0.35) * settings.sensitivity;
+      
+      let y = midY - displacement;
+      if (yPercent < 40) {
+        y = midY + displacement;
+      } else if (placement === 'center') {
+        y = midY - (i % 2 === 0 ? displacement : -displacement) * 0.4;
+      }
+      
+      const x = (i / (pointsCount - 1)) * width;
+      points.push({ x, y });
+    }
+
+    ctx.save();
+    ctx.shadowBlur = 15;
+    ctx.shadowColor = settings.glowColor || settings.primaryColor;
+    ctx.strokeStyle = settings.primaryColor;
+    ctx.lineWidth = settings.lineThickness + 2.5;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 0; i < points.length - 1; i++) {
+      const p = points[i];
+      const next = points[i + 1];
+      ctx.bezierCurveTo(
+        p.x + (next.x - p.x) / 3, p.y,
+        p.x + 2 * (next.x - p.x) / 3, next.y,
+        next.x, next.y
+      );
+    }
+    ctx.stroke();
+    ctx.restore();
+
+  } else if (settings.style === 'floating-bubble-particles') {
+    // Floating Bubble Particles scaling with frequency
+    const bubbleCount = Math.min(30, dataLen);
+    const timeScale = Date.now() * 0.001;
+    const yTravelRange = height * 0.85;
+
+    for (let i = 0; i < bubbleCount; i++) {
+      const idx = Math.floor((i / bubbleCount) * (dataLen * 0.4));
+      const val = analyserData[idx] || 0;
+      const size = Math.max(3, (val / 255) * 18 * settings.sensitivity + 2 + beatIntensity * 3.5);
+
+      const xBase = (i / (bubbleCount - 1)) * (width - 40) + 20;
+      const bubbleSpeed = 0.4 + (i % 5) * 0.1 + (val / 255) * 1.3;
+      const progress = (timeScale * bubbleSpeed + (i * 0.17)) % 1.0;
+
+      let y = 0;
+      if (yPercent < 40) {
+        y = midY + progress * yTravelRange;
+      } else if (yPercent > 65) {
+        y = midY - progress * yTravelRange;
+      } else {
+        y = midY - (progress - 0.5) * yTravelRange;
+      }
+
+      const sway = Math.sin(timeScale * 2 + i) * 15;
+      const fx = xBase + sway;
+
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(fx, y, size, 0, Math.PI * 2);
+      ctx.fillStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, i / bubbleCount);
+      ctx.globalAlpha = (0.2 + (1.0 - progress) * 0.6) * (val / 255 * 0.85 + 0.15);
+      ctx.fill();
+
+      ctx.beginPath();
+      ctx.arc(fx, y, size, 0, Math.PI * 2);
+      ctx.strokeStyle = settings.primaryColor;
+      ctx.lineWidth = 1;
+      ctx.globalAlpha = (0.3 + (1.0 - progress) * 0.5);
+      ctx.stroke();
+      ctx.restore();
+    }
+
+  } else if (settings.style === 'mirrored-wave-silhouette') {
+    // Mirrored Wave Shadow Silhouette symmetrical filled polygon
+    ctx.save();
+    const step = Math.max(1, Math.floor(dataLen / 100));
+    const points: { x: number; yTop: number; yBottom: number }[] = [];
+
+    for (let i = 0; i < dataLen; i += step) {
+      const val = analyserData[i] || 0;
+      const hVal = (val / 255) * (height * 0.28) * settings.sensitivity + 2;
+      const x = (i / (dataLen - 1)) * width;
+      points.push({ x, yTop: midY - hVal, yBottom: midY + hVal });
+    }
+
+    if (points.length > 0) {
+      const rgb1 = hexToRgb(settings.primaryColor) || { r: 0, g: 255, b: 200 };
+      const rgb2 = hexToRgb(settings.secondaryColor) || { r: 255, g: 0, b: 128 };
+      
+      const gradient = ctx.createLinearGradient(0, midY - height * 0.3, 0, midY + height * 0.3);
+      gradient.addColorStop(0, `rgba(${rgb1.r}, ${rgb1.g}, ${rgb1.b}, 0.35)`);
+      gradient.addColorStop(0.5, `rgba(${rgb2.r}, ${rgb2.g}, ${rgb2.b}, 0.1)`);
+      gradient.addColorStop(1, `rgba(${rgb1.r}, ${rgb1.g}, ${rgb1.b}, 0.35)`);
+
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, points[0].yTop);
+      for (let i = 0; i < points.length; i++) {
+        ctx.lineTo(points[i].x, points[i].yTop);
+      }
+      for (let i = points.length - 1; i >= 0; i--) {
+        ctx.lineTo(points[i].x, points[i].yBottom);
+      }
+      ctx.closePath();
+      ctx.fill();
+
+      // Top edge stroke
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, points[0].yTop);
+      for (let i = 1; i < points.length; i++) {
+        ctx.lineTo(points[i].x, points[i].yTop);
+      }
+      ctx.strokeStyle = settings.primaryColor;
+      ctx.lineWidth = settings.lineThickness;
+      ctx.stroke();
+
+      // Bottom edge stroke
+      ctx.beginPath();
+      ctx.moveTo(points[points.length - 1].x, points[points.length - 1].yBottom);
+      for (let i = points.length - 2; i >= 0; i--) {
+        ctx.lineTo(points[i].x, points[i].yBottom);
+      }
+      ctx.strokeStyle = settings.secondaryColor;
+      ctx.lineWidth = settings.lineThickness;
+      ctx.stroke();
+    }
+    ctx.restore();
+
+  } else if (settings.style === 'retro-arcade-dot-grid') {
+    // Retro Arcade Dot Grid equalizer blocks
+    const colCount = Math.min(24, dataLen);
+    const spacing = settings.barSpacing !== undefined ? settings.barSpacing : 8;
+    const totalSpacing = spacing * (colCount - 1);
+    const colWidth = (width - totalSpacing) / colCount;
+
+    const dotRows = 12;
+    const dotSize = Math.max(3, colWidth - 2);
+
+    ctx.save();
+    for (let i = 0; i < colCount; i++) {
+      const idx = Math.floor((i / colCount) * (dataLen * 0.6));
+      const val = analyserData[idx] || 0;
+      const activeRows = Math.floor((val / 255) * dotRows * settings.sensitivity);
+
+      const x = i * (colWidth + spacing) + colWidth / 2;
+
+      for (let r = 0; r < dotRows; r++) {
+        const yOffset = r * (dotSize + 4);
+        let y = 0;
+        if (yPercent < 40) {
+          y = midY + yOffset;
+        } else if (yPercent > 65) {
+          y = midY - yOffset;
+        } else {
+          y = midY - dotRows * (dotSize + 4) / 2 + yOffset;
+        }
+
+        const isActive = r < activeRows;
+
+        ctx.beginPath();
+        if (isActive) {
+          ctx.fillStyle = r > dotRows * 0.8
+            ? '#ef4444' // red caps
+            : r > dotRows * 0.5
+              ? '#fbbf24' // yellow middle
+              : getDynamicColor(settings.primaryColor, settings.secondaryColor, i / colCount);
+          ctx.globalAlpha = 1.0;
+        } else {
+          ctx.fillStyle = '#ffffff';
+          ctx.globalAlpha = 0.05;
+        }
+
+        ctx.arc(x, y, dotSize / 2, 0, Math.PI * 2);
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+
+  } else if (settings.style === 'minimalist-pulse-dot') {
+    // Minimalist Floating Pulse Dots (bass, mids, treble)
+    ctx.save();
+    const bands = [
+      { label: 'BASS', start: 0, end: Math.max(1, Math.floor(dataLen * 0.05)) || 2, x: width * 0.2, color: settings.primaryColor },
+      { label: 'LOW-MID', start: Math.max(1, Math.floor(dataLen * 0.05)) || 2, end: Math.max(2, Math.floor(dataLen * 0.18)) || 7, x: width * 0.4, color: settings.primaryColor },
+      { label: 'HIGH-MID', start: Math.max(2, Math.floor(dataLen * 0.18)) || 7, end: Math.max(3, Math.floor(dataLen * 0.45)) || 17, x: width * 0.6, color: settings.secondaryColor },
+      { label: 'TREBLE', start: Math.max(3, Math.floor(dataLen * 0.45)) || 17, end: Math.max(4, Math.floor(dataLen * 0.8)) || 30, x: width * 0.8, color: settings.secondaryColor }
+    ];
+
+    const timeSec = Date.now() * 0.001;
+
+    bands.forEach((band, index) => {
+      let sum = 0;
+      const count = band.end - band.start;
+      for (let i = band.start; i < band.end; i++) {
+        sum += analyserData[i] || 0;
+      }
+      const avg = count > 0 ? sum / count : 0;
+      const intensity = (avg / 255) * settings.sensitivity;
+
+      const floatY = Math.sin(timeSec * 1.5 + index * 1.2) * 20;
+      const orbY = midY + floatY;
+
+      const baseRadius = 24 + beatIntensity * 4;
+      const scale = 1 + intensity * 2.2;
+      const activeRadius = baseRadius * scale;
+
+      // Pulse glow gradient
+      ctx.beginPath();
+      const radialGrad = ctx.createRadialGradient(band.x, orbY, 1, band.x, orbY, activeRadius);
+      const rgb = hexToRgb(band.color) || { r: 0, g: 255, b: 200 };
+      radialGrad.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.85)`);
+      radialGrad.addColorStop(0.35, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.3)`);
+      radialGrad.addColorStop(1, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0)`);
+
+      ctx.fillStyle = radialGrad;
+      ctx.arc(band.x, orbY, activeRadius, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Core anchor dot
+      ctx.beginPath();
+      ctx.arc(band.x, orbY, 6 + intensity * 6, 0, Math.PI * 2);
+      ctx.fillStyle = '#ffffff';
+      ctx.globalAlpha = 0.95;
+      ctx.fill();
+
+      // Small glowing label
+      ctx.beginPath();
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.45)';
+      ctx.font = 'bold 9px "JetBrains Mono", monospace';
+      ctx.textAlign = 'center';
+      ctx.fillText(band.label, band.x, orbY + 45 + floatY * 0.15);
+    });
+    ctx.restore();
+  } else if (settings.style === 'modern-sleek') {
+    // Ultra-thin, smooth anti-aliased frequency neon lines with a subtle gradient glow.
+    const steps = Math.min(128, dataLen);
+    const points: { x: number; y: number }[] = [];
+    
+    for (let i = 0; i < steps; i++) {
+      // Smooth frequency indexing
+      const idx = Math.floor(Math.pow(i / steps, 1.3) * (dataLen * 0.7));
+      const val = analyserData[idx] || 0;
+      const magnitude = (val / 255) * (height * 0.3) * settings.sensitivity;
+      
+      const x = (i / (steps - 1)) * width;
+      let y = midY - magnitude;
+      
+      if (yPercent < 40) {
+        y = midY + magnitude;
+      } else if (placement === 'center') {
+        y = midY - magnitude / 2;
+      }
+      points.push({ x, y });
+    }
+    
+    ctx.save();
+    
+    // Subtle gradient glow
+    const grad = ctx.createLinearGradient(0, 0, width, 0);
+    grad.addColorStop(0, settings.primaryColor);
+    grad.addColorStop(0.5, settings.secondaryColor || settings.primaryColor);
+    grad.addColorStop(1, '#ffffff');
+
+    ctx.strokeStyle = grad;
+    ctx.lineWidth = 1.0; // ultra-thin
+    ctx.shadowBlur = settings.glowStrength !== undefined ? settings.glowStrength : 8;
+    ctx.shadowColor = settings.glowColor || settings.primaryColor;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 0; i < points.length - 1; i++) {
+      const xc = (points[i].x + points[i + 1].x) / 2;
+      const yc = (points[i].y + points[i + 1].y) / 2;
+      ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
+    }
+    ctx.stroke();
+    
+    // Symmetrical mirror line
+    ctx.beginPath();
+    ctx.moveTo(points[0].x, height - points[0].y);
+    for (let i = 0; i < points.length - 1; i++) {
+      const xc = (points[i].x + points[i + 1].x) / 2;
+      const yc = (height - points[i].y + height - points[i + 1].y) / 2;
+      ctx.quadraticCurveTo(points[i].x, height - points[i].y, xc, yc);
+    }
+    ctx.strokeStyle = settings.secondaryColor;
+    ctx.lineWidth = 0.5; // even thinnner mirror line
+    ctx.stroke();
+    
+    ctx.restore();
+  } else if (settings.style === 'frequency-spectrogram') {
+    const historyCount = spectrogramHistory.length;
+    if (historyCount > 0) {
+      const colCount = Math.min(80, dataLen);
+      const cellW = width / colCount;
+      
+      const maxSpectrogramH = height * 0.45 * settings.sensitivity;
+      const cellH = maxSpectrogramH / MAX_SPECTROGRAM_HISTORY;
+
+      ctx.save();
+      // Disable shadow blur for performance during high density cell rendering
+      ctx.shadowBlur = 0; 
+
+      for (let h = 0; h < historyCount; h++) {
+        // ageRatio: 0.0 (oldest) to 1.0 (newest)
+        const ageRatio = h / Math.max(1, historyCount - 1);
+        const ageFade = Math.pow(ageRatio, 1.4); // exponential tail fade
+
+        // Newest frames are drawn right at midY, older frames push away
+        const yOffset = (historyCount - 1 - h) * cellH;
+
+        for (let i = 0; i < colCount; i++) {
+          const freqRatio = i / (colCount - 1);
+          // Read from active audible frequencies (lower-mid 70% bounds)
+          const dataIdx = Math.floor(freqRatio * (dataLen * 0.7));
+          const val = spectrogramHistory[h][dataIdx] || 0;
+          const ampRatio = val / 255;
+
+          if (ampRatio < 0.02) continue; // skip near-silent pixels to save CPU cycles
+
+          let cellColor = '';
+          const opacity = ampRatio * ageFade;
+
+          if (settings.colorMode === 'solid') {
+            cellColor = settings.primaryColor;
+          } else if (settings.colorMode === 'gradient') {
+            // Dynamic Volume Amplitude gradient mapping
+            cellColor = getDynamicColor(settings.primaryColor, settings.secondaryColor, ampRatio);
+          } else { // 'rainbow'
+            // Classic science/thermal heatmap: low volume = dark purple-blue, high volume = hot yellow-red
+            const hue = (1.0 - ampRatio) * 260;
+            cellColor = `hsl(${Math.round(hue)}, 100%, ${Math.round(35 + ampRatio * 35)}%)`;
+          }
+
+          ctx.fillStyle = cellColor;
+          ctx.globalAlpha = opacity;
+
+          const drawW = Math.max(1, cellW - 0.5);
+          const drawH = Math.max(1, cellH - 0.5);
+          const x = i * cellW;
+
+          if (placement === 'bottom') {
+            const y = midY - yOffset - drawH;
+            ctx.fillRect(x, y, drawW, drawH);
+          } else if (placement === 'top') {
+            const y = midY + yOffset;
+            ctx.fillRect(x, y, drawW, drawH);
+          } else {
+            // Symmetrical double-mirrored waterfall cascade
+            const yTop = midY - yOffset - drawH;
+            const yBottom = midY + yOffset;
+            ctx.fillRect(x, yTop, drawW, drawH);
+            ctx.fillRect(x, yBottom, drawW, drawH);
+          }
+        }
+      }
+      ctx.restore();
+    }
+  } else if (settings.style === 'three-d-speaker-effects') {
+    // 1. Calculate dynamic average low-end bass level (first 12% bins)
+    const bassBins = Math.max(1, Math.floor(dataLen * 0.12));
+    let bassSum = 0;
+    for (let i = 0; i < bassBins; i++) {
+      bassSum += analyserData[i] || 0;
+    }
+    const avgBassVal = bassSum / bassBins;
+    const bassFactor = avgBassVal / 255.0; // 0.0 to 1.0
+
+    const responseMult = typeof settings.speakerBassResponse === 'number' ? settings.speakerBassResponse : 1.0;
+    const speakerPulse = 1.0 + bassFactor * 0.16 * responseMult;
+
+    // Woofer rattle/vibration translation values
+    const vibrateX = (Math.random() - 0.5) * bassFactor * 9.0 * responseMult;
+    const vibrateY = (Math.random() - 0.5) * bassFactor * 9.0 * responseMult;
+
+    const horizonY = midY + height * 0.06;
+    const centerX = width / 2;
+
+    // --- A. Render 3D Perspective Grid Floor ---
+    ctx.save();
+    ctx.strokeStyle = settings.secondaryColor || '#00ffff';
+    ctx.lineWidth = 1.5;
+    ctx.globalAlpha = 0.22;
+
+    const num3dLines = 18;
+    for (let i = 0; i <= num3dLines; i++) {
+      const xRatio = i / num3dLines;
+      const bottomX = xRatio * width;
+      ctx.beginPath();
+      ctx.moveTo(centerX, horizonY);
+      ctx.lineTo(bottomX, height);
+      ctx.stroke();
+    }
+
+    const num3dRows = 12;
+    for (let i = 0; i <= num3dRows; i++) {
+      const progress = i / num3dRows;
+      const zRatio = Math.pow(progress, 1.8); // Exponential spacing for depth perspective
+      const y = horizonY + zRatio * (height - horizonY);
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(width, y);
+      ctx.stroke();
+    }
+    ctx.restore();
+
+    // --- B. Render 3D Perspective Spectrum Pillars ---
+    const pillarsCount = 20;
+    const zDepth = 0.72; // depth line location on floor
+    const yBase = horizonY + zDepth * (height - horizonY);
+    const xPerspectiveFactor = zDepth; // perspective narrowing factor
+
+    const colW = (width * 0.6) / (pillarsCount - 1);
+    const baseWidth = colW * 0.75 * xPerspectiveFactor;
+
+    for (let i = 0; i < pillarsCount; i++) {
+      const r = i / (pillarsCount - 1);
+      const screenX = centerX + (r - 0.5) * width * 0.68 * xPerspectiveFactor;
+
+      // Extract frequency value
+      const freqIdx = Math.floor(r * (dataLen * 0.65));
+      const rawF = analyserData[freqIdx] || 0;
+      const barHeight = (rawF / 255.0) * (height * 0.38) * settings.sensitivity;
+      const h = barHeight * xPerspectiveFactor;
+
+      const topY = yBase - h;
+      const faceColor = getDynamicColor(settings.primaryColor, settings.secondaryColor, r);
+      const sideOffset = (screenX - centerX) * 0.07; // skew projection towards vanishing point
+
+      ctx.save();
+      // Apply subtle shadow blur to columns to make them glowing neon structures
+      const glowStr = settings.glowStrength !== undefined ? settings.glowStrength : 12;
+      if (glowStr > 0) {
+        ctx.shadowBlur = Math.min(15, glowStr);
+        ctx.shadowColor = settings.glowColor || settings.primaryColor;
+      }
+
+      // 1. Front column face
+      ctx.fillStyle = faceColor;
+      ctx.globalAlpha = 0.78;
+      ctx.beginPath();
+      ctx.rect(screenX - baseWidth / 2, topY, baseWidth, h || 2);
+      ctx.fill();
+
+      // 2. Side column face (extruded towards center vanishing point)
+      ctx.shadowBlur = 0; // disable shadows for side faces to look sharp
+      ctx.fillStyle = getDynamicColor(settings.secondaryColor, '#000000', 0.45);
+      ctx.globalAlpha = 0.65;
+      ctx.beginPath();
+      ctx.moveTo(screenX + baseWidth / 2, topY);
+      ctx.lineTo(screenX + baseWidth / 2 + sideOffset, topY - h * 0.08);
+      ctx.lineTo(screenX + baseWidth / 2 + sideOffset, yBase - h * 0.08);
+      ctx.lineTo(screenX + baseWidth / 2, yBase);
+      ctx.closePath();
+      ctx.fill();
+
+      // 3. Top cap face of column
+      ctx.fillStyle = '#ffffff';
+      ctx.globalAlpha = 0.88;
+      ctx.beginPath();
+      ctx.moveTo(screenX - baseWidth / 2, topY);
+      ctx.lineTo(screenX + baseWidth / 2, topY);
+      ctx.lineTo(screenX + baseWidth / 2 + sideOffset, topY - h * 0.08);
+      ctx.lineTo(screenX - baseWidth / 2 + sideOffset, topY - h * 0.08);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.restore();
+    }
+
+    // --- C. Render Dual Speaker Woofers ---
+    // Adjust size base on aspect ratio / window boundaries
+    const speakerRadius = Math.min(width * 0.09, height * 0.16);
+    
+    // Left speaker
+    const leftCX = width * 0.14;
+    const leftCY = height * 0.35;
+    
+    // Right speaker
+    const rightCX = width * 0.86;
+    const rightCY = height * 0.35;
+
+    const drawSpeakerVec = (cx: number, cy: number, baseRadius: number) => {
+      const rx = cx + vibrateX;
+      const ry = cy + vibrateY;
+
+      // 1. Outer wooden cabinet cabinet/rim
+      ctx.save();
+      ctx.beginPath();
+      ctx.arc(rx, ry, baseRadius * 1.25, 0, Math.PI * 2);
+      ctx.fillStyle = '#0a0a0f';
+      ctx.strokeStyle = '#22222d';
+      ctx.lineWidth = 4;
+      ctx.fill();
+      ctx.stroke();
+
+      // Metallic mounting rivets
+      const numScrews = 6;
+      for (let s = 0; s < numScrews; s++) {
+        const angle = (s / numScrews) * Math.PI * 2;
+        const sx = rx + Math.cos(angle) * baseRadius * 1.14;
+        const sy = ry + Math.sin(angle) * baseRadius * 1.14;
+        ctx.beginPath();
+        ctx.arc(sx, sy, 3, 0, Math.PI * 2);
+        ctx.fillStyle = '#656578';
+        ctx.fill();
+      }
+
+      // 2. Heavy rubber suspension casing cone (surround)
+      const pulseRad = baseRadius * speakerPulse;
+      ctx.beginPath();
+      ctx.arc(rx, ry, pulseRad, 0, Math.PI * 2);
+      const surroundGradHandler = ctx.createRadialGradient(rx, ry, pulseRad * 0.72, rx, ry, pulseRad);
+      surroundGradHandler.addColorStop(0, '#101015');
+      surroundGradHandler.addColorStop(0.75, '#292934');
+      surroundGradHandler.addColorStop(1.0, '#0d0d12');
+      ctx.fillStyle = surroundGradHandler;
+      ctx.fill();
+
+      // 3. Colored dynamic woofer cone
+      ctx.beginPath();
+      ctx.arc(rx, ry, pulseRad * 0.78, 0, Math.PI * 2);
+      const coneGradHandler = ctx.createRadialGradient(rx, ry, 0, rx, ry, pulseRad * 0.78);
+      coneGradHandler.addColorStop(0, '#111116');
+      coneGradHandler.addColorStop(0.48, settings.primaryColor);
+      coneGradHandler.addColorStop(1.0, settings.secondaryColor || settings.primaryColor);
+      ctx.fillStyle = coneGradHandler;
+      ctx.fill();
+
+      // 4. Center metallic dust dome cap
+      const capRad = pulseRad * 0.28;
+      ctx.beginPath();
+      ctx.arc(rx, ry, capRad, 0, Math.PI * 2);
+      const capGradHandler = ctx.createRadialGradient(rx - capRad * 0.22, ry - capRad * 0.22, 0, rx, ry, capRad);
+      capGradHandler.addColorStop(0, '#ffffff');
+      capGradHandler.addColorStop(0.35, settings.glowColor || '#00ffcc');
+      capGradHandler.addColorStop(1.0, '#040406');
+      ctx.fillStyle = capGradHandler;
+      ctx.fill();
+
+      ctx.restore();
+    };
+
+    // Render left & right custom speaker nodes
+    drawSpeakerVec(leftCX, leftCY, speakerRadius);
+    drawSpeakerVec(rightCX, rightCY, speakerRadius);
+  }
+
+  ctx.restore();
+
+  // Apply Mirror Mode if enabled to reflect the visualizer horizontally
+  if (settings.mirrorMode) {
+    const symmetry = Math.max(1, Math.min(8, settings.symmetryMultiplier || 1));
+    const segmentWidth = Math.floor(width / (2 * symmetry));
+
+    if (segmentWidth > 0) {
+      if (!mirrorOffscreenCanvas) {
+        mirrorOffscreenCanvas = document.createElement('canvas');
+      }
+      if (mirrorOffscreenCanvas.width !== segmentWidth || mirrorOffscreenCanvas.height !== height) {
+        mirrorOffscreenCanvas.width = segmentWidth;
+        mirrorOffscreenCanvas.height = height;
+      }
+      mirrorOffscreenCtx = mirrorOffscreenCanvas.getContext('2d');
+      if (mirrorOffscreenCtx) {
+        mirrorOffscreenCtx.clearRect(0, 0, segmentWidth, height);
+        mirrorOffscreenCtx.drawImage(ctx.canvas, 0, 0, segmentWidth, height, 0, 0, segmentWidth, height);
+        
+        // Clear the canvas to the right of the first segment
+        ctx.clearRect(segmentWidth, 0, width - segmentWidth, height);
+        
+        // Populate the remaining segments across the canvas with alternating orientations
+        for (let i = 1; i < 2 * symmetry; i++) {
+          const x = i * segmentWidth;
+          if (i % 2 === 0) {
+            // Draw normal
+            ctx.drawImage(mirrorOffscreenCanvas, 0, 0, segmentWidth, height, x, 0, segmentWidth, height);
+          } else {
+            // Draw mirrored
+            ctx.save();
+            ctx.translate(x + segmentWidth, 0);
+            ctx.scale(-1, 1);
+            ctx.drawImage(mirrorOffscreenCanvas, 0, 0, segmentWidth, height, 0, 0, segmentWidth, height);
+            ctx.restore();
+          }
+        }
+      }
+    }
+  }
+}
+
+// DRAW TEXT OVERLAYS
+export function drawTitleOverlay(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  settings: TitleOverlaySettings,
+  audioDuration: number,
+  currentTime: number,
+  visualsSettings?: VisualizerSettings,
+  analyserData?: Uint8Array
+) {
+  if (!settings.visible || (!settings.text && !settings.artist)) return;
+
+  ctx.save();
+  ctx.fillStyle = settings.color;
+  
+  // Font select setup
+  const fontObj: Record<string, string> = {
+    'Inter': 'Inter, sans-serif',
+    'Space Grotesk': '"Space Grotesk", sans-serif',
+    'JetBrains Mono': '"JetBrains Mono", monospace',
+    'Outfit': 'Outfit, sans-serif',
+    'Playfair Display': '"Playfair Display", serif'
+  };
+
+  const selectedFont = fontObj[settings.fontFamily] || 'Inter, sans-serif';
+
+  // Title Size
+  const mainSize = settings.fontSize;
+  const subtitleSize = Math.max(14, mainSize * 0.45);
+
+  let x = width / 2;
+  let y = height / 2;
+  let align: CanvasTextAlign = 'center';
+
+  if (settings.position === 'center') {
+    align = 'center';
+    x = width / 2;
+    y = height / 2 - mainSize * 0.2;
+  } else if (settings.position === 'top-left') {
+    align = 'left';
+    x = 40;
+    y = 60 + mainSize;
+  } else if (settings.position === 'top-right') {
+    align = 'right';
+    x = width - 40;
+    y = 60 + mainSize;
+  } else if (settings.position === 'bottom-left') {
+    align = 'left';
+    x = 40;
+    y = height - 100;
+  } else if (settings.position === 'bottom-right') {
+    align = 'right';
+    x = width - 40;
+    y = height - 100;
+  }
+
+  // Reactive text transformation/scaling
+  let glowMultiplier = 0;
+  if (visualsSettings?.reactiveTextGlow && analyserData && analyserData.length > 0) {
+    // Look at middle/high frequencies (indices from 30% to 90% of spectrum)
+    const startIdx = Math.floor(analyserData.length * 0.3);
+    const endIdx = Math.floor(analyserData.length * 0.9);
+    let sum = 0;
+    let count = 0;
+    for (let i = startIdx; i < endIdx; i++) {
+      sum += analyserData[i];
+      count++;
+    }
+    const avg = count > 0 ? sum / count : 0;
+    glowMultiplier = avg / 255; // 0.0 to 1.0
+  }
+
+  if (glowMultiplier > 0) {
+    const scale = 1.0 + glowMultiplier * 0.08;
+    ctx.translate(x, y);
+    ctx.scale(scale, scale);
+    ctx.translate(-x, -y);
+  }
+
+  // Draw Title Text
+  ctx.textAlign = align;
+  ctx.font = `600 ${mainSize}px ${selectedFont}`;
+  
+  // Shadows for maximum overlay legibility over complex background art
+  if (glowMultiplier > 0) {
+    ctx.shadowColor = settings.color;
+    ctx.shadowBlur = 8 + glowMultiplier * 25;
+  } else {
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
+    ctx.shadowBlur = 8;
+  }
+  ctx.shadowOffsetX = 2;
+  ctx.shadowOffsetY = 2;
+
+  if (settings.text) {
+    ctx.fillText(settings.text.toUpperCase(), x, y);
+  }
+
+  // Draw Artist Text
+  if (settings.artist) {
+    ctx.font = `400 ${subtitleSize}px ${selectedFont}`;
+    ctx.fillStyle = `rgba(${hexToRgb(settings.color)?.r || 255}, ${hexToRgb(settings.color)?.g || 255}, ${hexToRgb(settings.color)?.b || 255}, 0.8)`;
+    ctx.fillText(settings.artist, x, y + mainSize * 0.9);
+  }
+
+  // Draw dynamic progress clock below center text if duration is parsed
+  if (audioDuration > 0 && settings.position === 'center') {
+    const minC = Math.floor(currentTime / 60);
+    const secC = Math.floor(currentTime % 60).toString().padStart(2, '0');
+    const minTot = Math.floor(audioDuration / 60);
+    const secTot = Math.floor(audioDuration % 60).toString().padStart(2, '0');
+    
+    ctx.font = `500 12px "JetBrains Mono", monospace`;
+    ctx.fillStyle = `rgba(255, 255, 255, 0.4)`;
+    ctx.fillText(`${minC}:${secC} / ${minTot}:${secTot}`, x, y + mainSize * 1.5);
+  }
+
+  ctx.restore();
+}
+
+// Blend colors based on linear ratio and advanced color modes
+function getDynamicColor(color1: string, color2: string, ratio: number): string {
+  const mode = activeSettings?.colorMode || 'gradient';
+  if (mode === 'solid') {
+    return color1;
+  } else if (mode === 'rainbow') {
+    // Low frequencies (ratio near 0.0) mapping through typical hues up to high (near 1.0)
+    const hue = Math.floor(ratio * 280);
+    return `hsl(${hue}, 100%, 55%)`;
+  }
+
+  const c1 = hexToRgb(color1) || { r: 0, g: 0, b: 0 };
+  const c2 = hexToRgb(color2) || { r: 255, g: 255, b: 255 };
+
+  const r = Math.floor(c1.r + (c2.r - c1.r) * ratio);
+  const g = Math.floor(c1.g + (c2.g - c1.g) * ratio);
+  const b = Math.floor(c1.b + (c2.b - c1.b) * ratio);
+
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
+// DRAW PROGRESS BAR
+export function drawProgressBar(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  visualsSettings: VisualizerSettings,
+  audioDuration: number,
+  currentTime: number
+) {
+  if (!visualsSettings.showProgressBar) return;
+
+  const edge = visualsSettings.progressBarEdge || 'bottom';
+  const marginPadding = visualsSettings.progressBarPadding !== undefined ? visualsSettings.progressBarPadding : 25;
+  const thickness = visualsSettings.progressBarThickness !== undefined ? visualsSettings.progressBarThickness : 6;
+  const scale = visualsSettings.progressBarScale !== undefined ? visualsSettings.progressBarScale : 1.0;
+  const style = visualsSettings.progressBarStyle || 'gradient';
+  const roundCaps = visualsSettings.progressBarRoundCaps !== undefined ? visualsSettings.progressBarRoundCaps : true;
+
+  const trackColor = visualsSettings.progressBarTrackColor || 'rgba(255, 255, 255, 0.15)';
+  const fillColor = visualsSettings.progressBarFillColor || visualsSettings.primaryColor;
+  const gradStart = visualsSettings.progressBarGradientStart || visualsSettings.primaryColor;
+  const gradEnd = visualsSettings.progressBarGradientEnd || visualsSettings.secondaryColor || visualsSettings.primaryColor;
+
+  const percentage = audioDuration > 0 ? Math.max(0, Math.min(1.0, currentTime / audioDuration)) : 0;
+
+  ctx.save();
+  ctx.lineWidth = thickness;
+  ctx.lineCap = roundCaps ? 'round' : 'square';
+
+  let startX = 0;
+  let startY = 0;
+  let endX = 0;
+  let endY = 0;
+
+  let activeEndX = 0;
+  let activeEndY = 0;
+
+  const isHorizontal = edge === 'bottom' || edge === 'top';
+
+  if (isHorizontal) {
+    const barWidth = width * scale;
+    startX = (width - barWidth) / 2;
+    endX = (width + barWidth) / 2;
+    startY = edge === 'bottom' ? height - marginPadding : marginPadding;
+    endY = startY;
+
+    activeEndX = startX + barWidth * percentage;
+    activeEndY = startY;
+  } else {
+    // Vertical - left or right edge, counting from bottom (0%) to top (100%)
+    const barHeight = height * scale;
+    startX = edge === 'left' ? marginPadding : width - marginPadding;
+    endX = startX;
+    
+    // Bottom point is 0% start, top point is 100% end
+    startY = (height + barHeight) / 2;
+    endY = (height - barHeight) / 2;
+
+    activeEndX = startX;
+    activeEndY = startY + (endY - startY) * percentage;
+  }
+
+  // 1. Draw Inactive Track Line
+  ctx.strokeStyle = trackColor;
+  ctx.beginPath();
+  ctx.moveTo(startX, startY);
+  ctx.lineTo(endX, endY);
+  ctx.stroke();
+
+  // 2. Draw Active Track Line
+  if (percentage > 0) {
+    ctx.beginPath();
+    ctx.moveTo(startX, startY);
+    ctx.lineTo(activeEndX, activeEndY);
+
+    // Determine paint color / gradient
+    if (style === 'gradient') {
+      const grad = ctx.createLinearGradient(startX, startY, endX, endY);
+      grad.addColorStop(0, gradStart);
+      grad.addColorStop(1, gradEnd);
+      ctx.strokeStyle = grad;
+    } else if (style === 'neon') {
+      ctx.strokeStyle = fillColor;
+      ctx.shadowBlur = 15;
+      ctx.shadowColor = fillColor;
+    } else {
+      ctx.strokeStyle = fillColor;
+    }
+
+    ctx.stroke();
+  }
+
+  ctx.restore();
+}
+
+// DRAW WATERMARK
+export function drawWatermark(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  settings: VisualizerSettings,
+  logoImgElement: HTMLImageElement | null
+) {
+  if (!settings.watermarkUrl || !logoImgElement || !logoImgElement.complete) return;
+
+  ctx.save();
+  
+  const opacity = settings.watermarkOpacity !== undefined ? settings.watermarkOpacity : 0.8;
+  ctx.globalAlpha = opacity;
+
+  const maxDim = 120;
+  const imgWidth = logoImgElement.width;
+  const imgHeight = logoImgElement.height;
+  let dstWidth = maxDim;
+  let dstHeight = maxDim;
+
+  if (imgWidth > imgHeight) {
+    dstWidth = maxDim;
+    dstHeight = (imgHeight / imgWidth) * maxDim;
+  } else {
+    dstHeight = maxDim;
+    dstWidth = (imgWidth / imgHeight) * maxDim;
+  }
+
+  const scale = (settings.watermarkScale !== undefined ? settings.watermarkScale : 100) / 100;
+  dstWidth *= scale;
+  dstHeight *= scale;
+
+  const padding = 45;
+  let x = padding;
+  let y = padding;
+
+  const pos = settings.watermarkPosition || 'top-right';
+  if (pos === 'top-left') {
+    x = padding;
+    y = padding;
+  } else if (pos === 'top-right') {
+    x = width - dstWidth - padding;
+    y = padding;
+  } else if (pos === 'bottom-left') {
+    x = padding;
+    y = height - dstHeight - padding;
+    if (settings.showProgressBar) {
+      y -= 15;
+    }
+  } else if (pos === 'bottom-right') {
+    x = width - dstWidth - padding;
+    y = height - dstHeight - padding;
+    if (settings.showProgressBar) {
+      y -= 15;
+    }
+  }
+
+  ctx.drawImage(logoImgElement, x, y, dstWidth, dstHeight);
+  ctx.restore();
+}
