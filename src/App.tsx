@@ -37,6 +37,8 @@ import {
   AudioTrack,
   ExportSettings,
   OverlayImage,
+  SparkParticle,
+  FireworkRocket,
 } from './types';
 import {
   initParticles,
@@ -302,13 +304,22 @@ const PRESETS = [
 
 export default function App() {
   // Navigation Tabs state
-  const [activeTab, setActiveTab] = useState<'track' | 'background' | 'visuals' | 'particles' | 'overlay' | 'export'>('track');
+  const [activeTab, setActiveTab] = useState<'track' | 'background' | 'visuals' | 'particles' | 'overlay' | 'text' | 'export'>('track');
 
   // Core Visualizer Customizations
   const [visuals, setVisuals] = useState<VisualizerSettings>(PRESETS[0].visuals);
   const [particlesSet, setParticlesSet] = useState<ParticleSettings>(PRESETS[0].particles);
   const [background, setBackground] = useState<BackgroundSettings>(PRESETS[0].background);
   const [titleOverlay, setTitleOverlay] = useState<TitleOverlaySettings>(PRESETS[0].title);
+
+  // Dedicated Text & Emojis layer state
+  const [customText, setCustomText] = useState<string>('');
+  const [customTextColor, setCustomTextColor] = useState<string>('#00f3ff');
+  const [customTextFontSize, setCustomTextFontSize] = useState<number>(44);
+  const [customTextFontFamily, setCustomTextFontFamily] = useState<'Inter' | 'Space Grotesk' | 'JetBrains Mono' | 'Outfit' | 'Playfair Display'>('Space Grotesk');
+  const [customTextX, setCustomTextX] = useState<number>(50); // 0 to 100 %
+  const [customTextY, setCustomTextY] = useState<number>(25); // 0 to 100 %
+  const [activeStickers, setActiveStickers] = useState<string[]>([]);
 
   // Multi-Image Overlay (Stickers / Album covers) state
   const [overlayImages, setOverlayImages] = useState<OverlayImage[]>([]);
@@ -403,6 +414,12 @@ export default function App() {
 
   // Interactive Particle Pool ref
   const particlesPoolRef = useRef<RenderParticle[]>([]);
+
+  // Audio-reactive Spark Beat Burst Pool Ref
+  const beatBurstsRef = useRef<SparkParticle[]>([]);
+
+  // Active launching firework rockets Ref
+  const fireworkRocketsRef = useRef<FireworkRocket[]>([]);
 
   // Recording Stream & Recorder refs
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
@@ -1750,6 +1767,15 @@ export default function App() {
   const exportFpsRef = useRef(exportSettings.fps);
   const activeTabRef = useRef(activeTab);
 
+  // Custom text & emoji refs
+  const customTextRef = useRef(customText);
+  const customTextColorRef = useRef(customTextColor);
+  const customTextFontSizeRef = useRef(customTextFontSize);
+  const customTextFontFamilyRef = useRef(customTextFontFamily);
+  const customTextXRef = useRef(customTextX);
+  const customTextYRef = useRef(customTextY);
+  const activeStickersRef = useRef(activeStickers);
+
   const renderFrameRef = useRef<(() => void) | null>(null);
   const currentFrameOverrideRef = useRef<{
     analyserData: Uint8Array;
@@ -1770,6 +1796,14 @@ export default function App() {
   useEffect(() => { isExportingRef.current = isExporting; }, [isExporting]);
   useEffect(() => { exportFpsRef.current = exportSettings.fps; }, [exportSettings.fps]);
   useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
+
+  useEffect(() => { customTextRef.current = customText; }, [customText]);
+  useEffect(() => { customTextColorRef.current = customTextColor; }, [customTextColor]);
+  useEffect(() => { customTextFontSizeRef.current = customTextFontSize; }, [customTextFontSize]);
+  useEffect(() => { customTextFontFamilyRef.current = customTextFontFamily; }, [customTextFontFamily]);
+  useEffect(() => { customTextXRef.current = customTextX; }, [customTextX]);
+  useEffect(() => { customTextYRef.current = customTextY; }, [customTextY]);
+  useEffect(() => { activeStickersRef.current = activeStickers; }, [activeStickers]);
 
   // Initialize persistent overlay video element on mount
   useEffect(() => {
@@ -2070,6 +2104,193 @@ export default function App() {
       );
       drawParticles(ctx, particlesPoolRef.current, particlesSetRef.current, isBeat, beatIntensity);
 
+      // --- SECTION 3: AUDIO-REACTIVE BEATER BURSTS / ADVANCED FIREWORKS SYSTEM ---
+      const interpolateColor = (color1: string, color2: string, ratio: number): string => {
+        try {
+          const hex1 = color1.replace('#', '');
+          const r1 = parseInt(hex1.substring(0, 2), 16) || 0;
+          const g1 = parseInt(hex1.substring(2, 4), 16) || 0;
+          const b1 = parseInt(hex1.substring(4, 6), 16) || 0;
+
+          const hex2 = color2.replace('#', '');
+          const r2 = parseInt(hex2.substring(0, 2), 16) || 0;
+          const g2 = parseInt(hex2.substring(2, 4), 16) || 0;
+          const b2 = parseInt(hex2.substring(4, 6), 16) || 0;
+
+          const r = Math.floor(r1 + (r2 - r1) * ratio);
+          const g = Math.floor(g1 + (g2 - g1) * ratio);
+          const b = Math.floor(b1 + (b2 - b1) * ratio);
+
+          return `rgb(${r}, ${g}, ${b})`;
+        } catch (e) {
+          return color1;
+        }
+      };
+
+      const enableFireworks = visualsRef.current.enableFireworks ?? true;
+
+      if (enableFireworks) {
+        // Rocket launcher: triggers on on-beat bass cuts of high intensity
+        if (isBeat && beatIntensity > 0.45) {
+          const xPercent = visualsRef.current.waveformOffsetX !== undefined ? visualsRef.current.waveformOffsetX : 50;
+          
+          // Launch from near the baseline bottom of the canvas
+          const spawnX = canvas.width * (xPercent / 100) + (Math.random() - 0.5) * 150;
+          const spawnY = canvas.height;
+          
+          // Flight Height / Altitude slider controls detonation (defaults to 50%)
+          const altitudeVal = visualsRef.current.fireworksAltitude ?? 50;
+          const targetY = canvas.height * (1.0 - altitudeVal / 100);
+
+          // Adaptive Color Syncing
+          const primaryCol = visualsRef.current.primaryColor || '#ff007f';
+          const secondaryCol = visualsRef.current.secondaryColor || '#00ffff';
+          const colorMode = visualsRef.current.colorMode || 'gradient';
+
+          let rocketColor = primaryCol;
+          if (colorMode === 'rainbow') {
+            rocketColor = `hsl(${Math.floor(Math.random() * 280)}, 100%, 55%)`;
+          } else if (colorMode === 'gradient') {
+            rocketColor = interpolateColor(primaryCol, secondaryCol, Math.random());
+          }
+
+          fireworkRocketsRef.current.push({
+            x: spawnX,
+            y: spawnY,
+            startX: spawnX,
+            startY: spawnY,
+            targetY: targetY,
+            speed: 5 + Math.random() * 5, // Flight speed upwards
+            color: rocketColor,
+            size: 2.5,
+            alpha: 1.0,
+          });
+        }
+
+        // Update and Draw active launching Firework Rockets
+        if (fireworkRocketsRef.current.length > 0) {
+          ctx.save();
+          const activeRockets: FireworkRocket[] = [];
+
+          for (const rocket of fireworkRocketsRef.current) {
+            rocket.y -= rocket.speed;
+
+            if (rocket.y > rocket.targetY) {
+              // Draw launching rocket flare
+              ctx.beginPath();
+              ctx.globalAlpha = rocket.alpha;
+              ctx.fillStyle = rocket.color;
+              ctx.shadowBlur = 15;
+              ctx.shadowColor = rocket.color;
+              ctx.arc(rocket.x, rocket.y, rocket.size, 0, Math.PI * 2);
+              ctx.fill();
+
+              // Rocket tail flare trail
+              ctx.beginPath();
+              ctx.globalAlpha = rocket.alpha * 0.4;
+              ctx.strokeStyle = rocket.color;
+              ctx.lineWidth = rocket.size * 0.8;
+              ctx.moveTo(rocket.x, rocket.y);
+              ctx.lineTo(rocket.x, rocket.y + 15);
+              ctx.stroke();
+
+              activeRockets.push(rocket);
+            } else {
+              // Target Altitude reached: DETONATION!
+              const sparkCount = 20 + Math.floor(Math.random() * 20); // 20 to 40 sparks
+              const radiusMult = visualsRef.current.fireworksRadius ?? 1.0;
+              const sparkSizeVal = visualsRef.current.fireworksSparkSize ?? 1.5;
+
+              const primaryCol = visualsRef.current.primaryColor || '#ff007f';
+              const secondaryCol = visualsRef.current.secondaryColor || '#00ffff';
+              const colorMode = visualsRef.current.colorMode || 'gradient';
+
+              for (let i = 0; i < sparkCount; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                // "Explosion Size / Radius" adjusts spread velocity of sparks
+                const radialSpeed = (3 + Math.random() * 7) * radiusMult;
+                // "Spark Particle Size" adjusts thickness/size of sparks
+                const size = (1.2 + Math.random() * 3.0) * sparkSizeVal / 1.5;
+                const maxLife = 25 + Math.floor(Math.random() * 25);
+
+                // Adaptive Color Syncing inheritance
+                let sparkColor = primaryCol;
+                if (colorMode === 'rainbow') {
+                  const ratio = i / sparkCount;
+                  sparkColor = `hsl(${Math.floor(ratio * 280)}, 100%, 55%)`;
+                } else if (colorMode === 'gradient') {
+                  const ratio = Math.random();
+                  sparkColor = interpolateColor(primaryCol, secondaryCol, ratio);
+                }
+
+                beatBurstsRef.current.push({
+                  x: rocket.x,
+                  y: rocket.targetY,
+                  vx: Math.cos(angle) * radialSpeed,
+                  vy: Math.sin(angle) * radialSpeed,
+                  color: sparkColor,
+                  size: size,
+                  alpha: 1.0,
+                  life: maxLife,
+                  maxLife: maxLife
+                });
+              }
+            }
+          }
+
+          fireworkRocketsRef.current = activeRockets;
+          ctx.restore();
+        }
+
+        // Physics Simulation and Trail Drawing of active Sparks
+        if (beatBurstsRef.current.length > 0) {
+          ctx.save();
+          const activeSparks: SparkParticle[] = [];
+
+          for (const spark of beatBurstsRef.current) {
+            spark.life -= 1;
+
+            if (spark.life > 0) {
+              spark.vy += 0.12; // slow gravity downward drift
+              spark.vx *= 0.95; // air friction drag
+              spark.vy *= 0.95;
+
+              spark.x += spark.vx;
+              spark.y += spark.vy;
+
+              spark.size += 0.03; // grow slightly as heat dissipates
+              spark.alpha = Math.max(0, spark.life / spark.maxLife);
+
+              ctx.beginPath();
+              ctx.globalAlpha = spark.alpha;
+              ctx.strokeStyle = spark.color;
+              ctx.lineWidth = spark.size;
+              ctx.lineCap = 'round';
+              ctx.shadowBlur = 8;
+              ctx.shadowColor = spark.color;
+
+              // Paint neon trail trajectory
+              ctx.moveTo(spark.x - spark.vx * 1.5, spark.y - spark.vy * 1.5);
+              ctx.lineTo(spark.x, spark.y);
+              ctx.stroke();
+
+              activeSparks.push(spark);
+            }
+          }
+
+          beatBurstsRef.current = activeSparks;
+          ctx.restore();
+        }
+      } else {
+        // Clear pools upon disable to free resources and stop rendering instantly
+        if (fireworkRocketsRef.current.length > 0) {
+          fireworkRocketsRef.current = [];
+        }
+        if (beatBurstsRef.current.length > 0) {
+          beatBurstsRef.current = [];
+        }
+      }
+
       // 3. Draw Foreground Video Overlay Track if present and loaded (draw before visualizer spectrum)
       if (overlayVideoRef.current && visualsRef.current.overlayVideoUrl) {
         const overlayVid = overlayVideoRef.current;
@@ -2318,6 +2539,91 @@ export default function App() {
         visualsRef.current,
         analyserData
       );
+
+      // 4.5 Draw Custom Creator Text & Emojis/Stickers Layer
+      const hasText = customTextRef.current && customTextRef.current.trim() !== '';
+      const hasStickers = activeStickersRef.current && activeStickersRef.current.length > 0;
+      if (hasText || hasStickers) {
+        const fontObj: Record<string, string> = {
+          'Inter': 'Inter, sans-serif',
+          'Space Grotesk': '"Space Grotesk", sans-serif',
+          'JetBrains Mono': '"JetBrains Mono", monospace',
+          'Outfit': 'Outfit, sans-serif',
+          'Playfair Display': '"Playfair Display", serif'
+        };
+
+        const finalX = (customTextXRef.current / 100) * canvas.width;
+        const finalY = (customTextYRef.current / 100) * canvas.height;
+
+        if (hasText) {
+          ctx.save();
+          ctx.fillStyle = customTextColorRef.current;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          
+          const selectedFont = fontObj[customTextFontFamilyRef.current] || 'Inter, sans-serif';
+          const fontSize = customTextFontSizeRef.current;
+          ctx.font = `700 ${fontSize}px ${selectedFont}`;
+
+          let glowMultiplier = 0;
+          if (visualsRef.current?.reactiveTextGlow && analyserData && analyserData.length > 0) {
+            const startIdx = Math.floor(analyserData.length * 0.3);
+            const endIdx = Math.floor(analyserData.length * 0.9);
+            let sum = 0;
+            let count = 0;
+            for (let i = startIdx; i < endIdx; i++) {
+              sum += analyserData[i];
+              count++;
+            }
+            const avg = count > 0 ? sum / count : 0;
+            glowMultiplier = avg / 255;
+          }
+
+          if (glowMultiplier > 0) {
+            ctx.shadowColor = customTextColorRef.current;
+            ctx.shadowBlur = 8 + glowMultiplier * 25;
+            const scale = 1.0 + glowMultiplier * 0.05;
+            ctx.translate(finalX, finalY);
+            ctx.scale(scale, scale);
+            ctx.translate(-finalX, -finalY);
+          } else {
+            ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
+            ctx.shadowBlur = 8;
+          }
+          ctx.shadowOffsetX = 2;
+          ctx.shadowOffsetY = 2;
+
+          ctx.fillText(customTextRef.current, finalX, finalY);
+          ctx.restore();
+        }
+
+        if (hasStickers) {
+          ctx.save();
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          
+          const emojiSize = Math.max(24, customTextFontSizeRef.current * 0.9);
+          ctx.font = `${emojiSize}px sans-serif`;
+          
+          ctx.shadowColor = 'rgba(0, 0, 0, 0.6)';
+          ctx.shadowBlur = 6;
+          ctx.shadowOffsetX = 2;
+          ctx.shadowOffsetY = 2;
+
+          const totalEmojis = activeStickersRef.current.length;
+          const spacing = emojiSize * 1.35;
+          const startX = finalX - ((totalEmojis - 1) * spacing) / 2;
+          const emojiY = finalY + (hasText ? (customTextFontSizeRef.current * 0.75 + 15) : 0);
+
+          activeStickersRef.current.forEach((emoji, index) => {
+            const currentX = startX + index * spacing;
+            const floatOffset = Math.sin(Date.now() / 300 + index * 1.5) * 6;
+            ctx.fillText(emoji, currentX, emojiY + floatOffset);
+          });
+          
+          ctx.restore();
+        }
+      }
 
       // 5. Dynamic Progress Bar Line overlay
       drawProgressBar(
@@ -3301,6 +3607,17 @@ export default function App() {
               <span>Overlay</span>
             </button>
             <button
+              onClick={() => setActiveTab('text')}
+              className={`flex-1 py-3 px-3.5 flex items-center justify-center space-x-2 border-b-2 font-medium whitespace-nowrap transition-all cursor-pointer ${
+                activeTab === 'text'
+                  ? 'border-blue-600 text-white bg-zinc-900/60 font-semibold'
+                  : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/40'
+              }`}
+            >
+              <Type className="w-3.5 h-3.5" />
+              <span>Text</span>
+            </button>
+            <button
               onClick={() => setActiveTab('export')}
               className={`flex-1 py-3 px-3.5 flex items-center justify-center space-x-2 border-b-2 font-medium whitespace-nowrap transition-all cursor-pointer ${
                 activeTab === 'export'
@@ -3328,7 +3645,7 @@ export default function App() {
                 <div className="bg-zinc-900/40 border border-dashed border-zinc-800 rounded-lg p-5 text-center relative group">
                   <input
                     type="file"
-                    accept="audio/*"
+                    accept="audio/*,video/*,.mp3,.wav,.flac,.ogg,.mp4,.m4a"
                     id="audio-selector"
                     onChange={handleManualAudioUpload}
                     className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
@@ -3338,8 +3655,8 @@ export default function App() {
                       <Music className="w-4 h-4 text-blue-500" />
                     </div>
                     <div>
-                      <p className="text-xs text-zinc-300 font-medium font-sans">Click or Drag & Drop audio file</p>
-                      <p className="text-[10px] text-zinc-500 font-mono mt-0.5">Supports MP3, WAV, FLAC, AAC</p>
+                      <p className="text-xs text-zinc-300 font-medium font-sans">Click or Drag & Drop audio or video file</p>
+                      <p className="text-[10px] text-zinc-500 font-mono mt-0.5">Supports MP3, WAV, FLAC, OGG, M4A, MP4</p>
                     </div>
                   </div>
                 </div>
@@ -3665,7 +3982,7 @@ export default function App() {
                   {/* Visual Structure Style */}
                   <div>
                     <label className="block text-xs font-semibold text-gray-300 mb-1.5 font-mono uppercase">Wave representation Style</label>
-                    <div className="grid grid-cols-2 gap-2 text-xs">
+                    <div className="space-y-2 text-xs">
                       {[
                         { id: 'bars', name: 'Rounded Bars' },
                         { id: 'waveform', name: 'Bezier Wave' },
@@ -3693,20 +4010,152 @@ export default function App() {
                         { id: 'minimalist-pulse-dot', name: 'Minimalist Pulse Dots' },
                         { id: 'modern-sleek', name: 'Modern Sleek' },
                         { id: 'frequency-spectrogram', name: 'Spectrogram Waterfall' },
-                        { id: 'three-d-speaker-effects', name: '3D Speakers & Floor' }
-                      ].map((item) => (
-                        <button
-                          key={item.id}
-                          onClick={() => setVisuals(prev => ({ ...prev, style: item.id as VisualizerStyle }))}
-                          className={`py-2 px-3 rounded-lg border text-left transition-all text-[11px] leading-tight ${
-                            visuals.style === item.id
-                              ? 'bg-indigo-600/20 border-indigo-500 text-white font-medium'
-                              : 'bg-[#0a0a0f] border-gray-900 hover:bg-[#12121d] text-gray-400'
-                          }`}
-                        >
-                          {item.name}
-                        </button>
-                      ))}
+                        { id: 'three-d-speaker-effects', name: '3D Speakers & Floor' },
+                        { id: 'tron-neon-grid', name: 'Tron Neon Grid' }
+                      ].map((item) => {
+                        const active = visuals.activeStyles && visuals.activeStyles.length > 0
+                          ? visuals.activeStyles.includes(item.id as VisualizerStyle)
+                          : visuals.style === item.id;
+                        
+                        // Style specific position offsets and vertical scale with fallback values
+                        const styleX = visuals.stylePositions?.[item.id]?.xOffset ?? (visuals.waveformOffsetX !== undefined ? visuals.waveformOffsetX : 50);
+                        const styleY = visuals.stylePositions?.[item.id]?.yOffset ?? (visuals.waveformOffsetY !== undefined ? visuals.waveformOffsetY : (visuals.placement === 'top' ? 25 : visuals.placement === 'bottom' ? 75 : 50));
+                        const styleScale = visuals.stylePositions?.[item.id]?.verticalScale ?? visuals.sensitivity;
+
+                        return (
+                          <div key={item.id} className="bg-zinc-950/25 rounded-lg border border-zinc-900/50 p-1 space-y-1">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                setVisuals(prev => {
+                                  const currentActive = prev.activeStyles && prev.activeStyles.length > 0
+                                    ? [...prev.activeStyles]
+                                    : [prev.style];
+                                  const index = currentActive.indexOf(item.id as VisualizerStyle);
+                                  if (index > -1) {
+                                    if (currentActive.length > 1) {
+                                      currentActive.splice(index, 1);
+                                    }
+                                  } else {
+                                    currentActive.push(item.id as VisualizerStyle);
+                                  }
+                                  return {
+                                    ...prev,
+                                    style: currentActive[0] || (item.id as VisualizerStyle),
+                                    activeStyles: currentActive
+                                  };
+                                });
+                              }}
+                              className={`w-full py-1.5 px-2.5 rounded-md border text-left flex items-center justify-between transition-all text-[11px] leading-tight cursor-pointer ${
+                                active
+                                  ? 'bg-indigo-600/15 border-indigo-500/60 text-white font-medium'
+                                  : 'bg-[#0a0a0f] border-zinc-900/80 hover:bg-[#12121d] text-gray-400'
+                              }`}
+                            >
+                              <span>{item.name}</span>
+                              <div className={`w-3.5 h-3.5 rounded border flex items-center justify-center transition-all ${
+                                active
+                                  ? 'border-indigo-400 bg-indigo-500/20 text-indigo-300'
+                                  : 'border-zinc-700 bg-zinc-950 text-transparent'
+                              }`}>
+                                {active && <Check className="w-2.5 h-2.5 stroke-[3]" />}
+                              </div>
+                            </button>
+
+                            {active && (
+                              <div className="px-2.5 py-2 bg-black/40 border border-zinc-900/40 rounded-md space-y-2 mt-1 mx-0.5">
+                                <div className="space-y-1">
+                                  <div className="flex justify-between items-center text-[9px] font-mono">
+                                    <span className="text-zinc-500 uppercase font-bold">Horizontal Shift</span>
+                                    <span className="text-indigo-400 font-semibold font-mono">{styleX}%</span>
+                                  </div>
+                                  <input
+                                    type="range"
+                                    min="0"
+                                    max="100"
+                                    value={styleX}
+                                    onChange={(e) => {
+                                      const val = parseInt(e.target.value);
+                                      setVisuals(prev => {
+                                        const positions = prev.stylePositions ? { ...prev.stylePositions } : {};
+                                        positions[item.id] = {
+                                          xOffset: val,
+                                          yOffset: positions[item.id]?.yOffset ?? styleY,
+                                          verticalScale: positions[item.id]?.verticalScale ?? styleScale
+                                        };
+                                        return {
+                                          ...prev,
+                                          stylePositions: positions
+                                        };
+                                      });
+                                    }}
+                                    className="w-full h-1 bg-zinc-950 rounded appearance-none cursor-pointer accent-indigo-500"
+                                  />
+                                </div>
+
+                                <div className="space-y-1">
+                                  <div className="flex justify-between items-center text-[9px] font-mono">
+                                    <span className="text-zinc-500 uppercase font-bold">Vertical Shift</span>
+                                    <span className="text-indigo-400 font-semibold font-mono">{styleY}%</span>
+                                  </div>
+                                  <input
+                                    type="range"
+                                    min="0"
+                                    max="100"
+                                    value={styleY}
+                                    onChange={(e) => {
+                                      const val = parseInt(e.target.value);
+                                      setVisuals(prev => {
+                                        const positions = prev.stylePositions ? { ...prev.stylePositions } : {};
+                                        positions[item.id] = {
+                                          xOffset: positions[item.id]?.xOffset ?? styleX,
+                                          yOffset: val,
+                                          verticalScale: positions[item.id]?.verticalScale ?? styleScale
+                                        };
+                                        return {
+                                          ...prev,
+                                          stylePositions: positions
+                                        };
+                                      });
+                                    }}
+                                    className="w-full h-1 bg-zinc-950 rounded appearance-none cursor-pointer accent-indigo-500"
+                                  />
+                                </div>
+
+                                <div className="space-y-1">
+                                  <div className="flex justify-between items-center text-[9px] font-mono">
+                                    <span className="text-zinc-500 uppercase font-bold text-sky-400">Vertical Scale / Line Height</span>
+                                    <span className="text-indigo-400 font-semibold font-mono">{styleScale.toFixed(2)}x</span>
+                                  </div>
+                                  <input
+                                    type="range"
+                                    min="0.1"
+                                    max="5.0"
+                                    step="0.05"
+                                    value={styleScale}
+                                    onChange={(e) => {
+                                      const val = parseFloat(e.target.value);
+                                      setVisuals(prev => {
+                                        const positions = prev.stylePositions ? { ...prev.stylePositions } : {};
+                                        positions[item.id] = {
+                                          xOffset: positions[item.id]?.xOffset ?? styleX,
+                                          yOffset: positions[item.id]?.yOffset ?? styleY,
+                                          verticalScale: val
+                                        };
+                                        return {
+                                          ...prev,
+                                          stylePositions: positions
+                                        };
+                                      });
+                                    }}
+                                    className="w-full h-1 bg-zinc-950 rounded appearance-none cursor-pointer accent-indigo-500"
+                                  />
+                                </div>
+                              </div>
+                            )}
+                          </div>
+                        );
+                      })}
                     </div>
                   </div>
 
@@ -3719,14 +4168,33 @@ export default function App() {
                       </div>
                       <button
                         type="button"
-                        onClick={() => setVisuals(prev => ({ ...prev, style: 'three-d-speaker-effects' }))}
+                        onClick={() => {
+                          setVisuals(prev => {
+                            const currentActive = prev.activeStyles && prev.activeStyles.length > 0
+                              ? [...prev.activeStyles]
+                              : [prev.style];
+                            const index = currentActive.indexOf('three-d-speaker-effects');
+                            if (index > -1) {
+                              if (currentActive.length > 1) {
+                                currentActive.splice(index, 1);
+                              }
+                            } else {
+                              currentActive.push('three-d-speaker-effects');
+                            }
+                            return {
+                              ...prev,
+                              style: currentActive[0] || 'three-d-speaker-effects',
+                              activeStyles: currentActive
+                            };
+                          });
+                        }}
                         className={`text-[10px] px-2.5 py-1 rounded font-semibold transition-all shrink-0 ${
-                          visuals.style === 'three-d-speaker-effects'
+                          ((visuals.activeStyles && visuals.activeStyles.includes('three-d-speaker-effects')) || visuals.style === 'three-d-speaker-effects')
                             ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
                             : 'bg-[#0a0a0f] border border-gray-800 text-gray-300 hover:text-white'
                         }`}
                       >
-                        {visuals.style === 'three-d-speaker-effects' ? 'ACTIVE' : 'ACTIVATE'}
+                        {((visuals.activeStyles && visuals.activeStyles.includes('three-d-speaker-effects')) || visuals.style === 'three-d-speaker-effects') ? 'ACTIVE' : 'ACTIVATE'}
                       </button>
                     </div>
 
@@ -3932,6 +4400,22 @@ export default function App() {
                         step="0.1"
                         value={visuals.sensitivity}
                         onChange={(e) => setVisuals(prev => ({ ...prev, sensitivity: parseFloat(e.target.value) }))}
+                        className="w-full accent-blue-600 cursor-pointer"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="flex justify-between font-mono text-[9px] text-zinc-400 font-bold">
+                        <span>MAX LINE WIDTH / HORIZONTAL SCALE</span>
+                        <span className="text-white font-semibold">{visuals.lineThickness} px</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="1"
+                        max="12"
+                        step="1"
+                        value={visuals.lineThickness}
+                        onChange={(e) => setVisuals(prev => ({ ...prev, lineThickness: parseInt(e.target.value) }))}
                         className="w-full accent-blue-600 cursor-pointer"
                       />
                     </div>
@@ -4897,7 +5381,11 @@ export default function App() {
                         { id: 'sparks', name: 'Combust Fire' },
                         { id: 'sakura', name: 'Cherry Sakura' },
                         { id: 'dust', name: 'Nebula Dust' },
-                        { id: 'digital', name: 'Binary digital' }
+                        { id: 'digital', name: 'Binary digital' },
+                        { id: 'glowing-stars', name: 'Glowing Stars' },
+                        { id: 'cyber-triangles', name: 'Cyber Triangles' },
+                        { id: 'floating-bubbles', name: 'Floating Bubbles' },
+                        { id: 'music-notes', name: 'Music Notes' }
                       ].map((item) => (
                         <button
                           key={item.id}
@@ -4912,6 +5400,20 @@ export default function App() {
                         </button>
                       ))}
                     </div>
+                  </div>
+
+                  {/* Emitting Direction dropdown */}
+                  <div>
+                    <label className="block text-[10px] font-semibold text-zinc-400 mb-1.5 font-mono uppercase font-sans">Emitting Direction</label>
+                    <select
+                      value={particlesSet.emittingDirection || 'float-up'}
+                      onChange={(e) => setParticlesSet(prev => ({ ...prev, emittingDirection: e.target.value as any }))}
+                      className="w-full bg-zinc-950 border border-zinc-850 rounded px-2.5 py-1.5 text-zinc-300 font-sans text-[11px] cursor-pointer focus:outline-none focus:ring-1 focus:ring-blue-500-custom"
+                    >
+                      <option value="float-up">Float Up (Default)</option>
+                      <option value="fall-down">Fall Down</option>
+                      <option value="center-explosion">Center Explosion</option>
+                    </select>
                   </div>
 
                   <hr className="border-zinc-900" />
@@ -5015,6 +5517,23 @@ export default function App() {
                       </div>
                     </div>
 
+                    {/* Particle Movement Speed linear multiplier */}
+                    <div className="space-y-1 bg-zinc-950/40 p-2 rounded border border-zinc-900">
+                      <div className="flex justify-between font-mono text-[9px] text-zinc-400">
+                        <span>Particle Movement Speed</span>
+                        <span className="text-white font-semibold">{(particlesSet.movementSpeed ?? 1.0).toFixed(1)}x</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0.0"
+                        max="5.0"
+                        step="0.1"
+                        value={particlesSet.movementSpeed ?? 1.0}
+                        onChange={(e) => setParticlesSet(prev => ({ ...prev, movementSpeed: parseFloat(e.target.value) }))}
+                        className="w-full accent-blue-600 cursor-pointer"
+                      />
+                    </div>
+
                     <div className="flex items-center justify-between p-2.5 bg-zinc-950/60 rounded border border-zinc-850">
                       <div>
                         <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Beat-Reactive Pulse</span>
@@ -5029,6 +5548,24 @@ export default function App() {
                       >
                         <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
                           particlesSet.beatReactive ? 'translate-x-3.5' : 'translate-x-0'
+                        }`} />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between p-2.5 bg-zinc-950/60 rounded border border-zinc-850">
+                      <div>
+                        <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Audio-Reactive Particle Burst</span>
+                        <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Vibrantly explode particle speed & size on deep bass cuts</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setParticlesSet(prev => ({ ...prev, beatBurst: !prev.beatBurst }))}
+                        className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                          particlesSet.beatBurst ? 'bg-blue-600' : 'bg-zinc-800'
+                        }`}
+                      >
+                        <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                          particlesSet.beatBurst ? 'translate-x-3.5' : 'translate-x-0'
                         }`} />
                       </button>
                     </div>
@@ -5062,6 +5599,91 @@ export default function App() {
                         />
                         <span className="font-mono text-[9px] text-zinc-400">{particlesSet.color.toUpperCase()}</span>
                       </div>
+                    </div>
+
+                    {/* DYNAMIC FIREWORKS FX CONTROLS */}
+                    <div className="pt-4 border-t border-zinc-900 space-y-3.5 text-left">
+                      <div className="flex items-center justify-between pb-1">
+                        <div>
+                          <span className="font-semibold text-zinc-300 block font-sans text-xs">Dynamic Fireworks FX</span>
+                          <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Launches and detonates sound-driven rockets on beats</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setVisuals(prev => ({ ...prev, enableFireworks: !(prev.enableFireworks ?? true) }))}
+                          className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                            (visuals.enableFireworks ?? true) ? 'bg-indigo-600' : 'bg-zinc-800'
+                          }`}
+                        >
+                          <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                            (visuals.enableFireworks ?? true) ? 'translate-x-3.5' : 'translate-x-0'
+                          }`} />
+                        </button>
+                      </div>
+
+                      {(visuals.enableFireworks ?? true) && (
+                        <div className="space-y-3 bg-[#0a0a0f]/40 p-2.5 rounded-lg border border-zinc-900/60 transition-all">
+                          {/* Flight Height / Altitude */}
+                          <div className="space-y-1">
+                            <div className="flex justify-between items-center text-[10px] font-mono">
+                              <span className="text-zinc-400 uppercase font-bold">Flight Altitude</span>
+                              <span className="text-indigo-400 font-semibold">{(visuals.fireworksAltitude ?? 50)}%</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="10"
+                              max="90"
+                              step="1"
+                              value={visuals.fireworksAltitude ?? 50}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value);
+                                setVisuals(prev => ({ ...prev, fireworksAltitude: val }));
+                              }}
+                              className="w-full h-1 bg-zinc-950 rounded appearance-none cursor-pointer accent-indigo-500"
+                            />
+                          </div>
+
+                          {/* Explosion Size / Radius */}
+                          <div className="space-y-1">
+                            <div className="flex justify-between items-center text-[10px] font-mono">
+                              <span className="text-zinc-400 uppercase font-bold">Explosion Radius</span>
+                              <span className="text-indigo-400 font-semibold">{(visuals.fireworksRadius ?? 1.0).toFixed(1)}x</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="0.2"
+                              max="3.0"
+                              step="0.1"
+                              value={visuals.fireworksRadius ?? 1.0}
+                              onChange={(e) => {
+                                const val = parseFloat(e.target.value);
+                                setVisuals(prev => ({ ...prev, fireworksRadius: val }));
+                              }}
+                              className="w-full h-1 bg-zinc-950 rounded appearance-none cursor-pointer accent-indigo-500"
+                            />
+                          </div>
+
+                          {/* Spark Particle Size */}
+                          <div className="space-y-1">
+                            <div className="flex justify-between items-center text-[10px] font-mono">
+                              <span className="text-zinc-400 uppercase font-bold">Spark Particle Size</span>
+                              <span className="text-indigo-400 font-semibold">{(visuals.fireworksSparkSize ?? 1.5).toFixed(1)}px</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="0.5"
+                              max="5.0"
+                              step="0.1"
+                              value={visuals.fireworksSparkSize ?? 1.5}
+                              onChange={(e) => {
+                                const val = parseFloat(e.target.value);
+                                setVisuals(prev => ({ ...prev, fireworksSparkSize: val }));
+                              }}
+                              className="w-full h-1 bg-[#050508] rounded appearance-none cursor-pointer accent-indigo-500"
+                            />
+                          </div>
+                        </div>
+                      )}
                     </div>
 
                   </div>
@@ -5771,6 +6393,174 @@ export default function App() {
                     )}
                   </div>
 
+                </div>
+              </div>
+            )}
+
+            {/* TABS F: CUSTOM CREATOR TEXT & EMOJIS */}
+            {activeTab === 'text' && (
+              <div className="space-y-6">
+                <div>
+                  <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider font-mono flex items-center space-x-1.5">
+                    <Type className="w-4 h-4 text-cyan-400" />
+                    <span>Creative Custom Text & Emojis</span>
+                  </h3>
+                  <p className="text-[11px] text-zinc-500 mt-1 font-sans">Overlay customizable vector typography and responsive stickers directly onto your render canvas.</p>
+                </div>
+
+                <div className="space-y-5">
+                  {/* Custom Text Field */}
+                  <div className="bg-zinc-900/40 border border-zinc-900 rounded-lg p-4 space-y-3.5">
+                    <div className="space-y-1.5 text-left">
+                      <label className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-wide">Custom Text String</label>
+                      <input
+                        type="text"
+                        value={customText}
+                        onChange={(e) => setCustomText(e.target.value)}
+                        placeholder="Enter overlay text..."
+                        className="w-full bg-[#050508] border border-zinc-800 focus:border-cyan-500/50 rounded p-2 text-xs text-white placeholder-zinc-700 outline-none transition-all font-sans"
+                      />
+                    </div>
+
+                    <div className="grid grid-cols-2 gap-3.5 pt-1.5">
+                      {/* Font Family Dropdown */}
+                      <div className="space-y-1.5 text-left">
+                        <label className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-wide">Font Family</label>
+                        <select
+                          value={customTextFontFamily}
+                          onChange={(e) => setCustomTextFontFamily(e.target.value as any)}
+                          className="w-full bg-[#050508] border border-zinc-800 rounded p-2 text-xs text-white outline-none cursor-pointer transition-all"
+                        >
+                          <option value="Space Grotesk">Space Grotesk (Tech)</option>
+                          <option value="Inter">Inter (Classic)</option>
+                          <option value="JetBrains Mono">JetBrains Mono (Code)</option>
+                          <option value="Outfit">Outfit (Clean)</option>
+                          <option value="Playfair Display">Playfair Display (Serif)</option>
+                        </select>
+                      </div>
+
+                      {/* Text Color Picker */}
+                      <div className="space-y-1.5 text-left">
+                        <label className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-wide">Text Color</label>
+                        <div className="flex items-center space-x-2">
+                          <input
+                            type="color"
+                            value={customTextColor}
+                            onChange={(e) => setCustomTextColor(e.target.value)}
+                            className="bg-transparent border border-zinc-800 rounded w-8 h-8 cursor-pointer shrink-0"
+                          />
+                          <input
+                            type="text"
+                            value={customTextColor.toUpperCase()}
+                            onChange={(e) => setCustomTextColor(e.target.value)}
+                            maxLength={7}
+                            className="w-full bg-[#050508] border border-zinc-800 focus:border-cyan-500/50 rounded p-2 text-xs text-white placeholder-zinc-700 outline-none transition-all font-mono"
+                          />
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Font Size Slider */}
+                    <div className="space-y-1.5 text-left pt-1.5">
+                      <div className="flex justify-between items-center text-[10px] font-mono">
+                        <span className="text-zinc-400 font-bold uppercase">Font Size</span>
+                        <span className="text-cyan-400 font-semibold">{customTextFontSize}px</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="12"
+                        max="120"
+                        step="1"
+                        value={customTextFontSize}
+                        onChange={(e) => setCustomTextFontSize(parseInt(e.target.value))}
+                        className="w-full h-1 bg-zinc-950 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Position Controllers */}
+                  <div className="bg-zinc-900/40 border border-zinc-900 rounded-lg p-4 space-y-4">
+                    <h4 className="text-[10px] font-bold text-zinc-400 uppercase tracking-wide font-mono text-left border-b border-zinc-805/40 pb-1.5">Canvas Coordinates Position Alignment</h4>
+                    
+                    {/* Align X slider */}
+                    <div className="space-y-1.5 text-left">
+                      <div className="flex justify-between items-center text-[10px] font-mono">
+                        <span className="text-zinc-400 font-medium">Horizontal Alignment (X)</span>
+                        <span className="text-cyan-500">{customTextX}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="1"
+                        value={customTextX}
+                        onChange={(e) => setCustomTextX(parseInt(e.target.value))}
+                        className="w-full h-1 bg-zinc-950 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+                      />
+                    </div>
+
+                    {/* Align Y slider */}
+                    <div className="space-y-1.5 text-left pt-1">
+                      <div className="flex justify-between items-center text-[10px] font-mono">
+                        <span className="text-zinc-400 font-medium">Vertical Alignment (Y)</span>
+                        <span className="text-cyan-500">{customTextY}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="1"
+                        value={customTextY}
+                        onChange={(e) => setCustomTextY(parseInt(e.target.value))}
+                        className="w-full h-1 bg-zinc-950 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Creator Sticker & Emoji Selector Deck */}
+                  <div className="bg-zinc-900/40 border border-zinc-900 rounded-lg p-4 space-y-3.5">
+                    <div className="space-y-0.5 text-left border-b border-zinc-805/40 pb-1.5 flex justify-between items-center">
+                      <div>
+                        <h4 className="text-[10px] font-bold text-zinc-400 uppercase tracking-wide font-mono">Popular Creator Emojis & Stickers</h4>
+                        <p className="text-[9.5px] text-zinc-400">Toggle multiple stickers to showcase on visual canvas.</p>
+                      </div>
+                      {activeStickers.length > 0 && (
+                        <button
+                          onClick={() => setActiveStickers([])}
+                          className="text-[9.5px] font-mono text-red-400/80 hover:text-red-400 hover:underline cursor-pointer"
+                        >
+                          CLEAR ALL
+                        </button>
+                      )}
+                    </div>
+
+                    {/* Quick Emojis Grid Selector */}
+                    <div className="grid grid-cols-7 gap-2.5">
+                      {['⚡', '🔥', '✨', '👽', '💀', '🎵', '💫', '👾', '🌈', '🔮', '🌀', '💎', '🚀', '👑', '🌟', '💔', '🍿', '🎧', '🌅', '🌌', '🎸'].map((emoji) => {
+                        const isSelected = activeStickers.includes(emoji);
+                        return (
+                          <button
+                            key={emoji}
+                            onClick={() => {
+                              if (isSelected) {
+                                setActiveStickers(prev => prev.filter(e => e !== emoji));
+                              } else {
+                                setActiveStickers(prev => [...prev, emoji]);
+                              }
+                            }}
+                            className={`w-10 h-10 flex items-center justify-center rounded-lg text-lg transition-all border cursor-pointer ${
+                              isSelected
+                                ? 'bg-indigo-650/20 border-cyan-500/80 scale-105 shadow-md shadow-cyan-500/10'
+                                : 'bg-[#06060a] border-zinc-850 hover:bg-zinc-900 text-zinc-300'
+                            }`}
+                            title={`Toggle ${emoji} sticker`}
+                          >
+                            {emoji}
+                          </button>
+                        );
+                      })}
+                    </div>
+                  </div>
                 </div>
               </div>
             )}

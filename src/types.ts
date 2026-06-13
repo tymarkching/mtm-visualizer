@@ -25,7 +25,8 @@ export type VisualizerStyle =
   | 'minimalist-pulse-dot'     // Minimalist Floating Pulse Dots (bass, mids, treble)
   | 'modern-sleek'             // Modern Sleek neon wavelines with gradient glow
   | 'frequency-spectrogram'   // Frequency Spectrogram style heatmap
-  | 'three-d-speaker-effects'; // 3D Spectrum & Speaker Effects visualizer style
+  | 'three-d-speaker-effects' // 3D Spectrum & Speaker Effects visualizer style
+  | 'tron-neon-grid';         // Tron Futuristic Grid synthwave landscape style
 
 export type ParticleType =
   | 'stars'
@@ -37,10 +38,15 @@ export type ParticleType =
   | 'hearts'
   | 'glow-circles'
   | 'spark-stars'
-  | 'snowflakes';
+  | 'snowflakes'
+  | 'glowing-stars'
+  | 'cyber-triangles'
+  | 'floating-bubbles'
+  | 'music-notes';
 
 export interface VisualizerSettings {
   style: VisualizerStyle;
+  activeStyles?: VisualizerStyle[];
   primaryColor: string;
   secondaryColor: string;
   glowColor: string;
@@ -107,6 +113,11 @@ export interface VisualizerSettings {
   watermarkScale?: number; // scale/resize of watermark (10% to 200%, default 100%)
   fadeInDuration?: number; // fade in duration in seconds (0 to 10, default 0)
   fadeOutDuration?: number; // fade out duration in seconds (0 to 10, default 0)
+  enableFireworks?: boolean;
+  fireworksAltitude?: number;
+  fireworksRadius?: number;
+  fireworksSparkSize?: number;
+  stylePositions?: { [styleId: string]: { xOffset: number; yOffset: number; verticalScale?: number } };
 }
 
 export interface ParticleSettings {
@@ -121,6 +132,9 @@ export interface ParticleSettings {
   beatReactive: boolean; // do they burst/react on beat?
   beatThreshold: number; // frequency index or amplitude required
   enablePhysics?: boolean; // simple canvas-based particle collisions (bouncing off each other)
+  emittingDirection?: 'float-up' | 'fall-down' | 'center-explosion';
+  movementSpeed?: number;
+  beatBurst?: boolean;
 }
 
 export interface TitleOverlaySettings {
@@ -171,6 +185,30 @@ export interface AudioTrack {
   file: File | null;
   objectUrl: string | null;
   coverUrl: string | null;
+}
+
+export interface SparkParticle {
+  x: number;
+  y: number;
+  vx: number;
+  vy: number;
+  color: string;
+  size: number;
+  alpha: number;
+  life: number;
+  maxLife: number;
+}
+
+export interface FireworkRocket {
+  x: number;
+  y: number;
+  startX: number;
+  startY: number;
+  targetY: number;
+  speed: number;
+  color: string;
+  size: number;
+  alpha: number;
 }
 
 export interface ExportSettings {

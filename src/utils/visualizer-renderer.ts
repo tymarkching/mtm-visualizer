@@ -129,16 +129,23 @@ export function createParticle(
   randomY = false
 ): RenderParticle {
   const size = settings.minSize + Math.random() * (settings.maxSize - settings.minSize);
+  const dir = settings.emittingDirection || 'float-up';
   
-  // Starting positions based on gravity
+  // Starting positions based on gravity and direction
   let x = Math.random() * width;
   let y = 0;
   
   if (randomY) {
     y = Math.random() * height;
   } else {
-    // If gravity is pulling down, spawn at top. If gravity is floating up (negative), spawn at bottom
-    y = settings.gravity >= 0 ? -10 : height + 10;
+    if (dir === 'fall-down') {
+      y = -10;
+    } else if (dir === 'center-explosion') {
+      x = width / 2;
+      y = height / 2;
+    } else { // float-up
+      y = height + 10;
+    }
   }
 
   // Velocity
@@ -147,13 +154,26 @@ export function createParticle(
   let vx = Math.cos(angle) * (baseSpeed * 0.5) + settings.wind;
   let vy = Math.sin(angle) * (baseSpeed * 0.5) + settings.gravity;
 
-  // Let types steer velocity slightly differently
-  if (settings.type === 'sparks') {
-    vy = -baseSpeed * (0.5 + Math.random() * 1.5) + settings.gravity;
-    vx = (Math.random() - 0.5) * baseSpeed * 2 + settings.wind;
-  } else if (settings.type === 'bubbles') {
-    vy = -baseSpeed * (0.2 + Math.random() * 0.8) + settings.gravity;
-    vx = Math.sin(Math.random() * Math.PI) * 0.5 + settings.wind;
+  // Let direction steer velocity
+  if (dir === 'fall-down') {
+    vy = Math.abs(vy) || (baseSpeed * 0.5);
+  } else if (dir === 'float-up') {
+    vy = -Math.abs(vy) || (-baseSpeed * 0.5);
+  } else if (dir === 'center-explosion') {
+    const explosionSpeed = (0.3 + Math.random() * 0.8) * baseSpeed;
+    vx = Math.cos(angle) * explosionSpeed + settings.wind;
+    vy = Math.sin(angle) * explosionSpeed + settings.gravity;
+  }
+
+  // Preserve legacy types' special speeds if direction is default/implicit
+  if (!settings.emittingDirection) {
+    if (settings.type === 'sparks') {
+      vy = -baseSpeed * (0.5 + Math.random() * 1.5) + settings.gravity;
+      vx = (Math.random() - 0.5) * baseSpeed * 2 + settings.wind;
+    } else if (settings.type === 'bubbles') {
+      vy = -baseSpeed * (0.2 + Math.random() * 0.8) + settings.gravity;
+      vx = Math.sin(Math.random() * Math.PI) * 0.5 + settings.wind;
+    }
   }
 
   // Lifespan
@@ -188,11 +208,18 @@ export function updateParticles(
   for (let p of particles) {
     p.life -= 1;
 
-    // React to beats
+    // React to beats standard
     if (isBeat && settings.beatReactive) {
       p.vx *= 1.3 * (1 + beatIntensity * 0.5);
       p.vy *= 1.3 * (1 + beatIntensity * 0.5);
       p.size = Math.min(settings.maxSize * 2, p.size * (1.1 + beatIntensity * 0.2));
+    }
+
+    // React to extra beat bursts
+    let burstSpeedMult = 1.0;
+    if (isBeat && settings.beatBurst) {
+      burstSpeedMult = 2.5 * (1 + beatIntensity);
+      p.size = Math.min(settings.maxSize * 3, p.size * (1.5 + beatIntensity * 0.5));
     }
 
     // Apply winds & gravity
@@ -203,13 +230,14 @@ export function updateParticles(
     if (settings.type === 'sakura') {
       // Wind-swept sway
       p.vx += Math.sin(p.life * 0.05) * 0.05;
-    } else if (settings.type === 'bubbles') {
+    } else if (settings.type === 'bubbles' || settings.type === 'floating-bubbles') {
       // Bobbing wobble
       p.vx += Math.sin(p.life * 0.1) * 0.08;
     }
 
-    p.x += p.vx;
-    p.y += p.vy;
+    const currentSpeedMult = (settings.movementSpeed !== undefined ? settings.movementSpeed : 1.0) * burstSpeedMult;
+    p.x += p.vx * currentSpeedMult;
+    p.y += p.vy * currentSpeedMult;
     p.angle += p.spin;
 
     // Apply physics boundary bounces (bouncing off walls)
@@ -537,6 +565,71 @@ export function drawParticles(
         ctx.stroke();
       }
       ctx.restore();
+    } else if (settings.type === 'glowing-stars') {
+      ctx.save();
+      ctx.fillStyle = p.color;
+      ctx.shadowBlur = isBeat ? 25 : 12;
+      ctx.shadowColor = p.color;
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.angle || 0);
+      ctx.beginPath();
+      ctx.moveTo(0, -p.size * 2.0);
+      ctx.quadraticCurveTo(0, 0, p.size * 2.0, 0);
+      ctx.quadraticCurveTo(0, 0, 0, p.size * 2.0);
+      ctx.quadraticCurveTo(0, 0, -p.size * 2.0, 0);
+      ctx.quadraticCurveTo(0, 0, 0, -p.size * 2.0);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
+    } else if (settings.type === 'cyber-triangles') {
+      ctx.save();
+      ctx.strokeStyle = p.color;
+      ctx.lineWidth = Math.max(1, p.size * 0.15);
+      ctx.shadowBlur = isBeat ? 15 : 5;
+      ctx.shadowColor = p.color;
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.angle || 0);
+      ctx.beginPath();
+      const r = p.size * 1.5;
+      ctx.moveTo(0, -r);
+      ctx.lineTo(r * Math.cos(Math.PI / 6), r * Math.sin(Math.PI / 6));
+      ctx.lineTo(-r * Math.cos(Math.PI / 6), r * Math.sin(Math.PI / 6));
+      ctx.closePath();
+      ctx.stroke();
+      ctx.restore();
+    } else if (settings.type === 'floating-bubbles') {
+      ctx.save();
+      ctx.strokeStyle = p.color;
+      ctx.lineWidth = Math.max(1.5, p.size * 0.12);
+      ctx.shadowBlur = 8;
+      ctx.shadowColor = p.color;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.fillStyle = '#ffffff';
+      ctx.globalAlpha = p.alpha * 0.6;
+      ctx.arc(p.x - p.size * 0.35, p.y - p.size * 0.35, p.size * 0.2, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    } else if (settings.type === 'music-notes') {
+      ctx.save();
+      ctx.fillStyle = p.color;
+      ctx.shadowBlur = isBeat ? 12 : 4;
+      ctx.shadowColor = p.color;
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.angle || 0);
+      ctx.beginPath();
+      ctx.ellipse(-p.size * 0.3, p.size * 0.5, p.size * 0.45, p.size * 0.3, -Math.PI / 6, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillRect(0, -p.size * 0.8, p.size * 0.12, p.size * 1.3);
+      ctx.beginPath();
+      ctx.moveTo(p.size * 0.12, -p.size * 0.8);
+      ctx.bezierCurveTo(p.size * 0.7, -p.size * 0.5, p.size * 0.7, -p.size * 0.2, p.size * 0.75, 0);
+      ctx.bezierCurveTo(p.size * 0.5, -p.size * 0.2, p.size * 0.4, -p.size * 0.4, p.size * 0.12, -p.size * 0.5);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
     }
   }
 
@@ -548,16 +641,17 @@ export function drawVisualizer(
   ctx: CanvasRenderingContext2D,
   width: number,
   height: number,
-  settings: VisualizerSettings,
+  incomingSettings: VisualizerSettings,
   analyserData: Uint8Array,
   waveformData: Uint8Array,
   beatIntensity: number
 ) {
+  let settings = incomingSettings;
   const dataLen = analyserData.length;
   const isWebm = true;
 
   // Manage spectrogram history
-  if (settings.style === 'frequency-spectrogram') {
+  if (settings.style === 'frequency-spectrogram' || (settings.activeStyles && settings.activeStyles.includes('frequency-spectrogram'))) {
     spectrogramHistory.push(new Uint8Array(analyserData));
     if (spectrogramHistory.length > MAX_SPECTROGRAM_HISTORY) {
       spectrogramHistory.shift();
@@ -715,37 +809,67 @@ export function drawVisualizer(
   const originalWidth = width;
   const originalHeight = height;
 
-  // Draw-space transformations for side placements
-  if (placement === 'left') {
-    ctx.translate(0, height);
-    ctx.rotate(-Math.PI / 2);
-    width = originalHeight;
-    height = originalWidth;
-  } else if (placement === 'right') {
-    ctx.translate(width, 0);
-    ctx.rotate(Math.PI / 2);
-    width = originalHeight;
-    height = originalWidth;
-  }
+  const currentSettingsState = settings;
+  const stylesToDraw = currentSettingsState.activeStyles && currentSettingsState.activeStyles.length > 0
+    ? currentSettingsState.activeStyles
+    : [currentSettingsState.style];
 
-  // Dynamic layout coordinates based on vertical and horizontal shifts from sliders
-  const xPercent = settings.waveformOffsetX !== undefined ? settings.waveformOffsetX : 50;
-  const defaultYPercent = placement === 'top' ? 25 : placement === 'bottom' ? 75 : 50;
-  const yPercent = settings.waveformOffsetY !== undefined ? settings.waveformOffsetY : defaultYPercent;
-  activeYPercent = yPercent;
+  stylesToDraw.forEach((styleId) => {
+    ctx.save();
 
-  let centerX = width * (xPercent / 100);
-  let centerY = height * (yPercent / 100);
-  let midY = height * (yPercent / 100);
+    let width = originalWidth;
+    let height = originalHeight;
+    
+    const stylePos = currentSettingsState.stylePositions?.[styleId];
+    const styleScale = stylePos?.verticalScale !== undefined ? stylePos.verticalScale : currentSettingsState.sensitivity;
+    
+    // Local shadowed settings variable protects each style iteration
+    // Maps sensitivity to the style-specific verticalScale automatically
+    const settings = {
+      ...currentSettingsState,
+      style: styleId,
+      sensitivity: styleScale
+    };
+    
+    activeSettings = settings;
 
-  // Vertically invert the rendered waveform relative to the center baseline / active baseline coordinate
-  if (settings.flipWaveform) {
-    ctx.translate(0, midY);
-    ctx.scale(1, -1);
-    ctx.translate(0, -midY);
-  }
+    // Draw-space transformations for side placements
+    if (placement === 'left') {
+      ctx.translate(0, originalHeight);
+      ctx.rotate(-Math.PI / 2);
+      width = originalHeight;
+      height = originalWidth;
+    } else if (placement === 'right') {
+      ctx.translate(originalWidth, 0);
+      ctx.rotate(Math.PI / 2);
+      width = originalHeight;
+      height = originalWidth;
+    }
 
-  if (settings.style === 'waveform') {
+    // Dynamic layout coordinates based on vertical and horizontal shifts from sliders
+    const xPercent = stylePos?.xOffset !== undefined ? stylePos.xOffset : (settings.waveformOffsetX !== undefined ? settings.waveformOffsetX : 50);
+    const defaultYPercent = placement === 'top' ? 25 : placement === 'bottom' ? 75 : 50;
+    const yPercent = stylePos?.yOffset !== undefined ? stylePos.yOffset : (settings.waveformOffsetY !== undefined ? settings.waveformOffsetY : defaultYPercent);
+    activeYPercent = yPercent;
+
+    let centerX = width * (xPercent / 100);
+    let centerY = height * (yPercent / 100);
+    let midY = height * (yPercent / 100);
+
+    // Vertically invert the rendered waveform relative to the center baseline / active baseline coordinate
+    if (settings.flipWaveform) {
+      ctx.translate(0, midY);
+      ctx.scale(1, -1);
+      ctx.translate(0, -midY);
+    }
+
+    ctx.strokeStyle = activeStyleColor;
+    ctx.fillStyle = activeStyleColor;
+    ctx.lineWidth = settings.lineThickness;
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+
+    if (settings.style === 'waveform') {
     if (settings.spectrumAnalyzer) {
       // Replaces standard waveform with a frequency-domain bar chart view
       const barCount = Math.min(64, dataLen);
@@ -2057,30 +2181,31 @@ export function drawVisualizer(
       ctx.restore();
     }
   } else if (settings.style === 'three-d-speaker-effects') {
-    // 1. Calculate dynamic average low-end bass level (first 12% bins)
-    const bassBins = Math.max(1, Math.floor(dataLen * 0.12));
-    let bassSum = 0;
-    for (let i = 0; i < bassBins; i++) {
-      bassSum += analyserData[i] || 0;
+    // 1. Calculate sub-bass average from index 0 to 5 of the audio data buffer
+    let subBassSum = 0;
+    const subBassCount = Math.min(6, dataLen);
+    for (let i = 0; i < subBassCount; i++) {
+      subBassSum += analyserData[i] || 0;
     }
-    const avgBassVal = bassSum / bassBins;
-    const bassFactor = avgBassVal / 255.0; // 0.0 to 1.0
+    const avgSubBass = subBassSum / Math.max(1, subBassCount);
+    const subBassFactor = avgSubBass / 255.0; // 0.0 to 1.0
 
     const responseMult = typeof settings.speakerBassResponse === 'number' ? settings.speakerBassResponse : 1.0;
-    const speakerPulse = 1.0 + bassFactor * 0.16 * responseMult;
 
-    // Woofer rattle/vibration translation values
-    const vibrateX = (Math.random() - 0.5) * bassFactor * 9.0 * responseMult;
-    const vibrateY = (Math.random() - 0.5) * bassFactor * 9.0 * responseMult;
+    // Woofer rattle/vibration translation values based on sub-bass
+    const vibrateX = (Math.random() - 0.5) * subBassFactor * 9.0 * responseMult;
+    const vibrateY = (Math.random() - 0.5) * subBassFactor * 9.0 * responseMult;
 
     const horizonY = midY + height * 0.06;
     const centerX = width / 2;
 
-    // --- A. Render 3D Perspective Grid Floor ---
+    // --- A. Render 3D Perspective Grid Floor (Sleek Wireframe Layout) ---
     ctx.save();
     ctx.strokeStyle = settings.secondaryColor || '#00ffff';
+    ctx.shadowColor = settings.secondaryColor || '#00ffff';
+    ctx.shadowBlur = 12;
     ctx.lineWidth = 1.5;
-    ctx.globalAlpha = 0.22;
+    ctx.globalAlpha = 0.3 + subBassFactor * 0.45; // grid glows with music sub-bass!
 
     const num3dLines = 18;
     for (let i = 0; i <= num3dLines; i++) {
@@ -2089,22 +2214,28 @@ export function drawVisualizer(
       ctx.beginPath();
       ctx.moveTo(centerX, horizonY);
       ctx.lineTo(bottomX, height);
+      ctx.strokeStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor || settings.primaryColor, xRatio);
       ctx.stroke();
     }
 
     const num3dRows = 12;
     for (let i = 0; i <= num3dRows; i++) {
       const progress = i / num3dRows;
-      const zRatio = Math.pow(progress, 1.8); // Exponential spacing for depth perspective
+      const timeSec = Date.now() / 1000;
+      const moveOffset = (timeSec * (2.5 + subBassFactor * 8.0)) % 1.0;
+      const adjustedProgress = (progress + moveOffset / num3dRows) % 1.0;
+      
+      const zRatio = Math.pow(adjustedProgress, 1.8); // Exponential spacing for depth perspective
       const y = horizonY + zRatio * (height - horizonY);
       ctx.beginPath();
       ctx.moveTo(0, y);
       ctx.lineTo(width, y);
+      ctx.strokeStyle = getDynamicColor(settings.secondaryColor || settings.primaryColor, settings.primaryColor, zRatio);
       ctx.stroke();
     }
     ctx.restore();
 
-    // --- B. Render 3D Perspective Spectrum Pillars ---
+    // --- B. Render 3D Perspective Spectrum Pillars (Sleek Holographic Wireframe) ---
     const pillarsCount = 20;
     const zDepth = 0.72; // depth line location on floor
     const yBase = horizonY + zDepth * (height - horizonY);
@@ -2128,55 +2259,55 @@ export function drawVisualizer(
       const sideOffset = (screenX - centerX) * 0.07; // skew projection towards vanishing point
 
       ctx.save();
-      // Apply subtle shadow blur to columns to make them glowing neon structures
-      const glowStr = settings.glowStrength !== undefined ? settings.glowStrength : 12;
-      if (glowStr > 0) {
-        ctx.shadowBlur = Math.min(15, glowStr);
-        ctx.shadowColor = settings.glowColor || settings.primaryColor;
-      }
+      ctx.strokeStyle = faceColor;
+      ctx.shadowColor = settings.glowColor || settings.primaryColor || faceColor;
+      ctx.shadowBlur = 10;
+      ctx.lineWidth = Math.max(1, (settings.lineThickness || 2) * 0.4);
+      ctx.globalAlpha = 0.85;
 
-      // 1. Front column face
-      ctx.fillStyle = faceColor;
-      ctx.globalAlpha = 0.78;
+      // Draw wireframe front face box outline
       ctx.beginPath();
       ctx.rect(screenX - baseWidth / 2, topY, baseWidth, h || 2);
-      ctx.fill();
+      ctx.stroke();
 
-      // 2. Side column face (extruded towards center vanishing point)
-      ctx.shadowBlur = 0; // disable shadows for side faces to look sharp
-      ctx.fillStyle = getDynamicColor(settings.secondaryColor, '#000000', 0.45);
-      ctx.globalAlpha = 0.65;
+      // Horizontal wire rungs to give solid look without solid geometry fill
+      const rungs = h > 10 ? Math.floor(h / 12) : 0;
+      for (let rG = 1; rG < rungs; rG++) {
+        const rungY = topY + (rG / rungs) * h;
+        ctx.beginPath();
+        ctx.moveTo(screenX - baseWidth / 2, rungY);
+        ctx.lineTo(screenX + baseWidth / 2, rungY);
+        ctx.stroke();
+      }
+
+      // Draw wireframe side projection
       ctx.beginPath();
       ctx.moveTo(screenX + baseWidth / 2, topY);
       ctx.lineTo(screenX + baseWidth / 2 + sideOffset, topY - h * 0.08);
       ctx.lineTo(screenX + baseWidth / 2 + sideOffset, yBase - h * 0.08);
       ctx.lineTo(screenX + baseWidth / 2, yBase);
-      ctx.closePath();
-      ctx.fill();
+      ctx.stroke();
 
-      // 3. Top cap face of column
-      ctx.fillStyle = '#ffffff';
-      ctx.globalAlpha = 0.88;
+      // Top cap wireframe
       ctx.beginPath();
       ctx.moveTo(screenX - baseWidth / 2, topY);
       ctx.lineTo(screenX + baseWidth / 2, topY);
       ctx.lineTo(screenX + baseWidth / 2 + sideOffset, topY - h * 0.08);
       ctx.lineTo(screenX - baseWidth / 2 + sideOffset, topY - h * 0.08);
       ctx.closePath();
-      ctx.fill();
+      ctx.stroke();
 
       ctx.restore();
     }
 
-    // --- C. Render Dual Speaker Woofers ---
-    // Adjust size base on aspect ratio / window boundaries
+    // --- C. Render Dual Speaker Woofers (Pulsing Neon Wireframes) ---
     const speakerRadius = Math.min(width * 0.09, height * 0.16);
     
-    // Left speaker
+    // Left speaker position
     const leftCX = width * 0.14;
     const leftCY = height * 0.35;
     
-    // Right speaker
+    // Right speaker position
     const rightCX = width * 0.86;
     const rightCY = height * 0.35;
 
@@ -2184,67 +2315,244 @@ export function drawVisualizer(
       const rx = cx + vibrateX;
       const ry = cy + vibrateY;
 
-      // 1. Outer wooden cabinet cabinet/rim
       ctx.save();
-      ctx.beginPath();
-      ctx.arc(rx, ry, baseRadius * 1.25, 0, Math.PI * 2);
-      ctx.fillStyle = '#0a0a0f';
-      ctx.strokeStyle = '#22222d';
-      ctx.lineWidth = 4;
-      ctx.fill();
-      ctx.stroke();
+      
+      // Neon Glow using active user colors
+      ctx.shadowBlur = 15;
+      ctx.shadowColor = settings.glowColor || settings.primaryColor || '#ff00ff';
+      ctx.strokeStyle = settings.primaryColor || '#ff00ff';
+      ctx.lineWidth = Math.max(1.5, settings.lineThickness || 2);
 
-      // Metallic mounting rivets
-      const numScrews = 6;
-      for (let s = 0; s < numScrews; s++) {
-        const angle = (s / numScrews) * Math.PI * 2;
-        const sx = rx + Math.cos(angle) * baseRadius * 1.14;
-        const sy = ry + Math.sin(angle) * baseRadius * 1.14;
+      // Cyberpunk Speaker Cylinder Depth Projection (rear element)
+      const cylinderDepth = baseRadius * 0.35;
+      // Slight perspective shift based on side of center
+      const isLeft = cx < centerX;
+      const dirX = isLeft ? 1 : -1;
+      const depthX = dirX * cylinderDepth * 0.4;
+      const depthY = cylinderDepth * 0.2;
+
+      const pulseAmt = subBassFactor * 0.25 * responseMult;
+      const rFrontOuter = baseRadius * (1.0 + pulseAmt);
+      const rBackOuter = baseRadius * 0.9 * (1.0 + pulseAmt);
+
+      // Draw rear cylinder ring wireframe
+      ctx.save();
+      ctx.shadowBlur = 5;
+      ctx.globalAlpha = 0.38;
+      ctx.strokeStyle = settings.secondaryColor || settings.primaryColor || '#00ffff';
+      ctx.beginPath();
+      ctx.arc(rx + depthX, ry + depthY, rBackOuter, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+
+      // Draw wireframe cylinder connectors (struts joining front and back faces)
+      ctx.save();
+      ctx.globalAlpha = 0.45;
+      ctx.lineWidth = 1;
+      ctx.strokeStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor || settings.primaryColor, 0.5);
+      const cylSpokes = 8;
+      for (let s = 0; s < cylSpokes; s++) {
+        const angle = (s / cylSpokes) * Math.PI * 2;
+        const cos = Math.cos(angle);
+        const sin = Math.sin(angle);
         ctx.beginPath();
-        ctx.arc(sx, sy, 3, 0, Math.PI * 2);
-        ctx.fillStyle = '#656578';
-        ctx.fill();
+        ctx.moveTo(rx + cos * rFrontOuter, ry + sin * rFrontOuter);
+        ctx.lineTo(rx + depthX + cos * rBackOuter, ry + depthY + sin * rBackOuter);
+        ctx.stroke();
+      }
+      ctx.restore();
+
+      // Concentric wireframe circles mapping to sub-bass expansion
+      const numRings = 6;
+      for (let r = 1; r <= numRings; r++) {
+        const ringScale = (r / numRings);
+        const currentRadius = baseRadius * ringScale * (1.0 + pulseAmt);
+        
+        const ringColor = getDynamicColor(settings.primaryColor, settings.secondaryColor || settings.primaryColor, ringScale);
+        ctx.strokeStyle = ringColor;
+        ctx.shadowColor = ringColor;
+
+        ctx.beginPath();
+        ctx.arc(rx, ry, currentRadius, 0, Math.PI * 2);
+        ctx.stroke();
+
+        // Connector radial spokes for the wireframe cone
+        if (r === numRings) {
+          ctx.save();
+          ctx.globalAlpha = 0.35;
+          ctx.lineWidth = 1;
+          ctx.setLineDash([2, 4]);
+          
+          ctx.beginPath();
+          const radialSpokes = 8;
+          for (let s = 0; s < radialSpokes; s++) {
+            const angle = (s / radialSpokes) * Math.PI * 2;
+            const cos = Math.cos(angle);
+            const sin = Math.sin(angle);
+            ctx.moveTo(rx + cos * baseRadius * 0.2, ry + sin * baseRadius * 0.2);
+            ctx.lineTo(rx + cos * currentRadius, ry + sin * currentRadius);
+          }
+          ctx.stroke();
+          ctx.restore();
+        }
       }
 
-      // 2. Heavy rubber suspension casing cone (surround)
-      const pulseRad = baseRadius * speakerPulse;
+      // Draw Center wireframe cap ring
+      const capColor = settings.glowColor || settings.primaryColor || '#ff00ff';
+      ctx.strokeStyle = capColor;
+      ctx.shadowColor = capColor;
       ctx.beginPath();
-      ctx.arc(rx, ry, pulseRad, 0, Math.PI * 2);
-      const surroundGradHandler = ctx.createRadialGradient(rx, ry, pulseRad * 0.72, rx, ry, pulseRad);
-      surroundGradHandler.addColorStop(0, '#101015');
-      surroundGradHandler.addColorStop(0.75, '#292934');
-      surroundGradHandler.addColorStop(1.0, '#0d0d12');
-      ctx.fillStyle = surroundGradHandler;
-      ctx.fill();
+      ctx.arc(rx, ry, baseRadius * 0.22 * (1.0 + subBassFactor * 0.1), 0, Math.PI * 2);
+      ctx.stroke();
 
-      // 3. Colored dynamic woofer cone
+      // Outer wireframe hexagonal stage casing
+      const casingColor = settings.secondaryColor || '#00ffff';
+      ctx.strokeStyle = casingColor;
+      ctx.shadowColor = casingColor;
+      ctx.lineWidth = 1.5;
       ctx.beginPath();
-      ctx.arc(rx, ry, pulseRad * 0.78, 0, Math.PI * 2);
-      const coneGradHandler = ctx.createRadialGradient(rx, ry, 0, rx, ry, pulseRad * 0.78);
-      coneGradHandler.addColorStop(0, '#111116');
-      coneGradHandler.addColorStop(0.48, settings.primaryColor);
-      coneGradHandler.addColorStop(1.0, settings.secondaryColor || settings.primaryColor);
-      ctx.fillStyle = coneGradHandler;
-      ctx.fill();
+      const corners = 6;
+      for (let c = 0; c <= corners; c++) {
+        const angle = (c / corners) * Math.PI * 2;
+        const casingRadius = baseRadius * 1.35 * (1.0 + subBassFactor * 0.08 * responseMult);
+        const hX = rx + Math.cos(angle) * casingRadius;
+        const hY = ry + Math.sin(angle) * casingRadius;
+        if (c === 0) {
+          ctx.moveTo(hX, hY);
+        } else {
+          ctx.lineTo(hX, hY);
+        }
+      }
+      ctx.stroke();
 
-      // 4. Center metallic dust dome cap
-      const capRad = pulseRad * 0.28;
+      // Guidelines back to vanishing horizontal floor coordinates
+      ctx.save();
+      ctx.strokeStyle = settings.secondaryColor || '#00ffff';
+      ctx.globalAlpha = 0.22;
+      ctx.setLineDash([3, 5]);
       ctx.beginPath();
-      ctx.arc(rx, ry, capRad, 0, Math.PI * 2);
-      const capGradHandler = ctx.createRadialGradient(rx - capRad * 0.22, ry - capRad * 0.22, 0, rx, ry, capRad);
-      capGradHandler.addColorStop(0, '#ffffff');
-      capGradHandler.addColorStop(0.35, settings.glowColor || '#00ffcc');
-      capGradHandler.addColorStop(1.0, '#040406');
-      ctx.fillStyle = capGradHandler;
-      ctx.fill();
+      ctx.moveTo(rx, ry);
+      ctx.lineTo(centerX, horizonY);
+      ctx.stroke();
+      ctx.restore();
 
       ctx.restore();
     };
 
-    // Render left & right custom speaker nodes
+    // Render left & right wireframe speaker nodes
     drawSpeakerVec(leftCX, leftCY, speakerRadius);
     drawSpeakerVec(rightCX, rightCY, speakerRadius);
+  } else if (settings.style === 'tron-neon-grid') {
+    const bassBins = Math.max(1, Math.floor(dataLen * 0.12));
+    let bassSum = 0;
+    for (let i = 0; i < bassBins; i++) {
+      bassSum += analyserData[i] || 0;
+    }
+    const avgBassVal = bassSum / bassBins;
+    const bassFactor = avgBassVal / 255.0; // 0.0 to 1.0
+
+    const horizonY = height * 0.45;
+    const centerX = width / 2;
+
+    const speed = (settings.sensitivity || 1.0) * (3.0 + bassFactor * 25.0);
+    const timeSec = Date.now() / 1000;
+    const movementOffset = (timeSec * speed) % 1.0;
+
+    ctx.save();
+    
+    // Vibrant Neon Bloom Effect
+    ctx.shadowBlur = 15;
+    ctx.lineWidth = Math.max(1.5, settings.lineThickness || 2);
+
+    // Number of vertical perspective grid lines
+    const numPerspectiveLines = 16;
+    const numDepthSegments = 16;
+
+    // Outer boundaries
+    const gridWidthFactor = 2.0;
+
+    // Draw perspective vertical lines (from vanishing point spreading outwards)
+    for (let i = 0; i <= numPerspectiveLines; i++) {
+      const xRatio = i / numPerspectiveLines;
+      const lineColor = getDynamicColor(settings.primaryColor, settings.secondaryColor || settings.primaryColor, xRatio);
+      
+      ctx.strokeStyle = lineColor;
+      ctx.shadowColor = lineColor;
+      
+      ctx.beginPath();
+      for (let j = 0; j <= numDepthSegments; j++) {
+        const zProgress = j / numDepthSegments;
+        const zDepth = Math.pow(zProgress, 1.8); // exponential spacing for depth
+        
+        const y = horizonY + zDepth * (height - horizonY);
+        const originalX = centerX + (xRatio - 0.5) * width * gridWidthFactor * zDepth;
+        
+        const freqIndex = Math.floor(Math.abs(xRatio - 0.5) * 2 * (dataLen * 0.5)) % dataLen;
+        const freqAmp = analyserData[freqIndex] || 0;
+        
+        const displacement = -(freqAmp / 255.0) * 45 * Math.sin(j * 0.5 - timeSec * 5.0) * zDepth * (settings.sensitivity || 1.0);
+        
+        if (j === 0) {
+          ctx.moveTo(originalX, y + displacement);
+        } else {
+          ctx.lineTo(originalX, y + displacement);
+        }
+      }
+      ctx.stroke();
+    }
+
+    // Draw horizontal grid lines spacing exponentially with depth, moving forward (modulated by sound wave)
+    const numHorizontalLines = 12;
+    for (let i = 0; i < numHorizontalLines; i++) {
+      const progress = ((i + movementOffset) / numHorizontalLines) % 1.0;
+      const zDepth = Math.pow(progress, 1.8);
+      const y = horizonY + zDepth * (height - horizonY);
+
+      const hSegments = 32;
+      for (let s = 0; s < hSegments; s++) {
+        const xRatio1 = s / hSegments;
+        const xRatio2 = (s + 1) / hSegments;
+        
+        const originalX1 = centerX + (xRatio1 - 0.5) * width * gridWidthFactor * zDepth;
+        const originalX2 = centerX + (xRatio2 - 0.5) * width * gridWidthFactor * zDepth;
+
+        // Sound-wave ripple displacement across the horizontal line using live audio buffer array
+        const freqIndex1 = Math.floor(xRatio1 * (dataLen * 0.5)) % dataLen;
+        const freqIndex2 = Math.floor(xRatio2 * (dataLen * 0.5)) % dataLen;
+        const freqAmp1 = analyserData[freqIndex1] || 0;
+        const freqAmp2 = analyserData[freqIndex2] || 0;
+        
+        // Travel wave modulation using sine wave and signal amplitude
+        const displacement1 = -(freqAmp1 / 255.0) * 65 * zDepth * (settings.sensitivity || 1.0) * Math.sin(xRatio1 * Math.PI * 4.0 - timeSec * 6.0);
+        const displacement2 = -(freqAmp2 / 255.0) * 65 * zDepth * (settings.sensitivity || 1.0) * Math.sin(xRatio2 * Math.PI * 4.0 - timeSec * 6.0);
+
+        const segmentColor = getDynamicColor(settings.primaryColor, settings.secondaryColor || settings.primaryColor, xRatio1);
+        ctx.strokeStyle = segmentColor;
+        ctx.shadowColor = segmentColor;
+
+        ctx.beginPath();
+        ctx.moveTo(originalX1, y + displacement1);
+        ctx.lineTo(originalX2, y + displacement2);
+        ctx.stroke();
+      }
+    }
+
+    // Add a vibrant horizontal glow line at the vanishing horizon point
+    ctx.shadowBlur = 20;
+    const horizonColor = getDynamicColor(settings.primaryColor, settings.secondaryColor || settings.primaryColor, 0.5);
+    ctx.shadowColor = horizonColor;
+    ctx.strokeStyle = horizonColor;
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(0, horizonY);
+    ctx.lineTo(width, horizonY);
+    ctx.stroke();
+
+    ctx.restore();
   }
+
+    ctx.restore();
+  });
 
   ctx.restore();
 
