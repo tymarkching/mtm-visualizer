@@ -25,8 +25,11 @@ export type VisualizerStyle =
   | 'minimalist-pulse-dot'     // Minimalist Floating Pulse Dots (bass, mids, treble)
   | 'modern-sleek'             // Modern Sleek neon wavelines with gradient glow
   | 'frequency-spectrogram'   // Frequency Spectrogram style heatmap
-  | 'three-d-speaker-effects' // 3D Spectrum & Speaker Effects visualizer style
-  | 'tron-neon-grid';         // Tron Futuristic Grid synthwave landscape style
+  | 'cyber-laser-horizon'      // Cyber Laser Horizon lines/beam scanners
+  | 'neon-geometric-ring'      // Neon Geometric Ring broken orbit layouts
+  | 'retro-arcade-stack'       // 80s Retro Arcade Stack equalizer blocks
+  | 'prism-laser-scanner'      // Prism Laser Scanner diagonal coordinate vector sweep
+  | 'floating-wave-echo';      // Floating Wave Echo fluid bezier frames with ghost trails
 
 export type ParticleType =
   | 'stars'
@@ -117,10 +120,15 @@ export interface VisualizerSettings {
   fireworksAltitude?: number;
   fireworksRadius?: number;
   fireworksSparkSize?: number;
-  stylePositions?: { [styleId: string]: { xOffset: number; yOffset: number; verticalScale?: number } };
+  stylePositions?: { [styleId: string]: { xOffset: number; yOffset: number; verticalScale?: number; horizontalScale?: number } };
+  styleSettings?: { [styleId: string]: { xOffset: number; yOffset: number; scale?: number } };
+  barFrequencyCount?: number;
+  glowIntensity?: number;
+  glitchFrequency?: number;
 }
 
 export interface ParticleSettings {
+  enabled?: boolean;
   type: ParticleType;
   count: number;
   minSize: number;
@@ -135,6 +143,10 @@ export interface ParticleSettings {
   emittingDirection?: 'float-up' | 'fall-down' | 'center-explosion';
   movementSpeed?: number;
   beatBurst?: boolean;
+  trailLength?: number;
+  lifetime?: number;
+  sensitivityFloor?: number;
+  audioDriveTarget?: 'sub-bass' | 'vocal' | 'high-end';
 }
 
 export interface TitleOverlaySettings {

@@ -26,6 +26,7 @@ import {
   Save,
   FolderOpen,
   Shuffle,
+  Wand2,
 } from 'lucide-react';
 import {
   VisualizerStyle,
@@ -302,13 +303,34 @@ const PRESETS = [
   }
 ];
 
+function createImpulseResponse(ctx: BaseAudioContext, duration: number, decay: number) {
+  const sampleRate = ctx.sampleRate;
+  const length = sampleRate * duration;
+  const impulse = ctx.createBuffer(2, length, sampleRate);
+  const left = impulse.getChannelData(0);
+  const right = impulse.getChannelData(1);
+
+  for (let i = 0; i < length; i++) {
+    const percent = i / length;
+    const decayFactor = Math.exp(-decay * percent);
+    const randL = Math.random() * 2 - 1;
+    const randR = Math.random() * 2 - 1;
+    left[i] = randL * decayFactor;
+    right[i] = randR * decayFactor;
+  }
+  return impulse;
+}
+
 export default function App() {
   // Navigation Tabs state
-  const [activeTab, setActiveTab] = useState<'track' | 'background' | 'visuals' | 'particles' | 'overlay' | 'text' | 'export'>('track');
+  const [activeTab, setActiveTab] = useState<'track' | 'background' | 'visuals' | 'particles' | 'overlay' | 'text' | 'export' | 'sfx'>('track');
 
   // Core Visualizer Customizations
   const [visuals, setVisuals] = useState<VisualizerSettings>(PRESETS[0].visuals);
-  const [particlesSet, setParticlesSet] = useState<ParticleSettings>(PRESETS[0].particles);
+  const [particlesSet, setParticlesSet] = useState<ParticleSettings>(() => ({
+    ...PRESETS[0].particles,
+    enabled: false,
+  }));
   const [background, setBackground] = useState<BackgroundSettings>(PRESETS[0].background);
   const [titleOverlay, setTitleOverlay] = useState<TitleOverlaySettings>(PRESETS[0].title);
 
@@ -349,6 +371,89 @@ export default function App() {
   }, [overlayImages]);
 
   // Audio Playback & Web Audio API state
+  // SFX Tab States
+  const [sfxEcho, setSfxEcho] = useState<boolean>(false);
+  const [sfxDelayTime, setSfxDelayTime] = useState<number>(0.3);
+  const [sfxFeedback, setSfxFeedback] = useState<number>(0.4);
+  const [sfxReverbSpace, setSfxReverbSpace] = useState<'none' | 'room' | 'hall' | 'cosmic'>('none');
+  const [sfxReverbMix, setSfxReverbMix] = useState<number>(0.3);
+  const [sfxPan, setSfxPan] = useState<number>(0.0);
+  const [sfxAutoPan, setSfxAutoPan] = useState<boolean>(false);
+  const [sfxPlaybackRate, setSfxPlaybackRate] = useState<number>(1.0);
+
+  // SFX Refs
+  const delayNodeRef = useRef<DelayNode | null>(null);
+  const echoWetGainNodeRef = useRef<GainNode | null>(null);
+  const feedbackGainNodeRef = useRef<GainNode | null>(null);
+  const convolverNodeRef = useRef<ConvolverNode | null>(null);
+  const reverbWetGainNodeRef = useRef<GainNode | null>(null);
+  const stereoPannerNodeRef = useRef<StereoPannerNode | null>(null);
+
+  const sfxAutoPanRef = useRef(sfxAutoPan);
+  const sfxPanRef = useRef(sfxPan);
+  useEffect(() => { sfxAutoPanRef.current = sfxAutoPan; }, [sfxAutoPan]);
+  useEffect(() => { sfxPanRef.current = sfxPan; }, [sfxPan]);
+
+  useEffect(() => {
+    if (delayNodeRef.current && audioContextRef.current) {
+      try {
+        delayNodeRef.current.delayTime.setTargetAtTime(sfxDelayTime, audioContextRef.current.currentTime, 0.01);
+      } catch (err) {}
+    }
+  }, [sfxDelayTime]);
+
+  useEffect(() => {
+    if (feedbackGainNodeRef.current && audioContextRef.current) {
+      try {
+        feedbackGainNodeRef.current.gain.setTargetAtTime(sfxFeedback, audioContextRef.current.currentTime, 0.01);
+      } catch (err) {}
+    }
+  }, [sfxFeedback]);
+
+  useEffect(() => {
+    if (echoWetGainNodeRef.current && audioContextRef.current) {
+      try {
+        echoWetGainNodeRef.current.gain.setTargetAtTime(sfxEcho ? 0.5 : 0.0, audioContextRef.current.currentTime, 0.01);
+      } catch (err) {}
+    }
+  }, [sfxEcho]);
+
+  useEffect(() => {
+    if (convolverNodeRef.current && audioContextRef.current) {
+      try {
+        const ctx = audioContextRef.current;
+        if (sfxReverbSpace !== 'none') {
+          const dur = sfxReverbSpace === 'room' ? 0.8 : sfxReverbSpace === 'hall' ? 2.0 : 4.5;
+          const dec = sfxReverbSpace === 'room' ? 5.0 : sfxReverbSpace === 'hall' ? 3.0 : 1.5;
+          convolverNodeRef.current.buffer = createImpulseResponse(ctx, dur, dec);
+        } else {
+          convolverNodeRef.current.buffer = createImpulseResponse(ctx, 0.1, 10.0);
+        }
+      } catch (err) {}
+    }
+    if (reverbWetGainNodeRef.current && audioContextRef.current) {
+      try {
+        reverbWetGainNodeRef.current.gain.setTargetAtTime(sfxReverbSpace !== 'none' ? sfxReverbMix : 0.0, audioContextRef.current.currentTime, 0.01);
+      } catch (err) {}
+    }
+  }, [sfxReverbSpace, sfxReverbMix]);
+
+  useEffect(() => {
+    if (stereoPannerNodeRef.current && audioContextRef.current && !sfxAutoPan) {
+      try {
+        stereoPannerNodeRef.current.pan.setTargetAtTime(sfxPan, audioContextRef.current.currentTime, 0.01);
+      } catch (err) {}
+    }
+  }, [sfxPan, sfxAutoPan]);
+
+  useEffect(() => {
+    if (audioRef.current) {
+      try {
+        audioRef.current.playbackRate = sfxPlaybackRate;
+      } catch (err) {}
+    }
+  }, [sfxPlaybackRate]);
+
   const [audioTrack, setAudioTrack] = useState<AudioTrack>({
     name: 'Dynamic Visualizer Peak',
     artist: 'tymark',
@@ -368,6 +473,10 @@ export default function App() {
   const [eqBass, setEqBass] = useState<number>(0);
   const [eqMid, setEqMid] = useState<number>(0);
   const [eqTreble, setEqTreble] = useState<number>(0);
+
+  // 10-Band Graphic Equalizer Gains (dB, from -12 to +12)
+  // Frequencies: 32Hz, 64Hz, 125Hz, 250Hz, 500Hz, 1kHz, 2kHz, 4kHz, 8kHz, 16kHz
+  const [eqBands, setEqBands] = useState<number[]>([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
 
   // Drag-and-drop state
   const [isDraggingOver, setIsDraggingOver] = useState<boolean>(false);
@@ -410,7 +519,25 @@ export default function App() {
   const bassFilterRef = useRef<BiquadFilterNode | null>(null);
   const midFilterRef = useRef<BiquadFilterNode | null>(null);
   const trebleFilterRef = useRef<BiquadFilterNode | null>(null);
+  const eqFiltersRef = useRef<BiquadFilterNode[]>([]);
   const audioDestinationRef = useRef<MediaStreamAudioDestinationNode | null>(null);
+
+  // Active playing & volume envelope tracking references
+  const isPlayingRef = useRef<boolean>(isPlaying);
+  const isMutedRef = useRef<boolean>(isMuted);
+  const volumeRef = useRef<number>(volume);
+
+  useEffect(() => {
+    isPlayingRef.current = isPlaying;
+  }, [isPlaying]);
+
+  useEffect(() => {
+    isMutedRef.current = isMuted;
+  }, [isMuted]);
+
+  useEffect(() => {
+    volumeRef.current = volume;
+  }, [volume]);
 
   // Interactive Particle Pool ref
   const particlesPoolRef = useRef<RenderParticle[]>([]);
@@ -446,7 +573,10 @@ export default function App() {
   // Apply Preset Config
   const loadPreset = (preset: typeof PRESETS[0]) => {
     setVisuals(preset.visuals);
-    setParticlesSet(preset.particles);
+    setParticlesSet(prev => ({
+      ...preset.particles,
+      enabled: prev.enabled,
+    }));
     setBackground(preset.background);
     setTitleOverlay(preset.title);
 
@@ -501,7 +631,8 @@ export default function App() {
         bass: eqBass,
         mid: eqMid,
         treble: eqTreble,
-      }
+      },
+      eqBands
     };
 
     const jsonString = JSON.stringify(projectData, null, 2);
@@ -592,9 +723,18 @@ export default function App() {
         }
 
         if (project.eq) {
-          if (typeof project.eq.bass === 'number') setEqBass(project.eq.bass);
-          if (typeof project.eq.mid === 'number') setEqMid(project.eq.mid);
-          if (typeof project.eq.treble === 'number') setEqTreble(project.eq.treble);
+          const bass = typeof project.eq.bass === 'number' ? project.eq.bass : 0;
+          const mid = typeof project.eq.mid === 'number' ? project.eq.mid : 0;
+          const treble = typeof project.eq.treble === 'number' ? project.eq.treble : 0;
+          
+          if (project.eqBands && Array.isArray(project.eqBands) && project.eqBands.length === 10) {
+            setEqBands(project.eqBands);
+          } else {
+            setEqBands([bass, bass, bass, mid, mid, mid, treble, treble, treble, treble]);
+          }
+          setEqBass(bass);
+          setEqMid(mid);
+          setEqTreble(treble);
         }
 
         alert("Project restored successfully! All custom visualizers, particulate levels, EQ coefficients, and text overlay states have been load-reconciled.");
@@ -659,22 +799,114 @@ export default function App() {
       analyser.fftSize = visuals.fftSize;
       analyser.smoothingTimeConstant = typeof visuals.smoothing === 'number' ? visuals.smoothing : 0.8;
 
-      // Initialize 3-Band Equalizer filters (adjusts audio before reaching analyser)
-      const bassFilter = ctx.createBiquadFilter();
-      bassFilter.type = 'lowshelf';
-      bassFilter.frequency.value = 200; // Low crossover frequency
-      bassFilter.gain.value = eqBass;
+      // Initialize 10-Band Equalizer Filter Chain
+      const eqFrequencies = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+      const eqFilters: BiquadFilterNode[] = [];
 
-      const midFilter = ctx.createBiquadFilter();
-      midFilter.type = 'peaking';
-      midFilter.frequency.value = 1200; // mid band range
-      midFilter.Q.value = 1.0;
-      midFilter.gain.value = eqMid;
+      for (let i = 0; i < eqFrequencies.length; i++) {
+        const filter = ctx.createBiquadFilter();
+        const freq = eqFrequencies[i];
+        if (i === 0) {
+          filter.type = 'lowshelf';
+          filter.frequency.value = freq;
+        } else if (i === eqFrequencies.length - 1) {
+          filter.type = 'highshelf';
+          filter.frequency.value = freq;
+        } else {
+          filter.type = 'peaking';
+          filter.frequency.value = freq;
+          filter.Q.value = 1.41;
+        }
+        filter.gain.value = eqBands[i];
+        eqFilters.push(filter);
+      }
 
-      const trebleFilter = ctx.createBiquadFilter();
-      trebleFilter.type = 'highshelf';
-      trebleFilter.frequency.value = 4000; // High frequency crossover
-      trebleFilter.gain.value = eqTreble;
+      // Chain all 10 filters sequentially in series
+      for (let i = 0; i < eqFilters.length - 1; i++) {
+        eqFilters[i].connect(eqFilters[i + 1]);
+      }
+
+      // --- ECHO / DELAY BLOCK ---
+      const echoInput = ctx.createGain();
+      echoInput.gain.value = 1.0;
+      const echoDryGain = ctx.createGain();
+      echoDryGain.gain.value = 1.0;
+      const delayNode = ctx.createDelay(1.0);
+      delayNode.delayTime.value = sfxDelayTime;
+      const feedbackGain = ctx.createGain();
+      feedbackGain.gain.value = sfxFeedback;
+      const echoWetGain = ctx.createGain();
+      echoWetGain.gain.value = sfxEcho ? 0.5 : 0.0;
+      const echoOutput = ctx.createGain();
+      echoOutput.gain.value = 1.0;
+
+      echoInput.connect(echoDryGain);
+      echoDryGain.connect(echoOutput);
+      echoInput.connect(delayNode);
+      delayNode.connect(echoWetGain);
+      echoWetGain.connect(echoOutput);
+      delayNode.connect(feedbackGain);
+      feedbackGain.connect(delayNode);
+
+      delayNodeRef.current = delayNode;
+      echoWetGainNodeRef.current = echoWetGain;
+      feedbackGainNodeRef.current = feedbackGain;
+
+      // --- REVERB BLOCK ---
+      const reverbInput = ctx.createGain();
+      reverbInput.gain.value = 1.0;
+      const reverbDryGain = ctx.createGain();
+      reverbDryGain.gain.value = 1.0;
+      const convolver = ctx.createConvolver();
+      if (sfxReverbSpace !== 'none') {
+        const dur = sfxReverbSpace === 'room' ? 0.8 : sfxReverbSpace === 'hall' ? 2.0 : 4.5;
+        const dec = sfxReverbSpace === 'room' ? 5.0 : sfxReverbSpace === 'hall' ? 3.0 : 1.5;
+        convolver.buffer = createImpulseResponse(ctx, dur, dec);
+      } else {
+        convolver.buffer = createImpulseResponse(ctx, 0.1, 10.0);
+      }
+      const reverbWetGain = ctx.createGain();
+      reverbWetGain.gain.value = sfxReverbSpace !== 'none' ? sfxReverbMix : 0.0;
+      const reverbOutput = ctx.createGain();
+      reverbOutput.gain.value = 1.0;
+
+      reverbInput.connect(reverbDryGain);
+      reverbDryGain.connect(reverbOutput);
+      reverbInput.connect(convolver);
+      convolver.connect(reverbWetGain);
+      reverbWetGain.connect(reverbOutput);
+
+      convolverNodeRef.current = convolver;
+      reverbWetGainNodeRef.current = reverbWetGain;
+
+      // --- PANNER BLOCK ---
+      const pannerInput = ctx.createGain();
+      pannerInput.gain.value = 1.0;
+      const pannerOutput = ctx.createGain();
+      pannerOutput.gain.value = 1.0;
+      let pannerNode: StereoPannerNode | null = null;
+      if (ctx.createStereoPanner) {
+        pannerNode = ctx.createStereoPanner();
+        pannerNode.pan.value = sfxAutoPan ? 0.0 : sfxPan;
+        stereoPannerNodeRef.current = pannerNode;
+        pannerInput.connect(pannerNode);
+        pannerNode.connect(pannerOutput);
+      } else {
+        pannerInput.connect(pannerOutput);
+      }
+
+      // --- CONNECT THE SYSTEM IN SERIES ---
+      // 10 EQ filters final node -> Echo Input
+      eqFilters[eqFilters.length - 1].connect(echoInput);
+      
+      // Echo Output -> Reverb Input
+      echoOutput.connect(reverbInput);
+
+      // Reverb Output -> Panner Input
+      reverbOutput.connect(pannerInput);
+
+      // Panner Output -> Analyser
+      pannerOutput.connect(analyser);
 
       // Master Gain for Volume mapping (Fidelity master always at 1.0, with fade effects applied to it)
       const gainNode = ctx.createGain();
@@ -684,15 +916,8 @@ export default function App() {
       const previewGain = ctx.createGain();
       previewGain.gain.value = isMuted ? 0 : volume;
 
-      // Connections: source -> EQ Chain (Bass -> Mid -> Treble)
-      bassFilter.connect(midFilter);
-      midFilter.connect(trebleFilter);
-      
-      // Parallel routing logic to avoid silencing source files from analyser scope:
-      // 1) Route EQ output directly to Analyser (Analysis path)
-      trebleFilter.connect(analyser);
-      // 2) Route EQ output to master Volume gain node (Fidelity path)
-      trebleFilter.connect(gainNode);
+      // Connect AnalyserNode to Master Gain Node
+      analyser.connect(gainNode);
 
       // Route main gain node output to:
       // A) speakers (via PreviewGainNode for dynamic volume/mute slider dampening)
@@ -708,14 +933,17 @@ export default function App() {
       analyserRef.current = analyser;
       gainNodeRef.current = gainNode;
       previewGainNodeRef.current = previewGain;
-      bassFilterRef.current = bassFilter;
-      midFilterRef.current = midFilter;
-      trebleFilterRef.current = trebleFilter;
+      eqFiltersRef.current = eqFilters;
+
+      // Backwards-compatible safety mapping
+      bassFilterRef.current = eqFilters[2]; // 125 Hz
+      midFilterRef.current = eqFilters[5];  // 1000 Hz
+      trebleFilterRef.current = eqFilters[8]; // 8000 Hz
 
       // Connect HTML5 Audio Element source securely (only once)
       if (audioRef.current && !mediaSourceRef.current) {
         const source = ctx.createMediaElementSource(audioRef.current);
-        source.connect(bassFilter);
+        source.connect(eqFilters[0]);
         mediaSourceRef.current = source;
       }
 
@@ -742,24 +970,26 @@ export default function App() {
     }
   }, [visuals.smoothing]);
 
-  // Keep EQ levels aligned with Filter Nodes dynamically
+  // Synchronize eqBass, eqMid, eqTreble with eqBands for compatibility (saving, projects, legacy)
   useEffect(() => {
-    if (bassFilterRef.current && audioContextRef.current) {
-      bassFilterRef.current.gain.setValueAtTime(eqBass, audioContextRef.current.currentTime);
+    if (eqBands.length === 10) {
+      setEqBass(eqBands[2]); // 125Hz
+      setEqMid(eqBands[5]);  // 1kHz
+      setEqTreble(eqBands[8]); // 8kHz
     }
-  }, [eqBass]);
+  }, [eqBands]);
 
+  // Keep 10 EQ Filter levels aligned with nodes dynamically
   useEffect(() => {
-    if (midFilterRef.current && audioContextRef.current) {
-      midFilterRef.current.gain.setValueAtTime(eqMid, audioContextRef.current.currentTime);
+    if (eqFiltersRef.current.length === 10 && audioContextRef.current) {
+      eqBands.forEach((gain, index) => {
+        const filter = eqFiltersRef.current[index];
+        if (filter) {
+          filter.gain.setValueAtTime(gain, audioContextRef.current.currentTime);
+        }
+      });
     }
-  }, [eqMid]);
-
-  useEffect(() => {
-    if (trebleFilterRef.current && audioContextRef.current) {
-      trebleFilterRef.current.gain.setValueAtTime(eqTreble, audioContextRef.current.currentTime);
-    }
-  }, [eqTreble]);
+  }, [eqBands]);
 
   // Keep volume & mute aligned with Node
   useEffect(() => {
@@ -1876,8 +2106,6 @@ export default function App() {
     let animationId: number;
     let lastBeatTime = 0;
     const beatCooldown = 150; // ms
-    let currentShake = 0; // Decaying pixel-based offset representing active shake intensity
-    let dynamicHeavyShake = 0; // Decaying heavy kick/sub-bass speaker shake intensity
 
     // Persistent interpolation arrays for motion smoothing
     let smoothAnalyser: Float32Array | null = null;
@@ -1889,6 +2117,21 @@ export default function App() {
     let backupTimer: any = null;
 
     const renderFrame = () => {
+      // Live dynamic auto pan sweeping
+      if (stereoPannerNodeRef.current) {
+        if (sfxAutoPanRef.current) {
+          try {
+            const time = performance.now() / 1000;
+            const panValue = Math.sin(time * 1.5); // Sweep cleanly back and forth
+            stereoPannerNodeRef.current.pan.value = panValue;
+          } catch (err) {}
+        } else {
+          try {
+            stereoPannerNodeRef.current.pan.value = sfxPanRef.current;
+          } catch (err) {}
+        }
+      }
+
       // Read audio spectrum buffer if audio systems are initialized
       let analyserData = new Uint8Array(visualsRef.current.fftSize / 2);
       let waveformData = new Uint8Array(visualsRef.current.fftSize / 2);
@@ -2011,33 +2254,6 @@ export default function App() {
       const bassReactiveFactor = avgBass / 255;
       const mainBeatReactiveFactor = avgMain / 255;
 
-      // Decaying camera shake
-      currentShake *= 0.88; // decay multiplier
-      if (isBeat && visualsRef.current.cameraShake) {
-        const shakeFactor = visualsRef.current.cameraShake;
-        currentShake += beatIntensity * shakeFactor * 2.0;
-        currentShake = Math.min(currentShake, shakeFactor * 6.0);
-      }
-
-      // 1. Kick/Sub-Bass Heavy Speaker Beat-Induced Camera Shake
-      // Decays at 0.84 on every frame for brief high-energy shakes on kick peaks
-      dynamicHeavyShake *= 0.84;
-      if (isBeat && avgBass > 125) {
-        const shakeMult = typeof visualsRef.current.shakeIntensity === 'number' ? visualsRef.current.shakeIntensity : 1.0;
-        const kickFactor = (avgBass - 120) / 135;
-        // Apply peak transient coordinate offset
-        const impulse = Math.max(0.15, kickFactor) * 20.0 * shakeMult;
-        dynamicHeavyShake = Math.min(40.0, dynamicHeavyShake + impulse);
-      }
-
-      // 2. Intensity-Based Shake: continuous subtle random translation triggered by frequency bins (avgBass/avgMain)
-      let continuousShakeOffset = 0;
-      if (visualsRef.current.intensityBasedShake) {
-        const shakeMult = typeof visualsRef.current.shakeIntensity === 'number' ? visualsRef.current.shakeIntensity : 1.0;
-        const intensityFactor = avgBass / 255.0; // 0.0 to 1.0 level
-        continuousShakeOffset = intensityFactor * 7.5 * shakeMult; // continuous subtle jitter
-      }
-
       ctx.save();
 
       // Global Canvas Rotation (Subtle persistent rotation of the entire stage)
@@ -2047,23 +2263,6 @@ export default function App() {
         ctx.translate(canvas.width / 2, canvas.height / 2);
         ctx.rotate(rad);
         ctx.translate(-canvas.width / 2, -canvas.height / 2);
-      }
-
-      // Resolve combined active camera shake:
-      // Includes classic shake, heavy kick physical snap, and continuous intensity-based jitter
-      const activeShake = currentShake + (dynamicHeavyShake > 0.1 ? dynamicHeavyShake : 0) + continuousShakeOffset;
-      if (activeShake > 0.1) {
-        const dx = (Math.random() - 0.5) * activeShake;
-        const dy = (Math.random() - 0.5) * activeShake;
-        ctx.translate(dx, dy);
-      }
-
-      // Camera Beat-Shake Feature (Original 2D helper retained if enabled alongside others)
-      if (visualsRef.current.enableCameraBeatShake && avgBass > 140) {
-        const shakePower = ((avgBass - 140) / (255 - 140)) * 12;
-        const randomX = (Math.random() - 0.5) * shakePower;
-        const randomY = (Math.random() - 0.5) * shakePower;
-        ctx.translate(randomX, randomY);
       }
 
       let activeBgBeatPulse = 0;
@@ -2094,15 +2293,68 @@ export default function App() {
       );
 
       // 2. Compute and Draw Particles
-      particlesPoolRef.current = updateParticles(
-        particlesPoolRef.current,
-        particlesSetRef.current,
-        canvas.width,
-        canvas.height,
-        isBeat,
-        beatIntensity
-      );
-      drawParticles(ctx, particlesPoolRef.current, particlesSetRef.current, isBeat, beatIntensity);
+      if (particlesSetRef.current?.enabled) {
+        let bassIntensity = bassReactiveFactor; // Default to low range energy
+
+        // Section 3: Audio Band Link (Dropdown Select)
+        // Options: 'sub-bass' (Default - tracks low range), 'vocal' (Tracks center), 'high-end' (Tracks treble)
+        if (particlesSetRef.current?.audioDriveTarget === 'vocal') {
+          if (analyserData && analyserData.length > 0) {
+            const vocalStart = Math.floor(analyserData.length * 0.15);
+            const vocalEnd = Math.floor(analyserData.length * 0.55);
+            let vocalSum = 0;
+            let vocalCount = 0;
+            for (let i = vocalStart; i < vocalEnd; i++) {
+              vocalSum += analyserData[i];
+              vocalCount++;
+            }
+            bassIntensity = (vocalSum / Math.max(1, vocalCount)) / 255;
+          } else {
+            bassIntensity = mainBeatReactiveFactor;
+          }
+        } else if (particlesSetRef.current?.audioDriveTarget === 'high-end') {
+          if (analyserData && analyserData.length > 0) {
+            const highStart = Math.floor(analyserData.length * 0.55);
+            const highEnd = Math.floor(analyserData.length * 0.95);
+            let highSum = 0;
+            let highCount = 0;
+            for (let i = highStart; i < highEnd; i++) {
+              highSum += analyserData[i];
+              highCount++;
+            }
+            bassIntensity = (highSum / Math.max(1, highCount)) / 255;
+          } else {
+            bassIntensity = 0.15;
+          }
+        }
+        
+        // Calculate dynamic overall volume envelope coefficient
+        let overallVolume = 0;
+        if (isPlayingRef.current && !isMutedRef.current) {
+          if (analyserData && analyserData.length > 0) {
+            let sum = 0;
+            for (let i = 0; i < analyserData.length; i++) {
+              sum += analyserData[i];
+            }
+            overallVolume = (sum / analyserData.length) / 255;
+          }
+          // Factor in master audio track volume ref
+          overallVolume *= volumeRef.current;
+        } else {
+          overallVolume = 0;
+        }
+
+        particlesPoolRef.current = updateParticles(
+          particlesPoolRef.current,
+          particlesSetRef.current,
+          canvas.width,
+          canvas.height,
+          isBeat,
+          bassIntensity,
+          overallVolume
+        );
+        drawParticles(ctx, particlesPoolRef.current, particlesSetRef.current, isBeat, bassIntensity);
+      }
 
       // --- SECTION 3: AUDIO-REACTIVE BEATER BURSTS / ADVANCED FIREWORKS SYSTEM ---
       const interpolateColor = (color1: string, color2: string, ratio: number): string => {
@@ -2127,7 +2379,7 @@ export default function App() {
         }
       };
 
-      const enableFireworks = visualsRef.current.enableFireworks ?? true;
+      const enableFireworks = visualsRef.current.enableFireworks ?? false;
 
       if (enableFireworks) {
         // Rocket launcher: triggers on on-beat bass cuts of high intensity
@@ -2676,7 +2928,7 @@ export default function App() {
         ctx.restore();
       }
 
-      // Restore camera shake transformation state
+      // Restore global canvas state
       ctx.restore();
     };
 
@@ -3596,6 +3848,17 @@ export default function App() {
               <span>Particles</span>
             </button>
             <button
+              onClick={() => setActiveTab('sfx')}
+              className={`flex-1 py-3 px-3.5 flex items-center justify-center space-x-2 border-b-2 font-medium whitespace-nowrap transition-all cursor-pointer ${
+                activeTab === 'sfx'
+                  ? 'border-blue-600 text-white bg-zinc-900/60 font-semibold'
+                  : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/40'
+              }`}
+            >
+              <Wand2 className="w-3.5 h-3.5" />
+              <span>FX Studio</span>
+            </button>
+            <button
               onClick={() => setActiveTab('overlay')}
               className={`flex-1 py-3 px-3.5 flex items-center justify-center space-x-2 border-b-2 font-medium whitespace-nowrap transition-all cursor-pointer ${
                 activeTab === 'overlay'
@@ -3775,19 +4038,17 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Core 3-Band Equalizer Deck */}
-                <div className="bg-zinc-900 border border-zinc-850 p-4 rounded-lg space-y-4">
+                {/* Core 10-Band Equalizer Deck */}
+                <div className="bg-zinc-950/40 p-4 rounded-xl border border-zinc-900/50 space-y-4">
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider font-mono flex items-center space-x-2">
                       <Sliders className="w-3.5 h-3.5 text-blue-500" />
-                      <span>3-Band Studio EQ</span>
+                      <span>10-BAND PRO EQUALIZER</span>
                     </span>
-                    {(eqBass !== 0 || eqMid !== 0 || eqTreble !== 0) && (
+                    {eqBands.some(v => v !== 0) && (
                       <button
                         onClick={() => {
-                          setEqBass(0);
-                          setEqMid(0);
-                          setEqTreble(0);
+                          setEqBands([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
                         }}
                         className="text-[9px] font-mono text-blue-500 hover:text-blue-400 transition-colors cursor-pointer"
                       >
@@ -3796,70 +4057,46 @@ export default function App() {
                     )}
                   </div>
 
-                  <div className="space-y-3.5">
-                    {/* Bass scale */}
-                    <div className="space-y-1">
-                      <div className="flex justify-between font-mono text-[9px] text-zinc-400">
-                        <span>BASS (200 HZ)</span>
-                        <span className="text-zinc-200 font-semibold">{eqBass > 0 ? `+${eqBass}` : eqBass} dB</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="-12"
-                        max="12"
-                        step="1"
-                        value={eqBass}
-                        onChange={(e) => {
-                          initAudioSystem();
-                          setEqBass(parseInt(e.target.value));
-                        }}
-                        className="w-full accent-blue-600 cursor-pointer"
-                      />
-                    </div>
-
-                    {/* Mids peaking scale */}
-                    <div className="space-y-1">
-                      <div className="flex justify-between font-mono text-[9px] text-zinc-400">
-                        <span>MID (1.2 KHZ)</span>
-                        <span className="text-zinc-200 font-semibold">{eqMid > 0 ? `+${eqMid}` : eqMid} dB</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="-12"
-                        max="12"
-                        step="1"
-                        value={eqMid}
-                        onChange={(e) => {
-                          initAudioSystem();
-                          setEqMid(parseInt(e.target.value));
-                        }}
-                        className="w-full accent-blue-600 cursor-pointer"
-                      />
-                    </div>
-
-                    {/* Treble high peaking scale */}
-                    <div className="space-y-1">
-                      <div className="flex justify-between font-mono text-[9px] text-zinc-400">
-                        <span>TREBLE (4 KHZ)</span>
-                        <span className="text-zinc-200 font-semibold">{eqTreble > 0 ? `+${eqTreble}` : eqTreble} dB</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="-12"
-                        max="12"
-                        step="1"
-                        value={eqTreble}
-                        onChange={(e) => {
-                          initAudioSystem();
-                          setEqTreble(parseInt(e.target.value));
-                        }}
-                        className="w-full accent-blue-600 cursor-pointer"
-                      />
-                    </div>
+                  <div className="grid grid-cols-2 gap-2.5">
+                    {[32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000].map((freq, idx) => {
+                      const val = eqBands[idx];
+                      const fullLabels: { [f: number]: string } = {
+                        32: '32 Hz (Sub-Bass Rumble)',
+                        64: '64 Hz (Kick Drum Thump)',
+                        125: '125 Hz (Bass Warmth)',
+                        250: '250 Hz (Vocal Body)',
+                        500: '500 Hz (Instrument Clarity)',
+                        1000: '1 kHz (Vocal Presence)',
+                        2000: '2 kHz (Instrument Snap)',
+                        4000: '4 kHz (Treble Sharpness)',
+                        8000: '8 kHz (Treble Sizzle)',
+                        16000: '16 kHz (Air Sparkle)'
+                      };
+                      return (
+                        <div key={freq} className="space-y-1 bg-zinc-900/20 p-2 rounded border border-zinc-900/40">
+                          <div className="flex justify-between font-mono text-[9px]">
+                            <span className="text-zinc-300 font-semibold">{fullLabels[freq]}</span>
+                            <span className="text-blue-400 font-bold">{val > 0 ? `+${val}` : val} dB</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="-12"
+                            max="12"
+                            step="1"
+                            value={val}
+                            onChange={(e) => {
+                              initAudioSystem();
+                              const newBands = [...eqBands];
+                              newBands[idx] = parseInt(e.target.value);
+                              setEqBands(newBands);
+                            }}
+                            className="w-full accent-blue-600 h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none mt-1"
+                          />
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
-
-                <hr className="border-zinc-900" />
 
                 {/* VISIBLE TITLE TEXT OVERLAYS SETTINGS */}
                 <div className="space-y-4">
@@ -4010,17 +4247,21 @@ export default function App() {
                         { id: 'minimalist-pulse-dot', name: 'Minimalist Pulse Dots' },
                         { id: 'modern-sleek', name: 'Modern Sleek' },
                         { id: 'frequency-spectrogram', name: 'Spectrogram Waterfall' },
-                        { id: 'three-d-speaker-effects', name: '3D Speakers & Floor' },
-                        { id: 'tron-neon-grid', name: 'Tron Neon Grid' }
+                        { id: 'cyber-laser-horizon', name: 'Cyber Laser Horizon' },
+                        { id: 'neon-geometric-ring', name: 'Neon Geometric Ring' },
+                        { id: 'retro-arcade-stack', name: 'Retro Arcade Stack' },
+                        { id: 'prism-laser-scanner', name: 'Prism Laser Scanner' },
+                        { id: 'floating-wave-echo', name: 'Floating Wave Echo' }
                       ].map((item) => {
                         const active = visuals.activeStyles && visuals.activeStyles.length > 0
                           ? visuals.activeStyles.includes(item.id as VisualizerStyle)
                           : visuals.style === item.id;
                         
-                        // Style specific position offsets and vertical scale with fallback values
-                        const styleX = visuals.stylePositions?.[item.id]?.xOffset ?? (visuals.waveformOffsetX !== undefined ? visuals.waveformOffsetX : 50);
-                        const styleY = visuals.stylePositions?.[item.id]?.yOffset ?? (visuals.waveformOffsetY !== undefined ? visuals.waveformOffsetY : (visuals.placement === 'top' ? 25 : visuals.placement === 'bottom' ? 75 : 50));
-                        const styleScale = visuals.stylePositions?.[item.id]?.verticalScale ?? visuals.sensitivity;
+                        // Style specific position offsets, vertical scale and horizontal scale with fallback values
+                        const styleX = visuals.styleSettings?.[item.id]?.xOffset ?? visuals.stylePositions?.[item.id]?.xOffset ?? (visuals.waveformOffsetX !== undefined ? visuals.waveformOffsetX : 50);
+                        const styleY = visuals.styleSettings?.[item.id]?.yOffset ?? visuals.stylePositions?.[item.id]?.yOffset ?? (visuals.waveformOffsetY !== undefined ? visuals.waveformOffsetY : (visuals.placement === 'top' ? 25 : visuals.placement === 'bottom' ? 75 : 50));
+                        const styleScale = visuals.styleSettings?.[item.id]?.scale ?? visuals.stylePositions?.[item.id]?.verticalScale ?? visuals.sensitivity;
+                        const styleHorizontalScale = visuals.stylePositions?.[item.id]?.horizontalScale ?? visuals.lineThickness;
 
                         return (
                           <div key={item.id} className="bg-zinc-950/25 rounded-lg border border-zinc-900/50 p-1 space-y-1">
@@ -4081,11 +4322,19 @@ export default function App() {
                                         positions[item.id] = {
                                           xOffset: val,
                                           yOffset: positions[item.id]?.yOffset ?? styleY,
-                                          verticalScale: positions[item.id]?.verticalScale ?? styleScale
+                                          verticalScale: positions[item.id]?.verticalScale ?? styleScale,
+                                          horizontalScale: positions[item.id]?.horizontalScale ?? styleHorizontalScale
+                                        };
+                                        const settingsMap = prev.styleSettings ? { ...prev.styleSettings } : {};
+                                        settingsMap[item.id] = {
+                                          xOffset: val,
+                                          yOffset: settingsMap[item.id]?.yOffset ?? styleY,
+                                          scale: settingsMap[item.id]?.scale ?? styleScale
                                         };
                                         return {
                                           ...prev,
-                                          stylePositions: positions
+                                          stylePositions: positions,
+                                          styleSettings: settingsMap
                                         };
                                       });
                                     }}
@@ -4110,11 +4359,19 @@ export default function App() {
                                         positions[item.id] = {
                                           xOffset: positions[item.id]?.xOffset ?? styleX,
                                           yOffset: val,
-                                          verticalScale: positions[item.id]?.verticalScale ?? styleScale
+                                          verticalScale: positions[item.id]?.verticalScale ?? styleScale,
+                                          horizontalScale: positions[item.id]?.horizontalScale ?? styleHorizontalScale
+                                        };
+                                        const settingsMap = prev.styleSettings ? { ...prev.styleSettings } : {};
+                                        settingsMap[item.id] = {
+                                          xOffset: settingsMap[item.id]?.xOffset ?? styleX,
+                                          yOffset: val,
+                                          scale: settingsMap[item.id]?.scale ?? styleScale
                                         };
                                         return {
                                           ...prev,
-                                          stylePositions: positions
+                                          stylePositions: positions,
+                                          styleSettings: settingsMap
                                         };
                                       });
                                     }}
@@ -4140,7 +4397,46 @@ export default function App() {
                                         positions[item.id] = {
                                           xOffset: positions[item.id]?.xOffset ?? styleX,
                                           yOffset: positions[item.id]?.yOffset ?? styleY,
-                                          verticalScale: val
+                                          verticalScale: val,
+                                          horizontalScale: positions[item.id]?.horizontalScale ?? styleHorizontalScale
+                                        };
+                                        const settingsMap = prev.styleSettings ? { ...prev.styleSettings } : {};
+                                        settingsMap[item.id] = {
+                                          xOffset: settingsMap[item.id]?.xOffset ?? styleX,
+                                          yOffset: settingsMap[item.id]?.yOffset ?? styleY,
+                                          scale: val
+                                        };
+                                        return {
+                                          ...prev,
+                                          stylePositions: positions,
+                                          styleSettings: settingsMap
+                                        };
+                                      });
+                                    }}
+                                    className="w-full h-1 bg-zinc-950 rounded appearance-none cursor-pointer accent-indigo-500"
+                                  />
+                                </div>
+
+                                <div className="space-y-1">
+                                  <div className="flex justify-between items-center text-[9px] font-mono">
+                                    <span className="text-zinc-500 uppercase font-bold text-sky-400">Horizontal Scale / Thickness</span>
+                                    <span className="text-indigo-400 font-semibold font-mono">{styleHorizontalScale}px</span>
+                                  </div>
+                                  <input
+                                    type="range"
+                                    min="1"
+                                    max="12"
+                                    step="1"
+                                    value={styleHorizontalScale}
+                                    onChange={(e) => {
+                                      const val = parseInt(e.target.value);
+                                      setVisuals(prev => {
+                                        const positions = prev.stylePositions ? { ...prev.stylePositions } : {};
+                                        positions[item.id] = {
+                                          xOffset: positions[item.id]?.xOffset ?? styleX,
+                                          yOffset: positions[item.id]?.yOffset ?? styleY,
+                                          verticalScale: positions[item.id]?.verticalScale ?? styleScale,
+                                          horizontalScale: val
                                         };
                                         return {
                                           ...prev,
@@ -4159,91 +4455,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  {/* --- SPECIAL 3D SPECTRUM & SPEAKER EFFECTS CATEGORY SECTION --- */}
-                  <div className="bg-gradient-to-r from-indigo-950/20 to-purple-950/20 border border-indigo-500/20 p-3 rounded-lg space-y-3 mt-1 shadow-sm">
-                    <div className="flex items-center justify-between">
-                      <div className="space-y-0.5 text-left">
-                        <h4 className="text-[11px] font-bold text-indigo-300 uppercase tracking-wider font-mono">3D Spectrum & Speaker Effects</h4>
-                        <p className="text-[9.5px] text-zinc-400 leading-tight">Dual physical speaker subwoofers and projected perspective landscape.</p>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          setVisuals(prev => {
-                            const currentActive = prev.activeStyles && prev.activeStyles.length > 0
-                              ? [...prev.activeStyles]
-                              : [prev.style];
-                            const index = currentActive.indexOf('three-d-speaker-effects');
-                            if (index > -1) {
-                              if (currentActive.length > 1) {
-                                currentActive.splice(index, 1);
-                              }
-                            } else {
-                              currentActive.push('three-d-speaker-effects');
-                            }
-                            return {
-                              ...prev,
-                              style: currentActive[0] || 'three-d-speaker-effects',
-                              activeStyles: currentActive
-                            };
-                          });
-                        }}
-                        className={`text-[10px] px-2.5 py-1 rounded font-semibold transition-all shrink-0 ${
-                          ((visuals.activeStyles && visuals.activeStyles.includes('three-d-speaker-effects')) || visuals.style === 'three-d-speaker-effects')
-                            ? 'bg-indigo-600 text-white shadow-md shadow-indigo-600/30'
-                            : 'bg-[#0a0a0f] border border-gray-800 text-gray-300 hover:text-white'
-                        }`}
-                      >
-                        {((visuals.activeStyles && visuals.activeStyles.includes('three-d-speaker-effects')) || visuals.style === 'three-d-speaker-effects') ? 'ACTIVE' : 'ACTIVATE'}
-                      </button>
-                    </div>
 
-                    <div className="space-y-3 pt-2.5 border-t border-indigo-950/40">
-                      {/* Speaker Bass Response Slider */}
-                      <div className="space-y-1 text-left">
-                        <div className="flex justify-between items-center text-[10px] font-mono">
-                          <span className="text-zinc-300 font-bold uppercase">Speaker Bass Response</span>
-                          <span className="text-indigo-400 font-semibold font-mono">
-                            {typeof visuals.speakerBassResponse === 'number' ? visuals.speakerBassResponse.toFixed(2) : '1.00'}x
-                          </span>
-                        </div>
-                        <input
-                          type="range"
-                          min="0.0"
-                          max="2.0"
-                          step="0.05"
-                          value={typeof visuals.speakerBassResponse === 'number' ? visuals.speakerBassResponse : 1.0}
-                          onChange={(e) => setVisuals(prev => ({ ...prev, speakerBassResponse: parseFloat(e.target.value) }))}
-                          className="w-full h-1 bg-zinc-950 rounded-lg appearance-none cursor-pointer accent-indigo-500"
-                        />
-                        <p className="text-[9px] text-zinc-500 font-sans leading-normal">
-                          Controls the pulse scaling physical travel and vibration amplitude of dual subwoofers
-                        </p>
-                      </div>
-
-                      {/* Shake Intensity Slider */}
-                      <div className="space-y-1 text-left">
-                        <div className="flex justify-between items-center text-[10px] font-mono">
-                          <span className="text-zinc-300 font-bold uppercase">Shake Intensity</span>
-                          <span className="text-purple-400 font-semibold font-mono">
-                            {typeof visuals.shakeIntensity === 'number' ? visuals.shakeIntensity.toFixed(2) : '1.00'}x
-                          </span>
-                        </div>
-                        <input
-                          type="range"
-                          min="0.0"
-                          max="2.0"
-                          step="0.05"
-                          value={typeof visuals.shakeIntensity === 'number' ? visuals.shakeIntensity : 1.0}
-                          onChange={(e) => setVisuals(prev => ({ ...prev, shakeIntensity: parseFloat(e.target.value) }))}
-                          className="w-full h-1 bg-zinc-950 rounded-lg appearance-none cursor-pointer accent-purple-500"
-                        />
-                        <p className="text-[9px] text-zinc-500 font-sans leading-normal">
-                          Controls the physical viewport coordinate shake amplitude of beat-induced kick transients
-                        </p>
-                      </div>
-                    </div>
-                  </div>
 
                   {/* Waveform Placement Selector */}
                   <div className="space-y-1.5">
@@ -4588,6 +4800,22 @@ export default function App() {
                         value={visuals.glowStrength}
                         onChange={(e) => setVisuals(prev => ({ ...prev, glowStrength: parseInt(e.target.value) }))}
                         className="w-full accent-blue-600"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="flex justify-between font-mono text-[9px] text-zinc-400 font-bold">
+                        <span>DIGITAL GLITCH FREQUENCY</span>
+                        <span className="text-white font-semibold">{visuals.glitchFrequency !== undefined ? visuals.glitchFrequency : 0} %</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="1"
+                        value={visuals.glitchFrequency !== undefined ? visuals.glitchFrequency : 0}
+                        onChange={(e) => setVisuals(prev => ({ ...prev, glitchFrequency: parseInt(e.target.value) }))}
+                        className="w-full accent-blue-600 cursor-pointer"
                       />
                     </div>
 
@@ -5371,9 +5599,30 @@ export default function App() {
                 </div>
 
                 <div className="space-y-4">
-                  {/* Selector particle type */}
-                  <div>
-                    <label className="block text-[10px] font-semibold text-zinc-400 mb-1.5 font-mono uppercase">Particle Visual Template</label>
+                  {/* Master Switch UI */}
+                  <div className="flex items-center justify-between p-3.5 rounded-xl bg-blue-600/5 border border-blue-500/15 shadow-sm shadow-blue-500/5">
+                    <div>
+                      <span className="font-bold text-blue-400 block font-sans text-xs uppercase tracking-wide">Enable Particle Engine</span>
+                      <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Activate or deactivate live floating physics particles on stream</span>
+                    </div>
+                    <button
+                      type="button"
+                      id="toggle-particle-engine-master"
+                      onClick={() => setParticlesSet(prev => ({ ...prev, enabled: !prev.enabled }))}
+                      className={`relative w-9 h-5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                        particlesSet.enabled ? 'bg-blue-600' : 'bg-zinc-800'
+                      }`}
+                    >
+                      <span className={`absolute top-[2.5px] left-[2.5px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                        particlesSet.enabled ? 'translate-x-4' : 'translate-x-0'
+                      }`} />
+                    </button>
+                  </div>
+
+                  <div className={!particlesSet.enabled ? 'opacity-40 pointer-events-none transition-all space-y-4' : 'transition-all space-y-4'}>
+                    {/* Selector particle type */}
+                    <div>
+                      <label className="block text-[10px] font-semibold text-zinc-400 mb-1.5 font-mono uppercase">Particle Visual Template</label>
                     <div className="grid grid-cols-3 gap-2 text-xs">
                       {[
                         { id: 'stars', name: 'Classic Stars' },
@@ -5534,6 +5783,79 @@ export default function App() {
                       />
                     </div>
 
+                    {/* Particle Trail Length */}
+                    <div className="space-y-1 bg-zinc-950/40 p-2 rounded border border-zinc-900">
+                      <div className="flex justify-between font-mono text-[9px] text-zinc-400">
+                        <span>Particle Trail Length</span>
+                        <span className="text-white font-semibold">{(particlesSet.trailLength ?? 0)} frames</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="20"
+                        step="1"
+                        value={particlesSet.trailLength ?? 0}
+                        onChange={(e) => setParticlesSet(prev => ({ ...prev, trailLength: parseInt(e.target.value) }))}
+                        className="w-full accent-blue-600 cursor-pointer"
+                      />
+                      {(particlesSet.trailLength ?? 0) > 0 &&
+                        !(particlesSet.type === 'stars' || particlesSet.type === 'sparks' || particlesSet.type === 'spark-stars') && (
+                          <div className="text-[8px] text-zinc-500 leading-tight">
+                            * Trails only render for Sparks, Stars, and Spark Stars.
+                          </div>
+                        )}
+                    </div>
+
+                    {/* Particle Lifetime */}
+                    <div className="space-y-1 bg-zinc-950/40 p-2 rounded border border-zinc-900">
+                      <div className="flex justify-between font-mono text-[9px] text-zinc-400">
+                        <span>Particle Lifetime</span>
+                        <span className="text-white font-semibold">{(particlesSet.lifetime ?? 3.0).toFixed(1)}s</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="1.0"
+                        max="10.0"
+                        step="0.5"
+                        value={particlesSet.lifetime ?? 3.0}
+                        onChange={(e) => setParticlesSet(prev => ({ ...prev, lifetime: parseFloat(e.target.value) }))}
+                        className="w-full accent-blue-600 cursor-pointer"
+                      />
+                    </div>
+
+                    {/* Audio Sensitivity Floor */}
+                    <div className="space-y-1 bg-zinc-950/40 p-2 rounded border border-zinc-900">
+                      <div className="flex justify-between font-mono text-[9px] text-zinc-400">
+                        <span>Sensitivity Floor</span>
+                        <span className="text-white font-semibold">{(particlesSet.sensitivityFloor ?? 0.0).toFixed(1)}x</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0.0"
+                        max="1.0"
+                        step="0.1"
+                        value={particlesSet.sensitivityFloor ?? 0.0}
+                        onChange={(e) => setParticlesSet(prev => ({ ...prev, sensitivityFloor: parseFloat(e.target.value) }))}
+                        className="w-full accent-blue-600 cursor-pointer"
+                      />
+                    </div>
+
+                    {/* Audio Drive Target */}
+                    <div className="space-y-1 bg-zinc-950/40 p-2 rounded border border-zinc-900">
+                      <div className="flex justify-between font-mono text-[9px] text-zinc-400">
+                        <span>Audio Drive Target</span>
+                      </div>
+                      <select
+                        value={particlesSet.audioDriveTarget || 'sub-bass'}
+                        onChange={(e) => setParticlesSet(prev => ({ ...prev, audioDriveTarget: e.target.value as any }))}
+                        className="w-full bg-zinc-950 border border-zinc-850 rounded px-2 py-1 text-zinc-300 font-sans text-[11px] cursor-pointer focus:outline-none focus:ring-1 focus:ring-blue-500"
+                      >
+                        <option value="sub-bass">Sub-Bass & Kicks</option>
+                        <option value="vocal">Vocal Midrange</option>
+                        <option value="high-end">High-End Sparkle</option>
+                      </select>
+                    </div>
+
                     <div className="flex items-center justify-between p-2.5 bg-zinc-950/60 rounded border border-zinc-850">
                       <div>
                         <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Beat-Reactive Pulse</span>
@@ -5590,14 +5912,33 @@ export default function App() {
 
                     <div className="flex items-center justify-between">
                       <span className="text-[10px] text-zinc-400 font-mono">Particle Glow Tint</span>
-                      <div className="flex items-center space-x-2 bg-zinc-950 border border-zinc-800 rounded px-2 py-1">
-                        <input
-                          type="color"
-                          value={particlesSet.color}
-                          onChange={(e) => setParticlesSet(prev => ({ ...prev, color: e.target.value }))}
-                          className="w-6 h-6 border-0 bg-transparent cursor-pointer"
-                        />
-                        <span className="font-mono text-[9px] text-zinc-400">{particlesSet.color.toUpperCase()}</span>
+                      <div className="flex items-center space-x-2">
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const neonPalette = [
+                              '#00ffff', '#ff00ff', '#00ff00', '#ff007f',
+                              '#ffaa00', '#00ffcc', '#7a22ff', '#ff3300',
+                              '#ffff00', '#00ff66', '#4d4dff', '#ff0055'
+                            ];
+                            const randomColor = neonPalette[Math.floor(Math.random() * neonPalette.length)];
+                            setParticlesSet(prev => ({ ...prev, color: randomColor }));
+                          }}
+                          className="flex items-center gap-1 px-1.5 py-1 text-[9px] font-medium font-sans border border-zinc-800 rounded bg-[#030305] text-zinc-400 hover:text-white hover:border-zinc-700 transition-all cursor-pointer"
+                          title="Generate a random neon color"
+                        >
+                          <Shuffle className="w-2.5 h-2.5 text-blue-400" />
+                          <span>Randomize</span>
+                        </button>
+                        <div className="flex items-center space-x-1.5 bg-zinc-950 border border-zinc-800 rounded px-1.5 py-1">
+                          <input
+                            type="color"
+                            value={particlesSet.color}
+                            onChange={(e) => setParticlesSet(prev => ({ ...prev, color: e.target.value }))}
+                            className="w-5 h-5 border-0 bg-transparent cursor-pointer"
+                          />
+                          <span className="font-mono text-[9px] text-zinc-400">{particlesSet.color.toUpperCase()}</span>
+                        </div>
                       </div>
                     </div>
 
@@ -5610,18 +5951,18 @@ export default function App() {
                         </div>
                         <button
                           type="button"
-                          onClick={() => setVisuals(prev => ({ ...prev, enableFireworks: !(prev.enableFireworks ?? true) }))}
+                          onClick={() => setVisuals(prev => ({ ...prev, enableFireworks: !(prev.enableFireworks ?? false) }))}
                           className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
-                            (visuals.enableFireworks ?? true) ? 'bg-indigo-600' : 'bg-zinc-800'
+                            (visuals.enableFireworks ?? false) ? 'bg-indigo-600' : 'bg-zinc-800'
                           }`}
                         >
                           <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
-                            (visuals.enableFireworks ?? true) ? 'translate-x-3.5' : 'translate-x-0'
+                            (visuals.enableFireworks ?? false) ? 'translate-x-3.5' : 'translate-x-0'
                           }`} />
                         </button>
                       </div>
 
-                      {(visuals.enableFireworks ?? true) && (
+                      {(visuals.enableFireworks ?? false) && (
                         <div className="space-y-3 bg-[#0a0a0f]/40 p-2.5 rounded-lg border border-zinc-900/60 transition-all">
                           {/* Flight Height / Altitude */}
                           <div className="space-y-1">
@@ -5686,6 +6027,8 @@ export default function App() {
                       )}
                     </div>
 
+                  </div>
+                  {/* Closing tag for the opacity/interaction container */}
                   </div>
                 </div>
               </div>
@@ -6561,6 +6904,289 @@ export default function App() {
                       })}
                     </div>
                   </div>
+                </div>
+              </div>
+            )}
+
+            {/* SFX Studio / FX Studio Tab */}
+            {activeTab === 'sfx' && (
+              <div className="space-y-6">
+                <div>
+                  <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider font-mono flex items-center space-x-1.5">
+                    <Wand2 className="w-4 h-4 text-indigo-400 animate-pulse" />
+                    <span>FX Studio & DSP Processor Chain</span>
+                  </h3>
+                  <p className="text-[11px] text-zinc-500 mt-1 font-sans">
+                    Flesh out track atmospheres with serial DSP processing nodes connected directly to the real-time analyzer context.
+                  </p>
+                </div>
+
+                {/* Core 10-Band Equalizer Deck */}
+                <div className="bg-zinc-950/40 p-4 rounded-xl border border-zinc-900/50 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider font-mono flex items-center space-x-2">
+                      <Sliders className="w-3.5 h-3.5 text-indigo-400" />
+                      <span>10-BAND PRO EQUALIZER</span>
+                    </span>
+                    {eqBands.some(v => v !== 0) && (
+                      <button
+                        onClick={() => {
+                          setEqBands([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+                        }}
+                        className="text-[9px] font-mono text-indigo-400 hover:text-indigo-300 transition-colors cursor-pointer"
+                      >
+                        RESET
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-2 gap-2.5">
+                    {[32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000].map((freq, idx) => {
+                      const val = eqBands[idx];
+                      const fullLabels: { [f: number]: string } = {
+                        32: '32 Hz (Sub-Bass Rumble)',
+                        64: '64 Hz (Kick Drum Thump)',
+                        125: '125 Hz (Bass Warmth)',
+                        250: '250 Hz (Vocal Body)',
+                        500: '500 Hz (Instrument Clarity)',
+                        1000: '1 kHz (Vocal Presence)',
+                        2000: '2 kHz (Instrument Snap)',
+                        4000: '4 kHz (Treble Sharpness)',
+                        8000: '8 kHz (Treble Sizzle)',
+                        16000: '16 kHz (Air Sparkle)'
+                      };
+                      return (
+                        <div key={freq} className="space-y-1 bg-zinc-900/20 p-2 rounded border border-zinc-900/40">
+                          <div className="flex justify-between font-mono text-[9px]">
+                            <span className="text-zinc-300 font-semibold">{fullLabels[freq]}</span>
+                            <span className="text-indigo-400 font-bold">{val > 0 ? `+${val}` : val} dB</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="-12"
+                            max="12"
+                            step="1"
+                            value={val}
+                            onChange={(e) => {
+                              initAudioSystem();
+                              const newBands = [...eqBands];
+                              newBands[idx] = parseInt(e.target.value);
+                              setEqBands(newBands);
+                            }}
+                            className="w-full accent-indigo-500 h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none mt-1"
+                          />
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+
+                {/* Section: Pitch / Playback Speed */}
+                <div className="bg-zinc-950/40 p-4 rounded-xl border border-zinc-900/50 space-y-3">
+                  <div className="flex justify-between items-center">
+                    <label className="text-[11px] font-semibold text-zinc-400 font-mono tracking-wide uppercase">
+                      Playback Speed & Pitch
+                    </label>
+                    <span className="text-[11px] font-bold text-indigo-400 font-mono">
+                      {sfxPlaybackRate.toFixed(2)}x
+                    </span>
+                  </div>
+                  <input
+                    type="range"
+                    min="0.5"
+                    max="2.0"
+                    step="0.05"
+                    value={sfxPlaybackRate}
+                    onChange={(e) => {
+                      initAudioSystem();
+                      setSfxPlaybackRate(parseFloat(e.target.value));
+                    }}
+                    className="w-full accent-indigo-500 h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none"
+                  />
+                  <div className="flex justify-between text-[8.5px] text-zinc-500 font-mono">
+                    <span>0.5x (Slowed + Reverb)</span>
+                    <span>1.0x (Normal)</span>
+                    <span>2.0x (Nightcore)</span>
+                  </div>
+                </div>
+
+                {/* Section: Echo / Delay */}
+                <div className="bg-zinc-950/40 p-4 rounded-xl border border-zinc-900/50 space-y-4">
+                  <div className="flex justify-between items-center">
+                    <div className="flex flex-col">
+                      <span className="text-[11px] font-semibold text-zinc-400 font-mono tracking-wide uppercase">
+                        Echo / Feedback Delay
+                      </span>
+                      <span className="text-[9px] text-zinc-500">Temporal feedback sound recursion</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => {
+                        initAudioSystem();
+                        setSfxEcho(!sfxEcho);
+                      }}
+                      className={`px-3 py-1 text-[9.5px] font-mono rounded border transition-all cursor-pointer ${
+                        sfxEcho
+                          ? 'bg-emerald-650/20 border-emerald-500/50 text-emerald-400 font-bold'
+                          : 'bg-zinc-900/60 border-zinc-800 text-zinc-500 hover:text-zinc-300'
+                      }`}
+                    >
+                      {sfxEcho ? 'ACTIVE' : 'BYPASS'}
+                    </button>
+                  </div>
+
+                  {sfxEcho && (
+                    <div className="space-y-3 pt-1 border-t border-zinc-900/40">
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between font-mono text-[9px]">
+                          <span className="text-zinc-500">Delay Time</span>
+                          <span className="text-zinc-450 font-bold">{(sfxDelayTime * 1000).toFixed(0)} ms</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0.05"
+                          max="1.0"
+                          step="0.05"
+                          value={sfxDelayTime}
+                          onChange={(e) => {
+                            initAudioSystem();
+                            setSfxDelayTime(parseFloat(e.target.value));
+                          }}
+                          className="w-full accent-indigo-500 h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between font-mono text-[9px]">
+                          <span className="text-zinc-500">Feedback Level</span>
+                          <span className="text-zinc-450 font-bold">{(sfxFeedback * 100).toFixed(0)}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0.0"
+                          max="0.9"
+                          step="0.05"
+                          value={sfxFeedback}
+                          onChange={(e) => {
+                            initAudioSystem();
+                            setSfxFeedback(parseFloat(e.target.value));
+                          }}
+                          className="w-full accent-indigo-500 h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none"
+                        />
+                      </div>
+                    </div>
+                  )}
+                </div>
+
+                {/* Section: Ambient Reverb */}
+                <div className="bg-zinc-950/40 p-4 rounded-xl border border-zinc-900/50 space-y-4">
+                  <div className="flex justify-between items-center">
+                    <div className="flex flex-col">
+                      <span className="text-[11px] font-semibold text-zinc-400 font-mono tracking-wide uppercase">
+                        Ambient Reverb Space
+                      </span>
+                      <span className="text-[9px] text-zinc-500">Convoluted impulse environment modeling</span>
+                    </div>
+                  </div>
+
+                  <div className="grid grid-cols-4 gap-1.5">
+                    {(['none', 'room', 'hall', 'cosmic'] as const).map((space) => (
+                      <button
+                        type="button"
+                        key={space}
+                        onClick={() => {
+                          initAudioSystem();
+                          setSfxReverbSpace(space);
+                        }}
+                        className={`py-1.5 px-2 text-[10px] font-mono rounded border transition-all text-center cursor-pointer uppercase ${
+                          sfxReverbSpace === space
+                            ? 'bg-indigo-650/20 border-indigo-500/50 text-indigo-400 font-bold'
+                            : 'bg-zinc-900/40 border-zinc-900/80 text-zinc-500 hover:text-zinc-400 hover:bg-zinc-900/60'
+                        }`}
+                      >
+                        {space === 'none' ? 'Bypass' : space}
+                      </button>
+                    ))}
+                  </div>
+
+                  {sfxReverbSpace !== 'none' && (
+                    <div className="space-y-2 pt-1 border-t border-zinc-900/40">
+                      <div className="flex justify-between font-mono text-[9px]">
+                        <span className="text-zinc-500">Reverb Wet Mix</span>
+                        <span className="text-indigo-400 font-bold">{(sfxReverbMix * 100).toFixed(0)}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0.05"
+                        max="0.8"
+                        step="0.05"
+                        value={sfxReverbMix}
+                        onChange={(e) => {
+                          initAudioSystem();
+                          setSfxReverbMix(parseFloat(e.target.value));
+                        }}
+                        className="w-full accent-indigo-500 h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none"
+                      />
+                    </div>
+                  )}
+                </div>
+
+                {/* Section: Surround Panner */}
+                <div className="bg-zinc-950/40 p-4 rounded-xl border border-zinc-900/50 space-y-4">
+                  <div className="flex justify-between items-center">
+                    <div className="flex flex-col">
+                      <span className="text-[11px] font-semibold text-zinc-400 font-mono tracking-wide uppercase">
+                        Stereo Surround Panner
+                      </span>
+                      <span className="text-[9px] text-zinc-500">Left/Right coordinate space placing</span>
+                    </div>
+
+                    <div className="flex items-center space-x-1.5">
+                      <input
+                        type="checkbox"
+                        id="auto-pan"
+                        checked={sfxAutoPan}
+                        onChange={(e) => {
+                          initAudioSystem();
+                          setSfxAutoPan(e.target.checked);
+                        }}
+                        className="w-3.5 h-3.5 rounded border border-zinc-850 bg-zinc-950 text-indigo-500 focus:ring-indigo-500 accent-indigo-500 cursor-pointer"
+                      />
+                      <label htmlFor="auto-pan" className="text-[10px] font-mono text-zinc-450 tracking-wide select-none cursor-pointer">
+                        AUTO-PAN (PING-PONG)
+                      </label>
+                    </div>
+                  </div>
+
+                  {!sfxAutoPan ? (
+                    <div className="space-y-2">
+                      <div className="flex justify-between font-mono text-[9.5px]">
+                        <span className="text-zinc-500">Left Channel</span>
+                        <span className="text-indigo-400 font-bold">
+                          {sfxPan === 0 ? 'Centered' : sfxPan > 0 ? `R +${(sfxPan * 100).toFixed(0)}%` : `L +${Math.abs(sfxPan * 100).toFixed(0)}%`}
+                        </span>
+                        <span className="text-zinc-500">Right Channel</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="-1.0"
+                        max="1.0"
+                        step="0.1"
+                        value={sfxPan}
+                        onChange={(e) => {
+                          initAudioSystem();
+                          setSfxPan(parseFloat(e.target.value));
+                        }}
+                        className="w-full accent-indigo-500 h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none"
+                      />
+                    </div>
+                  ) : (
+                    <div className="h-6 flex items-center justify-center border border-dashed border-indigo-500/20 bg-indigo-500/5 rounded-md px-3 py-1">
+                      <span className="text-[9.5px] font-mono text-indigo-400 animate-pulse tracking-widest flex items-center space-x-2">
+                        <span>● PING-PONG SWEEPING CHANNELS IN REAL-TIME</span>
+                      </span>
+                    </div>
+                  )}
                 </div>
               </div>
             )}

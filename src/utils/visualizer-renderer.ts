@@ -14,6 +14,9 @@ let lastTimeColorCycle: number = Date.now();
 let spectrogramHistory: Uint8Array[] = [];
 const MAX_SPECTROGRAM_HISTORY = 60;
 
+// State for scrolling Floating Wave Echo ghost trail frames
+let floatingWaveHistory: { path: { x: number; y: number }[]; opacity: number; yShift: number }[] = [];
+
 // Cached offscreen canvas for Mirror Mode horizontal reflection to prevent frame-by-frame allocation overhead
 let mirrorOffscreenCanvas: HTMLCanvasElement | null = null;
 let mirrorOffscreenCtx: CanvasRenderingContext2D | null = null;
@@ -30,6 +33,10 @@ export interface RenderParticle {
   maxLife: number;
   angle: number;
   spin: number;
+  history?: { x: number; y: number }[];
+  baseVx?: number;
+  baseVy?: number;
+  baseSize?: number;
 }
 
 // Color conversion helpers
@@ -177,7 +184,9 @@ export function createParticle(
   }
 
   // Lifespan
-  const maxLife = 50 + Math.random() * 100;
+  const maxLife = settings.lifetime
+    ? Math.round(settings.lifetime * 60)
+    : (50 + Math.random() * 100);
 
   return {
     x,
@@ -191,6 +200,10 @@ export function createParticle(
     maxLife,
     angle: Math.random() * Math.PI * 2,
     spin: (Math.random() - 0.5) * 0.05,
+    history: [],
+    baseVx: vx,
+    baseVy: vy,
+    baseSize: size,
   };
 }
 
@@ -201,25 +214,50 @@ export function updateParticles(
   width: number,
   height: number,
   isBeat: boolean,
-  beatIntensity: number
+  bassIntensity: number,
+  overallVolume: number = 1.0
 ): RenderParticle[] {
   const result: RenderParticle[] = [];
 
+  const beatReactivePulseEnabled = !!settings.beatReactive;
+  const audioReactiveParticleBurstEnabled = !!settings.beatBurst;
+  const particlePhysicsCollisionEnabled = !!settings.enablePhysics;
+
+  const floor = settings.sensitivityFloor !== undefined ? settings.sensitivityFloor : 0.0;
+  const dynamicVolume = floor + (1.0 - floor) * overallVolume;
+
   for (let p of particles) {
-    p.life -= 1;
+    // Decrement life proportionally to the movement speed multiplier so particles travel the full distance before fading out
+    p.life -= Math.max(0.005, dynamicVolume);
 
-    // React to beats standard
-    if (isBeat && settings.beatReactive) {
-      p.vx *= 1.3 * (1 + beatIntensity * 0.5);
-      p.vy *= 1.3 * (1 + beatIntensity * 0.5);
-      p.size = Math.min(settings.maxSize * 2, p.size * (1.1 + beatIntensity * 0.2));
-    }
+    // Resolve baseline properties
+    const baseVx = p.baseVx !== undefined ? p.baseVx : p.vx;
+    const baseVy = p.baseVy !== undefined ? p.baseVy : p.vy;
+    const baseSize = p.baseSize !== undefined ? p.baseSize : p.size;
 
-    // React to extra beat bursts
-    let burstSpeedMult = 1.0;
-    if (isBeat && settings.beatBurst) {
-      burstSpeedMult = 2.5 * (1 + beatIntensity);
-      p.size = Math.min(settings.maxSize * 3, p.size * (1.5 + beatIntensity * 0.5));
+    // SECTION 2: RE-AMPLIFYING THE TOGGLE INTERACTION EFFECTS
+    // 1. Beat-Reactive Pulse: When beatReactivePulse is true AND a kick/bass beat is actively detected,
+    // apply a pronounced, immediate velocity burst and radius expansion factor to the particles.
+    // The pulse must feel sharp and instantaneous, decaying smoothly back down using linear interpolation (lerp).
+    // 3. Toggle Off Behavior: If either toggle is turned off, ensure the particle behavior instantly falls back to a clean, smooth, un-reactive state.
+    if (beatReactivePulseEnabled) {
+      if (isBeat) {
+        // Immediate, sharp velocity burst and expansion
+        const intensityScale = Math.max(0.5, bassIntensity); // make it pronounced
+        p.vx = baseVx * (1.6 + intensityScale * 1.8);
+        p.vy = baseVy * (1.6 + intensityScale * 1.8);
+        p.size = Math.min(settings.maxSize * 2.8, baseSize * (1.4 + intensityScale * 0.4));
+      } else {
+        // Smoothly decay back to standard baseline using linear interpolation (lerp) with 0.08 dampening factor
+        p.vx = p.vx + (baseVx - p.vx) * 0.08;
+        p.vy = p.vy + (baseVy - p.vy) * 0.08;
+        p.size = p.size + (baseSize - p.size) * 0.08;
+      }
+    } else {
+      // Toggle off: instantly fall back to a clean, smooth, un-reactive state
+      p.vx = baseVx;
+      p.vy = baseVy;
+      p.size = baseSize;
     }
 
     // Apply winds & gravity
@@ -235,13 +273,53 @@ export function updateParticles(
       p.vx += Math.sin(p.life * 0.1) * 0.08;
     }
 
-    const currentSpeedMult = (settings.movementSpeed !== undefined ? settings.movementSpeed : 1.0) * burstSpeedMult;
-    p.x += p.vx * currentSpeedMult;
-    p.y += p.vy * currentSpeedMult;
+    // Record history before position changes
+    if (!p.history) {
+      p.history = [];
+    }
+    const trailLen = settings.trailLength !== undefined ? settings.trailLength : 0;
+    if (trailLen > 0) {
+      p.history.push({ x: p.x, y: p.y });
+      if (p.history.length > trailLen) {
+        p.history.shift();
+      }
+    } else if (p.history.length > 0) {
+      p.history = [];
+    }
+
+    const speedFactor = settings.movementSpeed !== undefined ? settings.movementSpeed : 1.0;
+    // Map non-linearly for pristine slow-drift base scaling
+    const scaleMultiplier = speedFactor < 1.0
+      ? Math.pow(speedFactor, 1.8) // smooth curved drop towards 0 for graceful cinematic floats
+      : speedFactor;
+
+    // SECTION 2: RE-AMPLIFYING THE TOGGLE INTERACTION EFFECTS
+    // 2. Audio-Reactive Particle Burst: When audioReactiveParticleBurst is true, look directly at the real-time sub-bass frequency thresholds.
+    // Scale the particle burst count or instantaneous velocity vector dramatically during high-energy transients so that intense parts of the music feel completely distinct from quiet parts.
+    // 3. Toggle Off Behavior: If either toggle is turned off, ensure the particle behavior instantly falls back to a clean, smooth, un-reactive state.
+    let burstSpeedMult = 1.0;
+    if (audioReactiveParticleBurstEnabled) {
+      // Look directly at real-time sub-bass frequency threshold (bassIntensity represents this).
+      // Scale velocity vector dramatically during high-energy transients
+      if (bassIntensity > 0.4) {
+        burstSpeedMult = 1.0 + Math.pow(bassIntensity, 2.8) * 8.0;
+      } else {
+        burstSpeedMult = 1.0 + bassIntensity * 1.0;
+      }
+    }
+
+    // SECTION 1: ENVELOPE-BASED VELOCITY SCALING (THE FADE-OUT FIX)
+    // The base movement speed of the particles must be directly multiplied by this live dynamicVolume coefficient.
+    // This guarantees that if the music slows down, softens, or fades to silence, the particles automatically lose momentum and come to an absolute, complete stop.
+    // (Or gracefully slide at the Sensitivity Floor baseline if configured).
+    const dynamicBaseSpeedMultiplier = scaleMultiplier * dynamicVolume;
+
+    p.x += p.vx * dynamicBaseSpeedMultiplier * burstSpeedMult;
+    p.y += p.vy * dynamicBaseSpeedMultiplier * burstSpeedMult;
     p.angle += p.spin;
 
     // Apply physics boundary bounces (bouncing off walls)
-    if (settings.enablePhysics) {
+    if (particlePhysicsCollisionEnabled) {
       const bMultiplier = 0.85; // coefficient of restitution with walls
       if (p.x - p.size < 0) {
         p.x = p.size;
@@ -283,7 +361,7 @@ export function updateParticles(
   }
 
   // If particle physics is enabled, resolve particle-to-particle collisions
-  if (settings.enablePhysics && result.length > 1) {
+  if (particlePhysicsCollisionEnabled && result.length > 1) {
     for (let i = 0; i < result.length; i++) {
       for (let j = i + 1; j < result.length; j++) {
         const p1 = result[i];
@@ -450,6 +528,30 @@ export function drawParticles(
   ctx.save();
 
   for (const p of particles) {
+    const trailLenValue = settings.trailLength !== undefined ? settings.trailLength : 0;
+    if (trailLenValue > 0 && p.history && p.history.length > 0 && 
+        (settings.type === 'stars' || settings.type === 'sparks' || settings.type === 'spark-stars')) {
+      ctx.save();
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      const pts = [...p.history, { x: p.x, y: p.y }];
+      for (let i = 0; i < pts.length - 1; i++) {
+        const pStart = pts[i];
+        const pEnd = pts[i + 1];
+        
+        ctx.beginPath();
+        ctx.moveTo(pStart.x, pStart.y);
+        ctx.lineTo(pEnd.x, pEnd.y);
+        
+        const ratio = (i + 1) / pts.length;
+        ctx.globalAlpha = p.alpha * ratio;
+        ctx.strokeStyle = p.color;
+        ctx.lineWidth = p.size * ratio * 0.9;
+        ctx.stroke();
+      }
+      ctx.restore();
+    }
+
     ctx.beginPath();
     ctx.globalAlpha = p.alpha;
     
@@ -647,6 +749,53 @@ export function drawVisualizer(
   beatIntensity: number
 ) {
   let settings = incomingSettings;
+  const isPortrait = height > width;
+
+  // 1 & 2. Aspect Ratio Detection & Portrait Dynamic Resampling
+  let activeAnalyserData = analyserData;
+  let activeWaveformData = waveformData;
+
+  if (isPortrait) {
+    const targetSize = 64; // down to 64 optimized bins
+    const resampledAnalyser = new Uint8Array(targetSize);
+    const resampledWaveform = new Uint8Array(targetSize);
+    const binSize = analyserData.length / targetSize;
+    
+    for (let i = 0; i < targetSize; i++) {
+      const startIdx = Math.floor(i * binSize);
+      const endIdx = Math.ceil((i + 1) * binSize);
+      let sumAnalyser = 0;
+      let sumWaveform = 0;
+      let count = 0;
+      for (let j = startIdx; j < endIdx && j < analyserData.length; j++) {
+        sumAnalyser += analyserData[j];
+        sumWaveform += waveformData[j];
+        count++;
+      }
+      resampledAnalyser[i] = count > 0 ? sumAnalyser / count : 128;
+      resampledWaveform[i] = count > 0 ? sumWaveform / count : 128;
+    }
+    activeAnalyserData = resampledAnalyser;
+    activeWaveformData = resampledWaveform;
+    
+    // 3. Responsive Spacing Calculation
+    const suggestedSpacing = Math.max(1, Math.min(settings.barSpacing !== undefined ? settings.barSpacing : 4, Math.floor(width / 120)));
+    const suggestedBarCount = settings.barFrequencyCount !== undefined
+      ? Math.min(settings.barFrequencyCount, 48)
+      : 32;
+    // Cap barSpacing to make sure totalSpacing of barCount doesn't exceed 40% of the canvas width
+    const maxAllowedSpacing = Math.max(1, Math.floor((width * 0.4) / suggestedBarCount));
+    
+    settings = {
+      ...settings,
+      barSpacing: Math.min(suggestedSpacing, maxAllowedSpacing),
+      barFrequencyCount: suggestedBarCount,
+      lineThickness: Math.max(1, Math.min(settings.lineThickness || 2, 2)),
+    };
+  }
+
+  analyserData = activeAnalyserData;
+  waveformData = activeWaveformData;
   const dataLen = analyserData.length;
   const isWebm = true;
 
@@ -659,6 +808,11 @@ export function drawVisualizer(
   } else if (spectrogramHistory.length > 0) {
     // Release spectrogram history memory when not active
     spectrogramHistory = [];
+  }
+
+  // Manage floating wave echo history memory release
+  if (settings.style !== 'floating-wave-echo' && (!settings.activeStyles || !settings.activeStyles.includes('floating-wave-echo')) && floatingWaveHistory.length > 0) {
+    floatingWaveHistory = [];
   }
 
   let appliedHueShift = false;
@@ -728,6 +882,13 @@ export function drawVisualizer(
 
   // Save settings in module scope
   activeSettings = settings;
+
+  // Apply visualizer-wide bloom filter
+  if (settings.glowIntensity !== undefined && settings.glowIntensity > 0) {
+    ctx.filter = `drop-shadow(0 0 ${settings.glowIntensity}px ${settings.glowColor || settings.primaryColor || '#00ffcc'}) brightness(${(1 + settings.glowIntensity * 0.05).toFixed(2)})`;
+  } else {
+    ctx.filter = 'none';
+  }
 
   const primaryRGB = hexToRgb(settings.primaryColor) || { r: 0, g: 255, b: 200 };
   const secondaryRGB = hexToRgb(settings.secondaryColor) || { r: 255, g: 0, b: 128 };
@@ -820,18 +981,28 @@ export function drawVisualizer(
     let width = originalWidth;
     let height = originalHeight;
     
-    const stylePos = currentSettingsState.stylePositions?.[styleId];
-    const styleScale = stylePos?.verticalScale !== undefined ? stylePos.verticalScale : currentSettingsState.sensitivity;
+    const styleSetting = currentSettingsState.styleSettings?.[styleId];
+    const stylePosition = currentSettingsState.stylePositions?.[styleId];
+
+    const styleScale = styleSetting?.scale !== undefined 
+      ? styleSetting.scale 
+      : (stylePosition?.verticalScale !== undefined ? stylePosition.verticalScale : currentSettingsState.sensitivity);
+
+    const styleThickness = stylePosition?.horizontalScale !== undefined 
+      ? stylePosition.horizontalScale 
+      : currentSettingsState.lineThickness;
     
     // Local shadowed settings variable protects each style iteration
     // Maps sensitivity to the style-specific verticalScale automatically
     const settings = {
       ...currentSettingsState,
       style: styleId,
-      sensitivity: styleScale
+      sensitivity: styleScale,
+      lineThickness: styleThickness
     };
     
     activeSettings = settings;
+    ctx.lineWidth = settings.lineThickness;
 
     // Draw-space transformations for side placements
     if (placement === 'left') {
@@ -847,9 +1018,12 @@ export function drawVisualizer(
     }
 
     // Dynamic layout coordinates based on vertical and horizontal shifts from sliders
-    const xPercent = stylePos?.xOffset !== undefined ? stylePos.xOffset : (settings.waveformOffsetX !== undefined ? settings.waveformOffsetX : 50);
+    const xOffset = styleSetting?.xOffset !== undefined ? styleSetting.xOffset : (stylePosition?.xOffset !== undefined ? stylePosition.xOffset : undefined);
+    const yOffset = styleSetting?.yOffset !== undefined ? styleSetting.yOffset : (stylePosition?.yOffset !== undefined ? stylePosition.yOffset : undefined);
+
+    const xPercent = xOffset !== undefined ? xOffset : (settings.waveformOffsetX !== undefined ? settings.waveformOffsetX : 50);
     const defaultYPercent = placement === 'top' ? 25 : placement === 'bottom' ? 75 : 50;
-    const yPercent = stylePos?.yOffset !== undefined ? stylePos.yOffset : (settings.waveformOffsetY !== undefined ? settings.waveformOffsetY : defaultYPercent);
+    const yPercent = yOffset !== undefined ? yOffset : (settings.waveformOffsetY !== undefined ? settings.waveformOffsetY : defaultYPercent);
     activeYPercent = yPercent;
 
     let centerX = width * (xPercent / 100);
@@ -872,7 +1046,9 @@ export function drawVisualizer(
     if (settings.style === 'waveform') {
     if (settings.spectrumAnalyzer) {
       // Replaces standard waveform with a frequency-domain bar chart view
-      const barCount = Math.min(64, dataLen);
+      const barCount = settings.barFrequencyCount !== undefined && settings.barFrequencyCount > 0
+        ? Math.min(settings.barFrequencyCount, dataLen)
+        : Math.min(64, dataLen);
       const spacing = settings.barSpacing !== undefined ? settings.barSpacing : 4;
       const totalSpacing = spacing * (barCount - 1);
       const barWidth = (width - totalSpacing) / barCount;
@@ -933,7 +1109,9 @@ export function drawVisualizer(
 
   } else if (settings.style === 'bars') {
     // Traditional frequency visualizer bars
-    const barCount = Math.min(64, dataLen);
+    const barCount = settings.barFrequencyCount !== undefined && settings.barFrequencyCount > 0
+      ? Math.min(settings.barFrequencyCount, dataLen)
+      : Math.min(64, dataLen);
     const spacing = settings.barSpacing;
     const totalSpacing = spacing * (barCount - 1);
     const barWidth = (width - totalSpacing) / barCount;
@@ -1488,7 +1666,9 @@ export function drawVisualizer(
 
   } else if (settings.style === 'double-mirror-bars') {
     // Symmetrically upward/downward mirroring frequency bar graphs
-    const barCount = Math.min(64, dataLen);
+    const barCount = settings.barFrequencyCount !== undefined && settings.barFrequencyCount > 0
+      ? Math.min(settings.barFrequencyCount, dataLen)
+      : Math.min(64, dataLen);
     const spacing = settings.barSpacing !== undefined ? settings.barSpacing : 4;
     const totalSpacing = spacing * (barCount - 1);
     const barWidth = (width - totalSpacing) / barCount;
@@ -1774,7 +1954,9 @@ export function drawVisualizer(
     ctx.restore();
   } else if (settings.style === 'rounded-pill-bars') {
     // Modern Rounded Pill Bars with rounded caps
-    const barCount = Math.min(48, dataLen);
+    const barCount = settings.barFrequencyCount !== undefined && settings.barFrequencyCount > 0
+      ? Math.min(settings.barFrequencyCount, dataLen)
+      : Math.min(48, dataLen);
     const spacing = settings.barSpacing !== undefined ? settings.barSpacing : 6;
     const totalSpacing = spacing * (barCount - 1);
     const barWidth = (width - totalSpacing) / barCount;
@@ -2180,374 +2362,299 @@ export function drawVisualizer(
       }
       ctx.restore();
     }
-  } else if (settings.style === 'three-d-speaker-effects') {
-    // 1. Calculate sub-bass average from index 0 to 5 of the audio data buffer
-    let subBassSum = 0;
-    const subBassCount = Math.min(6, dataLen);
-    for (let i = 0; i < subBassCount; i++) {
-      subBassSum += analyserData[i] || 0;
+  } else if (settings.style === 'cyber-laser-horizon') {
+    // Cyber Laser Horizon
+    const startBin = Math.floor(dataLen * 0.35);
+    const endBin = Math.floor(dataLen * 0.85);
+    let midHighSum = 0;
+    let count = 0;
+    for (let i = startBin; i < endBin; i++) {
+      midHighSum += analyserData[i] || 0;
+      count++;
     }
-    const avgSubBass = subBassSum / Math.max(1, subBassCount);
-    const subBassFactor = avgSubBass / 255.0; // 0.0 to 1.0
+    const midHighIntensity = (midHighSum / (count || 1)) / 255;
 
-    const responseMult = typeof settings.speakerBassResponse === 'number' ? settings.speakerBassResponse : 1.0;
-
-    // Woofer rattle/vibration translation values based on sub-bass
-    const vibrateX = (Math.random() - 0.5) * subBassFactor * 9.0 * responseMult;
-    const vibrateY = (Math.random() - 0.5) * subBassFactor * 9.0 * responseMult;
-
-    const horizonY = midY + height * 0.06;
-    const centerX = width / 2;
-
-    // --- A. Render 3D Perspective Grid Floor (Sleek Wireframe Layout) ---
     ctx.save();
-    ctx.strokeStyle = settings.secondaryColor || '#00ffff';
-    ctx.shadowColor = settings.secondaryColor || '#00ffff';
-    ctx.shadowBlur = 12;
-    ctx.lineWidth = 1.5;
-    ctx.globalAlpha = 0.3 + subBassFactor * 0.45; // grid glows with music sub-bass!
+    ctx.shadowBlur = settings.glowStrength !== undefined ? settings.glowStrength : 15;
+    ctx.lineCap = 'round';
 
-    const num3dLines = 18;
-    for (let i = 0; i <= num3dLines; i++) {
-      const xRatio = i / num3dLines;
-      const bottomX = xRatio * width;
+    const numLasers = 10;
+    for (let i = 0; i < numLasers; i++) {
+      const laserRatio = i / (numLasers - 1);
+      const verticalOffset = (laserRatio - 0.5) * (height * 0.5);
+      const currentY = midY + verticalOffset;
+
+      const strokeW = 0.5 + midHighIntensity * (settings.lineThickness || 2) * 2.5;
+      const alpha = 0.2 + midHighIntensity * 0.8;
+
+      ctx.lineWidth = strokeW;
+      const laserColor = getDynamicColor(settings.primaryColor, settings.secondaryColor, laserRatio);
+      ctx.strokeStyle = colorToRgba(laserColor, alpha);
+      ctx.shadowColor = laserColor;
+
       ctx.beginPath();
-      ctx.moveTo(centerX, horizonY);
-      ctx.lineTo(bottomX, height);
-      ctx.strokeStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor || settings.primaryColor, xRatio);
+      ctx.moveTo(centerX - width * 0.45, currentY);
+      ctx.lineTo(centerX + width * 0.45, currentY);
       ctx.stroke();
-    }
 
-    const num3dRows = 12;
-    for (let i = 0; i <= num3dRows; i++) {
-      const progress = i / num3dRows;
-      const timeSec = Date.now() / 1000;
-      const moveOffset = (timeSec * (2.5 + subBassFactor * 8.0)) % 1.0;
-      const adjustedProgress = (progress + moveOffset / num3dRows) % 1.0;
-      
-      const zRatio = Math.pow(adjustedProgress, 1.8); // Exponential spacing for depth perspective
-      const y = horizonY + zRatio * (height - horizonY);
       ctx.beginPath();
-      ctx.moveTo(0, y);
-      ctx.lineTo(width, y);
-      ctx.strokeStyle = getDynamicColor(settings.secondaryColor || settings.primaryColor, settings.primaryColor, zRatio);
+      ctx.moveTo(centerX, midY);
+      ctx.lineTo(centerX + (laserRatio - 0.5) * width * 1.2, currentY);
+      ctx.strokeStyle = colorToRgba(laserColor, alpha * 0.4);
       ctx.stroke();
     }
     ctx.restore();
 
-    // --- B. Render 3D Perspective Spectrum Pillars (Sleek Holographic Wireframe) ---
-    const pillarsCount = 20;
-    const zDepth = 0.72; // depth line location on floor
-    const yBase = horizonY + zDepth * (height - horizonY);
-    const xPerspectiveFactor = zDepth; // perspective narrowing factor
-
-    const colW = (width * 0.6) / (pillarsCount - 1);
-    const baseWidth = colW * 0.75 * xPerspectiveFactor;
-
-    for (let i = 0; i < pillarsCount; i++) {
-      const r = i / (pillarsCount - 1);
-      const screenX = centerX + (r - 0.5) * width * 0.68 * xPerspectiveFactor;
-
-      // Extract frequency value
-      const freqIdx = Math.floor(r * (dataLen * 0.65));
-      const rawF = analyserData[freqIdx] || 0;
-      const barHeight = (rawF / 255.0) * (height * 0.38) * settings.sensitivity;
-      const h = barHeight * xPerspectiveFactor;
-
-      const topY = yBase - h;
-      const faceColor = getDynamicColor(settings.primaryColor, settings.secondaryColor, r);
-      const sideOffset = (screenX - centerX) * 0.07; // skew projection towards vanishing point
-
-      ctx.save();
-      ctx.strokeStyle = faceColor;
-      ctx.shadowColor = settings.glowColor || settings.primaryColor || faceColor;
-      ctx.shadowBlur = 10;
-      ctx.lineWidth = Math.max(1, (settings.lineThickness || 2) * 0.4);
-      ctx.globalAlpha = 0.85;
-
-      // Draw wireframe front face box outline
-      ctx.beginPath();
-      ctx.rect(screenX - baseWidth / 2, topY, baseWidth, h || 2);
-      ctx.stroke();
-
-      // Horizontal wire rungs to give solid look without solid geometry fill
-      const rungs = h > 10 ? Math.floor(h / 12) : 0;
-      for (let rG = 1; rG < rungs; rG++) {
-        const rungY = topY + (rG / rungs) * h;
-        ctx.beginPath();
-        ctx.moveTo(screenX - baseWidth / 2, rungY);
-        ctx.lineTo(screenX + baseWidth / 2, rungY);
-        ctx.stroke();
-      }
-
-      // Draw wireframe side projection
-      ctx.beginPath();
-      ctx.moveTo(screenX + baseWidth / 2, topY);
-      ctx.lineTo(screenX + baseWidth / 2 + sideOffset, topY - h * 0.08);
-      ctx.lineTo(screenX + baseWidth / 2 + sideOffset, yBase - h * 0.08);
-      ctx.lineTo(screenX + baseWidth / 2, yBase);
-      ctx.stroke();
-
-      // Top cap wireframe
-      ctx.beginPath();
-      ctx.moveTo(screenX - baseWidth / 2, topY);
-      ctx.lineTo(screenX + baseWidth / 2, topY);
-      ctx.lineTo(screenX + baseWidth / 2 + sideOffset, topY - h * 0.08);
-      ctx.lineTo(screenX - baseWidth / 2 + sideOffset, topY - h * 0.08);
-      ctx.closePath();
-      ctx.stroke();
-
-      ctx.restore();
-    }
-
-    // --- C. Render Dual Speaker Woofers (Pulsing Neon Wireframes) ---
-    const speakerRadius = Math.min(width * 0.09, height * 0.16);
-    
-    // Left speaker position
-    const leftCX = width * 0.14;
-    const leftCY = height * 0.35;
-    
-    // Right speaker position
-    const rightCX = width * 0.86;
-    const rightCY = height * 0.35;
-
-    const drawSpeakerVec = (cx: number, cy: number, baseRadius: number) => {
-      const rx = cx + vibrateX;
-      const ry = cy + vibrateY;
-
-      ctx.save();
-      
-      // Neon Glow using active user colors
-      ctx.shadowBlur = 15;
-      ctx.shadowColor = settings.glowColor || settings.primaryColor || '#ff00ff';
-      ctx.strokeStyle = settings.primaryColor || '#ff00ff';
-      ctx.lineWidth = Math.max(1.5, settings.lineThickness || 2);
-
-      // Cyberpunk Speaker Cylinder Depth Projection (rear element)
-      const cylinderDepth = baseRadius * 0.35;
-      // Slight perspective shift based on side of center
-      const isLeft = cx < centerX;
-      const dirX = isLeft ? 1 : -1;
-      const depthX = dirX * cylinderDepth * 0.4;
-      const depthY = cylinderDepth * 0.2;
-
-      const pulseAmt = subBassFactor * 0.25 * responseMult;
-      const rFrontOuter = baseRadius * (1.0 + pulseAmt);
-      const rBackOuter = baseRadius * 0.9 * (1.0 + pulseAmt);
-
-      // Draw rear cylinder ring wireframe
-      ctx.save();
-      ctx.shadowBlur = 5;
-      ctx.globalAlpha = 0.38;
-      ctx.strokeStyle = settings.secondaryColor || settings.primaryColor || '#00ffff';
-      ctx.beginPath();
-      ctx.arc(rx + depthX, ry + depthY, rBackOuter, 0, Math.PI * 2);
-      ctx.stroke();
-      ctx.restore();
-
-      // Draw wireframe cylinder connectors (struts joining front and back faces)
-      ctx.save();
-      ctx.globalAlpha = 0.45;
-      ctx.lineWidth = 1;
-      ctx.strokeStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor || settings.primaryColor, 0.5);
-      const cylSpokes = 8;
-      for (let s = 0; s < cylSpokes; s++) {
-        const angle = (s / cylSpokes) * Math.PI * 2;
-        const cos = Math.cos(angle);
-        const sin = Math.sin(angle);
-        ctx.beginPath();
-        ctx.moveTo(rx + cos * rFrontOuter, ry + sin * rFrontOuter);
-        ctx.lineTo(rx + depthX + cos * rBackOuter, ry + depthY + sin * rBackOuter);
-        ctx.stroke();
-      }
-      ctx.restore();
-
-      // Concentric wireframe circles mapping to sub-bass expansion
-      const numRings = 6;
-      for (let r = 1; r <= numRings; r++) {
-        const ringScale = (r / numRings);
-        const currentRadius = baseRadius * ringScale * (1.0 + pulseAmt);
-        
-        const ringColor = getDynamicColor(settings.primaryColor, settings.secondaryColor || settings.primaryColor, ringScale);
-        ctx.strokeStyle = ringColor;
-        ctx.shadowColor = ringColor;
-
-        ctx.beginPath();
-        ctx.arc(rx, ry, currentRadius, 0, Math.PI * 2);
-        ctx.stroke();
-
-        // Connector radial spokes for the wireframe cone
-        if (r === numRings) {
-          ctx.save();
-          ctx.globalAlpha = 0.35;
-          ctx.lineWidth = 1;
-          ctx.setLineDash([2, 4]);
-          
-          ctx.beginPath();
-          const radialSpokes = 8;
-          for (let s = 0; s < radialSpokes; s++) {
-            const angle = (s / radialSpokes) * Math.PI * 2;
-            const cos = Math.cos(angle);
-            const sin = Math.sin(angle);
-            ctx.moveTo(rx + cos * baseRadius * 0.2, ry + sin * baseRadius * 0.2);
-            ctx.lineTo(rx + cos * currentRadius, ry + sin * currentRadius);
-          }
-          ctx.stroke();
-          ctx.restore();
-        }
-      }
-
-      // Draw Center wireframe cap ring
-      const capColor = settings.glowColor || settings.primaryColor || '#ff00ff';
-      ctx.strokeStyle = capColor;
-      ctx.shadowColor = capColor;
-      ctx.beginPath();
-      ctx.arc(rx, ry, baseRadius * 0.22 * (1.0 + subBassFactor * 0.1), 0, Math.PI * 2);
-      ctx.stroke();
-
-      // Outer wireframe hexagonal stage casing
-      const casingColor = settings.secondaryColor || '#00ffff';
-      ctx.strokeStyle = casingColor;
-      ctx.shadowColor = casingColor;
-      ctx.lineWidth = 1.5;
-      ctx.beginPath();
-      const corners = 6;
-      for (let c = 0; c <= corners; c++) {
-        const angle = (c / corners) * Math.PI * 2;
-        const casingRadius = baseRadius * 1.35 * (1.0 + subBassFactor * 0.08 * responseMult);
-        const hX = rx + Math.cos(angle) * casingRadius;
-        const hY = ry + Math.sin(angle) * casingRadius;
-        if (c === 0) {
-          ctx.moveTo(hX, hY);
-        } else {
-          ctx.lineTo(hX, hY);
-        }
-      }
-      ctx.stroke();
-
-      // Guidelines back to vanishing horizontal floor coordinates
-      ctx.save();
-      ctx.strokeStyle = settings.secondaryColor || '#00ffff';
-      ctx.globalAlpha = 0.22;
-      ctx.setLineDash([3, 5]);
-      ctx.beginPath();
-      ctx.moveTo(rx, ry);
-      ctx.lineTo(centerX, horizonY);
-      ctx.stroke();
-      ctx.restore();
-
-      ctx.restore();
-    };
-
-    // Render left & right wireframe speaker nodes
-    drawSpeakerVec(leftCX, leftCY, speakerRadius);
-    drawSpeakerVec(rightCX, rightCY, speakerRadius);
-  } else if (settings.style === 'tron-neon-grid') {
-    const bassBins = Math.max(1, Math.floor(dataLen * 0.12));
+  } else if (settings.style === 'neon-geometric-ring') {
+    // Neon Geometric Ring
+    const bassBins = Math.max(1, Math.floor(dataLen * 0.08));
     let bassSum = 0;
     for (let i = 0; i < bassBins; i++) {
       bassSum += analyserData[i] || 0;
     }
-    const avgBassVal = bassSum / bassBins;
-    const bassFactor = avgBassVal / 255.0; // 0.0 to 1.0
-
-    const horizonY = height * 0.45;
-    const centerX = width / 2;
-
-    const speed = (settings.sensitivity || 1.0) * (3.0 + bassFactor * 25.0);
-    const timeSec = Date.now() / 1000;
-    const movementOffset = (timeSec * speed) % 1.0;
+    const subBassFactor = bassSum / (bassBins * 255.0);
 
     ctx.save();
-    
-    // Vibrant Neon Bloom Effect
-    ctx.shadowBlur = 15;
-    ctx.lineWidth = Math.max(1.5, settings.lineThickness || 2);
+    ctx.shadowBlur = settings.glowStrength !== undefined ? settings.glowStrength : 12;
+    ctx.lineWidth = Math.max(1.5, settings.lineThickness);
 
-    // Number of vertical perspective grid lines
-    const numPerspectiveLines = 16;
-    const numDepthSegments = 16;
+    const numRings = 5;
+    const maxRadius = Math.min(width, height) * 0.4;
+    const timeSec = Date.now() / 1000;
 
-    // Outer boundaries
-    const gridWidthFactor = 2.0;
+    for (let r = 1; r <= numRings; r++) {
+      const ringRatio = r / numRings;
+      const ringColor = getDynamicColor(settings.primaryColor, settings.secondaryColor, ringRatio);
+      ctx.strokeStyle = ringColor;
+      ctx.shadowColor = ringColor;
 
-    // Draw perspective vertical lines (from vanishing point spreading outwards)
-    for (let i = 0; i <= numPerspectiveLines; i++) {
-      const xRatio = i / numPerspectiveLines;
-      const lineColor = getDynamicColor(settings.primaryColor, settings.secondaryColor || settings.primaryColor, xRatio);
-      
-      ctx.strokeStyle = lineColor;
-      ctx.shadowColor = lineColor;
-      
-      ctx.beginPath();
-      for (let j = 0; j <= numDepthSegments; j++) {
-        const zProgress = j / numDepthSegments;
-        const zDepth = Math.pow(zProgress, 1.8); // exponential spacing for depth
-        
-        const y = horizonY + zDepth * (height - horizonY);
-        const originalX = centerX + (xRatio - 0.5) * width * gridWidthFactor * zDepth;
-        
-        const freqIndex = Math.floor(Math.abs(xRatio - 0.5) * 2 * (dataLen * 0.5)) % dataLen;
-        const freqAmp = analyserData[freqIndex] || 0;
-        
-        const displacement = -(freqAmp / 255.0) * 45 * Math.sin(j * 0.5 - timeSec * 5.0) * zDepth * (settings.sensitivity || 1.0);
-        
-        if (j === 0) {
-          ctx.moveTo(originalX, y + displacement);
-        } else {
-          ctx.lineTo(originalX, y + displacement);
-        }
-      }
-      ctx.stroke();
-    }
+      const baseRadius = maxRadius * ringRatio;
+      const dynamicRadius = baseRadius + subBassFactor * 45;
 
-    // Draw horizontal grid lines spacing exponentially with depth, moving forward (modulated by sound wave)
-    const numHorizontalLines = 12;
-    for (let i = 0; i < numHorizontalLines; i++) {
-      const progress = ((i + movementOffset) / numHorizontalLines) % 1.0;
-      const zDepth = Math.pow(progress, 1.8);
-      const y = horizonY + zDepth * (height - horizonY);
+      const segments = 4 + r * 2;
+      const angleStep = (Math.PI * 2) / segments;
+      const rotationOffset = timeSec * (r % 2 === 0 ? 0.4 : -0.4) * (1 + subBassFactor * 2);
 
-      const hSegments = 32;
-      for (let s = 0; s < hSegments; s++) {
-        const xRatio1 = s / hSegments;
-        const xRatio2 = (s + 1) / hSegments;
-        
-        const originalX1 = centerX + (xRatio1 - 0.5) * width * gridWidthFactor * zDepth;
-        const originalX2 = centerX + (xRatio2 - 0.5) * width * gridWidthFactor * zDepth;
-
-        // Sound-wave ripple displacement across the horizontal line using live audio buffer array
-        const freqIndex1 = Math.floor(xRatio1 * (dataLen * 0.5)) % dataLen;
-        const freqIndex2 = Math.floor(xRatio2 * (dataLen * 0.5)) % dataLen;
-        const freqAmp1 = analyserData[freqIndex1] || 0;
-        const freqAmp2 = analyserData[freqIndex2] || 0;
-        
-        // Travel wave modulation using sine wave and signal amplitude
-        const displacement1 = -(freqAmp1 / 255.0) * 65 * zDepth * (settings.sensitivity || 1.0) * Math.sin(xRatio1 * Math.PI * 4.0 - timeSec * 6.0);
-        const displacement2 = -(freqAmp2 / 255.0) * 65 * zDepth * (settings.sensitivity || 1.0) * Math.sin(xRatio2 * Math.PI * 4.0 - timeSec * 6.0);
-
-        const segmentColor = getDynamicColor(settings.primaryColor, settings.secondaryColor || settings.primaryColor, xRatio1);
-        ctx.strokeStyle = segmentColor;
-        ctx.shadowColor = segmentColor;
+      for (let s = 0; s < segments; s++) {
+        const startAng = s * angleStep + rotationOffset;
+        const dashArcLen = angleStep * 0.55;
+        const endAng = startAng + dashArcLen;
 
         ctx.beginPath();
-        ctx.moveTo(originalX1, y + displacement1);
-        ctx.lineTo(originalX2, y + displacement2);
+        ctx.arc(centerX, centerY, dynamicRadius, startAng, endAng);
         ctx.stroke();
+
+        ctx.save();
+        ctx.globalAlpha = 0.5;
+        ctx.lineWidth = 1;
+        const tickLength = 5 * ringRatio;
+        const cos = Math.cos(startAng);
+        const sin = Math.sin(startAng);
+        ctx.beginPath();
+        ctx.moveTo(centerX + cos * (dynamicRadius - tickLength), centerY + sin * (dynamicRadius - tickLength));
+        ctx.lineTo(centerX + cos * (dynamicRadius + tickLength), centerY + sin * (dynamicRadius + tickLength));
+        ctx.stroke();
+        ctx.restore();
       }
     }
+    ctx.restore();
 
-    // Add a vibrant horizontal glow line at the vanishing horizon point
-    ctx.shadowBlur = 20;
-    const horizonColor = getDynamicColor(settings.primaryColor, settings.secondaryColor || settings.primaryColor, 0.5);
-    ctx.shadowColor = horizonColor;
-    ctx.strokeStyle = horizonColor;
-    ctx.lineWidth = 3;
+  } else if (settings.style === 'retro-arcade-stack') {
+    // Retro Arcade Stack
+    const numColumns = Math.min(32, dataLen);
+    const colW = width / numColumns;
+    const gapX = colW * 0.2;
+    const drawW = colW - gapX;
+
+    ctx.save();
+    ctx.shadowBlur = settings.glowStrength !== undefined ? settings.glowStrength : 10;
+
+    for (let c = 0; c < numColumns; c++) {
+      const colRatio = c / (numColumns - 1);
+      const freqIdx = Math.floor(colRatio * (dataLen * 0.75));
+      const val = analyserData[freqIdx] || 0;
+      const magnitude = (val / 255.0) * (height * 0.55) * settings.sensitivity;
+
+      const x = c * colW + gapX / 2;
+      const numBlocks = 12;
+      const blockH = Math.max(2, (height * 0.4) / numBlocks);
+      const gapY = blockH * 0.25;
+      const finalBlockH = blockH - gapY;
+
+      const activeBlocks = Math.round((magnitude / (height * 0.5)) * numBlocks);
+
+      for (let b = 0; b < numBlocks; b++) {
+        const blockY = midY - (b * blockH);
+        const isActive = b < activeBlocks;
+
+        if (isActive) {
+          const blockRatio = b / (numBlocks - 1);
+          let blockColor = '';
+          if (settings.colorMode === 'solid') {
+            blockColor = settings.primaryColor;
+          } else if (settings.colorMode === 'gradient') {
+            blockColor = getDynamicColor(settings.primaryColor, settings.secondaryColor, blockRatio);
+          } else {
+            blockColor = blockRatio < 0.4
+              ? '#10b981'
+              : blockRatio < 0.75
+                ? '#eab308'
+                : '#ef4444';
+          }
+
+          ctx.fillStyle = blockColor;
+          ctx.shadowColor = blockColor;
+          ctx.globalAlpha = 1.0;
+        } else {
+          ctx.fillStyle = '#ffffff';
+          ctx.shadowColor = 'transparent';
+          ctx.globalAlpha = 0.05;
+        }
+
+        ctx.fillRect(x, blockY - finalBlockH, drawW, finalBlockH);
+      }
+    }
+    ctx.restore();
+
+  } else if (settings.style === 'prism-laser-scanner') {
+    // Prism Laser Scanner
+    const timeSec = Date.now() / 1000;
+    const isTransient = beatIntensity > 0.22;
+
+    ctx.save();
+    ctx.shadowBlur = settings.glowStrength !== undefined ? settings.glowStrength : 15;
+    ctx.lineWidth = Math.max(1.0, settings.lineThickness);
+
+    const leftX = 0;
+    const leftY = 0;
+    const rightX = width;
+    const rightY = 0;
+
+    const numLaserBeams = 12;
+    for (let i = 0; i < numLaserBeams; i++) {
+      const laserRatio = i / (numLaserBeams - 1);
+      const sweepAngle = Math.sin(timeSec * 0.8 + laserRatio * Math.PI) * 0.48 + 0.5;
+
+      const targetX = width * sweepAngle;
+      const targetY = height * 0.9;
+
+      const baseColor = getDynamicColor(settings.primaryColor, settings.secondaryColor, laserRatio);
+
+      const drawBeams = (anchorX: number, anchorY: number) => {
+        if (isTransient) {
+          ctx.strokeStyle = '#ef4444';
+          ctx.shadowColor = '#ef4444';
+          ctx.beginPath();
+          ctx.moveTo(anchorX - 3, anchorY);
+          ctx.lineTo(targetX - 7 * (laserRatio - 0.5), targetY);
+          ctx.stroke();
+
+          ctx.strokeStyle = '#10b981';
+          ctx.shadowColor = '#10b981';
+          ctx.beginPath();
+          ctx.moveTo(anchorX, anchorY);
+          ctx.lineTo(targetX, targetY);
+          ctx.stroke();
+
+          ctx.strokeStyle = '#3b82f6';
+          ctx.shadowColor = '#3b82f6';
+          ctx.beginPath();
+          ctx.moveTo(anchorX + 3, anchorY);
+          ctx.lineTo(targetX + 7 * (laserRatio - 0.5), targetY);
+          ctx.stroke();
+        } else {
+          ctx.strokeStyle = baseColor;
+          ctx.shadowColor = baseColor;
+          ctx.beginPath();
+          ctx.moveTo(anchorX, anchorY);
+          ctx.lineTo(targetX, targetY);
+          ctx.stroke();
+        }
+      };
+
+      drawBeams(leftX, leftY);
+      drawBeams(rightX, rightY);
+    }
+    ctx.restore();
+
+  } else if (settings.style === 'floating-wave-echo') {
+    // Floating Wave Echo
+    const steps = Math.min(64, dataLen);
+    const points: { x: number; y: number }[] = [];
+
+    for (let i = 0; i < steps; i++) {
+      const idx = Math.floor((i / steps) * dataLen * 0.8);
+      const val = waveformData[idx] || 128;
+      const amp = (val - 128) / 128;
+      const magnitude = amp * (height * 0.28) * settings.sensitivity;
+
+      const x = (i / (steps - 1)) * width;
+      const y = midY + magnitude;
+      points.push({ x, y });
+    }
+
+    if (points.length > 0) {
+      floatingWaveHistory.push({
+        path: points,
+        opacity: 0.5,
+        yShift: 0
+      });
+    }
+
+    if (floatingWaveHistory.length > 8) {
+      floatingWaveHistory.shift();
+    }
+
+    ctx.save();
+    ctx.shadowBlur = 0;
+
+    for (let h = 0; h < floatingWaveHistory.length - 1; h++) {
+      const frame = floatingWaveHistory[h];
+      frame.opacity *= 0.90;
+      frame.yShift -= 2.5;
+
+      if (frame.opacity < 0.05) continue;
+
+      ctx.save();
+      const trailColor = getDynamicColor(settings.primaryColor, settings.secondaryColor, h / floatingWaveHistory.length);
+      ctx.fillStyle = colorToRgba(trailColor, frame.opacity * 0.3);
+      ctx.strokeStyle = colorToRgba(trailColor, frame.opacity * 0.5);
+      ctx.lineWidth = 1;
+
+      ctx.beginPath();
+      ctx.moveTo(frame.path[0].x, frame.path[0].y + frame.yShift);
+      for (let i = 0; i < frame.path.length - 1; i++) {
+        const xc = (frame.path[i].x + frame.path[i + 1].x) / 2;
+        const yc = (frame.path[i].y + frame.path[i + 1].y) / 2 + frame.yShift;
+        ctx.quadraticCurveTo(frame.path[i].x, frame.path[i].y + frame.yShift, xc, yc);
+      }
+      ctx.lineTo(width, midY + frame.yShift);
+      ctx.lineTo(0, midY + frame.yShift);
+      ctx.closePath();
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    }
+
+    const currentTrailColor = settings.primaryColor;
+    ctx.fillStyle = colorToRgba(currentTrailColor, 0.45);
+    ctx.strokeStyle = currentTrailColor;
+    ctx.lineWidth = Math.max(1.5, settings.lineThickness);
+    ctx.shadowBlur = settings.glowStrength !== undefined ? settings.glowStrength : 12;
+    ctx.shadowColor = currentTrailColor;
+
     ctx.beginPath();
-    ctx.moveTo(0, horizonY);
-    ctx.lineTo(width, horizonY);
+    ctx.moveTo(points[0].x, points[0].y);
+    for (let i = 0; i < points.length - 1; i++) {
+      const xc = (points[i].x + points[i + 1].x) / 2;
+      const yc = (points[i].y + points[i + 1].y) / 2;
+      ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
+    }
+    ctx.lineTo(width, midY);
+    ctx.lineTo(0, midY);
+    ctx.closePath();
+    ctx.fill();
     ctx.stroke();
-
     ctx.restore();
   }
 
@@ -2592,6 +2699,53 @@ export function drawVisualizer(
             ctx.restore();
           }
         }
+      }
+    }
+  }
+
+  // Periodic digital glitch distortion synced with high-frequency audio bands
+  if (settings.glitchFrequency && settings.glitchFrequency > 0) {
+    // Calculate average high/treble frequencies to trigger distortion
+    let highFreqSum = 0;
+    const highFreqStart = Math.floor(dataLen * 0.7);
+    let highFreqCount = 0;
+    for (let i = highFreqStart; i < dataLen; i++) {
+      highFreqSum += analyserData[i] || 0;
+      highFreqCount++;
+    }
+    const avgHighFreq = highFreqSum / (highFreqCount || 1);
+
+    // Filter threshold: glitch spikes are sync'd to prominent treble hits
+    const rawThreshold = 30; // base floor
+    if (avgHighFreq > rawThreshold) {
+      // Periodic trigger chance scales with glitchFrequency slider
+      const glitchChance = (settings.glitchFrequency / 100) * ((avgHighFreq - rawThreshold) / (255 - rawThreshold)) * 0.5;
+      if (Math.random() < glitchChance) {
+        ctx.save();
+        
+        // Horizontal slicing displacements (slice whole lines and drift horizontally)
+        const numSlices = Math.floor(3 + Math.random() * 6);
+        for (let i = 0; i < numSlices; i++) {
+          const sy = Math.random() * height;
+          const sh = 4 + Math.random() * 25; // height of the glitch slice
+          const dispX = (Math.random() - 0.5) * 45 * (settings.glitchFrequency / 20); // horizontal displacement
+
+          ctx.drawImage(ctx.canvas, 0, sy, width, sh, dispX, sy, width, sh);
+        }
+
+        // Draw digital block or static elements occasionally
+        if (Math.random() < 0.3) {
+          ctx.fillStyle = Math.random() > 0.5 ? settings.primaryColor : settings.secondaryColor;
+          ctx.globalAlpha = 0.15 + Math.random() * 0.25;
+          ctx.fillRect(
+            Math.random() * width * 0.8,
+            Math.random() * height * 0.8,
+            80 + Math.random() * 200,
+            1 + Math.random() * 8
+          );
+        }
+
+        ctx.restore();
       }
     }
   }
@@ -2737,6 +2891,24 @@ function getDynamicColor(color1: string, color2: string, ratio: number): string 
   const b = Math.floor(c1.b + (c2.b - c1.b) * ratio);
 
   return `rgb(${r}, ${g}, ${b})`;
+}
+
+// Convert any hex, rgb, or hsl color to its translucent rgba version
+function colorToRgba(colorStr: string, alpha: number): string {
+  if (colorStr.startsWith('#')) {
+    const rgb = hexToRgb(colorStr) || { r: 0, g: 255, b: 200 };
+    return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
+  }
+  if (colorStr.startsWith('rgb(')) {
+    const matches = colorStr.match(/\d+/g);
+    if (matches && matches.length >= 3) {
+      return `rgba(${matches[0]}, ${matches[1]}, ${matches[2]}, ${alpha})`;
+    }
+  }
+  if (colorStr.startsWith('hsl(')) {
+    return colorStr.replace('hsl(', 'hsla(').replace(')', `, ${alpha})`);
+  }
+  return colorStr;
 }
 
 // DRAW PROGRESS BAR
