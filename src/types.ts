@@ -29,7 +29,16 @@ export type VisualizerStyle =
   | 'neon-geometric-ring'      // Neon Geometric Ring broken orbit layouts
   | 'retro-arcade-stack'       // 80s Retro Arcade Stack equalizer blocks
   | 'prism-laser-scanner'      // Prism Laser Scanner diagonal coordinate vector sweep
-  | 'floating-wave-echo';      // Floating Wave Echo fluid bezier frames with ghost trails
+  | 'floating-wave-echo'       // Floating Wave Echo fluid bezier frames with ghost trails
+  | 'digital-matrix-blocks'    // Digital Matrix Blocks vertical segments
+  | 'plasma-glow-ribbon'       // Plasma Glow Ribbon bezier path with intense neon aura
+  | 'concentric-dual-radials'  // Concentric Dual Radials rings for bass and midrange
+  | 'shaded-mirror-silhouette' // Shaded Mirror Silhouette filled custom linear gradient;
+  | 'reflected-glow-ribbon'     // Reflected Glow Ribbon continuous bezier curve with neon reflection
+  | 'reflected-matrix-dots'     // Reflected Matrix Dots glowing circular dots mirrored downward
+  | 'reflected-mountain-silhouette' // Reflected Mountain Silhouette filled area with flipped reflection
+  | 'reflected-center-split-pins' // Reflected Center-Split Pins symmetrical outward needle tracks
+  | 'reflected-radial-ring-horizon'; // Reflected Radial Ring Horizon vertical splitting and mirroring floor
 
 export type ParticleType =
   | 'stars'
@@ -147,6 +156,10 @@ export interface ParticleSettings {
   lifetime?: number;
   sensitivityFloor?: number;
   audioDriveTarget?: 'sub-bass' | 'vocal' | 'high-end';
+  colorInvertOnBeat?: boolean;
+  colorBurstOnBeat?: boolean;
+  beatReactiveColorShift?: boolean;
+  cycleColors?: boolean;
 }
 
 export interface TitleOverlaySettings {

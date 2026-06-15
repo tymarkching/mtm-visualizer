@@ -37,6 +37,8 @@ export interface RenderParticle {
   baseVx?: number;
   baseVy?: number;
   baseSize?: number;
+  hue?: number;
+  burstFlash?: number;
 }
 
 // Color conversion helpers
@@ -204,6 +206,8 @@ export function createParticle(
     baseVx: vx,
     baseVy: vy,
     baseSize: size,
+    hue: Math.random() * 360,
+    burstFlash: 0,
   };
 }
 
@@ -229,6 +233,29 @@ export function updateParticles(
   for (let p of particles) {
     // Decrement life proportionally to the movement speed multiplier so particles travel the full distance before fading out
     p.life -= Math.max(0.005, dynamicVolume);
+
+    // Update dynamic colors and bursts
+    if (settings.colorBurstOnBeat) {
+      if (isBeat) {
+        p.burstFlash = 1.0;
+      } else {
+        p.burstFlash = (p.burstFlash || 0) * 0.92;
+        if (p.burstFlash < 0.01) p.burstFlash = 0;
+      }
+    } else {
+      p.burstFlash = 0;
+    }
+
+    let hueDelta = 0;
+    if (settings.cycleColors) {
+      hueDelta += 0.5;
+    }
+    if (settings.beatReactiveColorShift && isBeat) {
+      hueDelta += 24;
+    }
+    if (hueDelta > 0) {
+      p.hue = ((p.hue || 0) + hueDelta) % 360;
+    }
 
     // Resolve baseline properties
     const baseVx = p.baseVx !== undefined ? p.baseVx : p.vx;
@@ -517,17 +544,97 @@ export function drawBackground(
   ctx.restore();
 }
 
+// DRAW PARTICLES COLOR HELPERS
+function lerpColor(c1: string, c2: string, ratio: number): string {
+  try {
+    const hex1 = c1.replace('#', '');
+    const r1 = parseInt(hex1.substring(0, 2), 16) || 0;
+    const g1 = parseInt(hex1.substring(2, 4), 16) || 0;
+    const b1 = parseInt(hex1.substring(4, 6), 16) || 0;
+
+    const hex2 = c2.replace('#', '');
+    const r2 = parseInt(hex2.substring(0, 2), 16) || 0;
+    const g2 = parseInt(hex2.substring(2, 4), 16) || 0;
+    const b2 = parseInt(hex2.substring(4, 6), 16) || 0;
+
+    const r = Math.round(r1 + (r2 - r1) * ratio);
+    const g = Math.round(g1 + (g2 - g1) * ratio);
+    const b = Math.round(b1 + (b2 - b1) * ratio);
+
+    const rs = r.toString(16).padStart(2, '0');
+    const gs = g.toString(16).padStart(2, '0');
+    const bs = b.toString(16).padStart(2, '0');
+
+    return `#${rs}${gs}${bs}`;
+  } catch (e) {
+    return c1;
+  }
+}
+
 // DRAW PARTICLES
 export function drawParticles(
   ctx: CanvasRenderingContext2D,
   particles: RenderParticle[],
   settings: ParticleSettings,
   isBeat: boolean,
-  beatIntensity: number
+  beatIntensity: number,
+  globalVisuals?: any
 ) {
   ctx.save();
 
+  const canvasW = ctx.canvas?.width || 800;
+
   for (const p of particles) {
+    // SECTION 2: LINKING PARTICLE FIELD TO GLOBAL COLOR MODES
+    let baseColor = p.color || settings.color || '#ff007f';
+
+    if (globalVisuals) {
+      const mode = globalVisuals.colorMode || 'solid';
+      if (mode === 'rainbow') {
+        baseColor = `hsl(${p.hue || 0}, 100%, 60%)`;
+      } else if (mode === 'gradient') {
+        let colorA = globalVisuals.primaryColor || '#ff007f';
+        let colorB = globalVisuals.secondaryColor || '#00ffff';
+        
+        // Strobe effect: instantly swap colorA and colorB on each beat
+        if (settings.colorInvertOnBeat && isBeat) {
+          const temp = colorA;
+          colorA = colorB;
+          colorB = temp;
+        }
+        
+        const xRatio = Math.max(0, Math.min(1, p.x / canvasW));
+        baseColor = lerpColor(colorA, colorB, xRatio);
+      } else {
+        // solid color mode
+        baseColor = settings.color || '#ff007f';
+      }
+    }
+
+    // Overriding if Cycle Particle Colors or Beat-Reactive Particle Color Shift is enabled
+    if (settings.cycleColors || settings.beatReactiveColorShift) {
+      baseColor = `hsl(${p.hue || 0}, 100%, 60%)`;
+    }
+
+    // SECTION 3: PROCESSING COMBINED INTERACTIVE EFFECT STATES (Color Burst on Beat)
+    let finalColor = baseColor;
+    let finalAlpha = p.alpha;
+    
+    // Dynamic luminescence glow for Color Burst On Beat
+    let glowOnBurst = false;
+    if (settings.colorBurstOnBeat && p.burstFlash && p.burstFlash > 0) {
+      if (baseColor.startsWith('#')) {
+        finalColor = lerpColor(baseColor, '#ffffff', p.burstFlash);
+      } else {
+        // HSL or other color format
+        if (p.burstFlash > 0.8) {
+          finalColor = '#ffffff';
+        }
+      }
+      finalAlpha = Math.max(p.alpha, p.burstFlash);
+      glowOnBurst = true;
+    }
+
     const trailLenValue = settings.trailLength !== undefined ? settings.trailLength : 0;
     if (trailLenValue > 0 && p.history && p.history.length > 0 && 
         (settings.type === 'stars' || settings.type === 'sparks' || settings.type === 'spark-stars')) {
@@ -544,8 +651,8 @@ export function drawParticles(
         ctx.lineTo(pEnd.x, pEnd.y);
         
         const ratio = (i + 1) / pts.length;
-        ctx.globalAlpha = p.alpha * ratio;
-        ctx.strokeStyle = p.color;
+        ctx.globalAlpha = finalAlpha * ratio;
+        ctx.strokeStyle = finalColor;
         ctx.lineWidth = p.size * ratio * 0.9;
         ctx.stroke();
       }
@@ -553,26 +660,31 @@ export function drawParticles(
     }
 
     ctx.beginPath();
-    ctx.globalAlpha = p.alpha;
+    ctx.globalAlpha = finalAlpha;
+    
+    // Setup shadow blur if bursting
+    if (glowOnBurst && p.burstFlash) {
+      ctx.shadowBlur = p.burstFlash * 25;
+      ctx.shadowColor = '#ffffff';
+    } else {
+      ctx.shadowBlur = 0;
+    }
     
     // Base style representation
     if (settings.type === 'stars') {
-      // Draw 4-point star or circle
-      ctx.fillStyle = p.color;
+      ctx.fillStyle = finalColor;
       ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
       ctx.fill();
     } else if (settings.type === 'bubbles') {
-      ctx.strokeStyle = p.color;
+      ctx.strokeStyle = finalColor;
       ctx.lineWidth = p.size * 0.15;
       ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
       ctx.stroke();
     } else if (settings.type === 'sparks') {
-      // Small fire sparks
-      ctx.fillStyle = p.color;
+      ctx.fillStyle = finalColor;
       ctx.fillRect(p.x - p.size / 2, p.y - p.size / 2, p.size, p.size * 2);
     } else if (settings.type === 'sakura') {
-      // Rotating soft petal shape
-      ctx.fillStyle = p.color;
+      ctx.fillStyle = finalColor;
       ctx.translate(p.x, p.y);
       ctx.rotate(p.angle);
       
@@ -582,23 +694,23 @@ export function drawParticles(
       ctx.bezierCurveTo(p.size * 2, p.size / 2, p.size, -p.size, 0, 0);
       ctx.fill();
       
-      // Reset transform
       ctx.setTransform(1, 0, 0, 1, 0, 0);
     } else if (settings.type === 'dust') {
-      ctx.fillStyle = p.color;
-      ctx.shadowBlur = isBeat ? 15 : 5;
-      ctx.shadowColor = p.color;
+      ctx.fillStyle = finalColor;
+      if (!glowOnBurst) {
+        ctx.shadowBlur = isBeat ? 15 : 5;
+        ctx.shadowColor = finalColor;
+      }
       ctx.arc(p.x, p.y, p.size * 0.5, 0, Math.PI * 2);
       ctx.fill();
     } else if (settings.type === 'digital') {
-      // Falling matrix character or glowing grid node
-      ctx.fillStyle = p.color;
+      ctx.fillStyle = finalColor;
       ctx.font = `${p.size * 1.5}px monospace`;
       const char = String.fromCharCode(48 + Math.floor(Math.random() * 2)); // 0 or 1
       ctx.fillText(char, p.x, p.y);
     } else if (settings.type === 'hearts') {
       ctx.save();
-      ctx.fillStyle = p.color;
+      ctx.fillStyle = finalColor;
       ctx.translate(p.x, p.y);
       ctx.rotate(p.angle || 0);
       ctx.beginPath();
@@ -611,15 +723,17 @@ export function drawParticles(
     } else if (settings.type === 'glow-circles') {
       ctx.save();
       ctx.beginPath();
-      ctx.shadowBlur = (isBeat ? (p.size * 3) : (p.size * 1.5));
-      ctx.shadowColor = p.color;
-      ctx.fillStyle = p.color;
+      if (!glowOnBurst) {
+        ctx.shadowBlur = (isBeat ? (p.size * 3) : (p.size * 1.5));
+        ctx.shadowColor = finalColor;
+      }
+      ctx.fillStyle = finalColor;
       ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     } else if (settings.type === 'spark-stars') {
       ctx.save();
-      ctx.fillStyle = p.color;
+      ctx.fillStyle = finalColor;
       ctx.translate(p.x, p.y);
       ctx.rotate(p.angle || 0);
       const spikes = 5;
@@ -645,13 +759,15 @@ export function drawParticles(
       }
       ctx.lineTo(cx, cy - outerRadius);
       ctx.closePath();
-      ctx.shadowBlur = 10;
-      ctx.shadowColor = p.color;
+      if (!glowOnBurst) {
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = finalColor;
+      }
       ctx.fill();
       ctx.restore();
     } else if (settings.type === 'snowflakes') {
       ctx.save();
-      ctx.strokeStyle = p.color;
+      ctx.strokeStyle = finalColor;
       ctx.lineWidth = Math.max(1, p.size * 0.2);
       ctx.translate(p.x, p.y);
       ctx.rotate(p.angle || 0);
@@ -669,9 +785,11 @@ export function drawParticles(
       ctx.restore();
     } else if (settings.type === 'glowing-stars') {
       ctx.save();
-      ctx.fillStyle = p.color;
-      ctx.shadowBlur = isBeat ? 25 : 12;
-      ctx.shadowColor = p.color;
+      ctx.fillStyle = finalColor;
+      if (!glowOnBurst) {
+        ctx.shadowBlur = isBeat ? 25 : 12;
+        ctx.shadowColor = finalColor;
+      }
       ctx.translate(p.x, p.y);
       ctx.rotate(p.angle || 0);
       ctx.beginPath();
@@ -685,10 +803,12 @@ export function drawParticles(
       ctx.restore();
     } else if (settings.type === 'cyber-triangles') {
       ctx.save();
-      ctx.strokeStyle = p.color;
+      ctx.strokeStyle = finalColor;
       ctx.lineWidth = Math.max(1, p.size * 0.15);
-      ctx.shadowBlur = isBeat ? 15 : 5;
-      ctx.shadowColor = p.color;
+      if (!glowOnBurst) {
+        ctx.shadowBlur = isBeat ? 15 : 5;
+        ctx.shadowColor = finalColor;
+      }
       ctx.translate(p.x, p.y);
       ctx.rotate(p.angle || 0);
       ctx.beginPath();
@@ -701,24 +821,28 @@ export function drawParticles(
       ctx.restore();
     } else if (settings.type === 'floating-bubbles') {
       ctx.save();
-      ctx.strokeStyle = p.color;
+      ctx.strokeStyle = finalColor;
       ctx.lineWidth = Math.max(1.5, p.size * 0.12);
-      ctx.shadowBlur = 8;
-      ctx.shadowColor = p.color;
+      if (!glowOnBurst) {
+        ctx.shadowBlur = 8;
+        ctx.shadowColor = finalColor;
+      }
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
       ctx.stroke();
       ctx.beginPath();
       ctx.fillStyle = '#ffffff';
-      ctx.globalAlpha = p.alpha * 0.6;
+      ctx.globalAlpha = finalAlpha * 0.6;
       ctx.arc(p.x - p.size * 0.35, p.y - p.size * 0.35, p.size * 0.2, 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     } else if (settings.type === 'music-notes') {
       ctx.save();
-      ctx.fillStyle = p.color;
-      ctx.shadowBlur = isBeat ? 12 : 4;
-      ctx.shadowColor = p.color;
+      ctx.fillStyle = finalColor;
+      if (!glowOnBurst) {
+        ctx.shadowBlur = isBeat ? 12 : 4;
+        ctx.shadowColor = finalColor;
+      }
       ctx.translate(p.x, p.y);
       ctx.rotate(p.angle || 0);
       ctx.beginPath();
@@ -1112,18 +1236,21 @@ export function drawVisualizer(
     const barCount = settings.barFrequencyCount !== undefined && settings.barFrequencyCount > 0
       ? Math.min(settings.barFrequencyCount, dataLen)
       : Math.min(64, dataLen);
-    const spacing = settings.barSpacing;
-    const totalSpacing = spacing * (barCount - 1);
-    const barWidth = (width - totalSpacing) / barCount;
+    
+    const totalBars = barCount;
+    const computedBarWidth = (width / totalBars) * 0.8;
+    const spacing = (width / totalBars) * 0.2;
     const radius = settings.barRoundness;
 
-    for (let i = 0; i < barCount; i++) {
-      // Map index logy to focus on musical bass & mids
-      const idx = Math.floor(Math.pow(i / barCount, 1.3) * (dataLen * 0.7));
-      const value = analyserData[idx] || 0;
+    const maxIdx = Math.floor(dataLen * 0.65);
+    for (let i = 0; i < totalBars; i++) {
+      const idx = Math.floor(Math.pow(i / totalBars, 1.2) * maxIdx);
+      const rawValue = analyserData[idx] || 0;
+      // High-Frequency Equalization Gain
+      const value = Math.min(255, rawValue * (1 + (i / totalBars) * 1.5));
       const barHeight = (value / 255) * (height * 0.6) * settings.sensitivity + 4;
 
-      const x = i * (barWidth + spacing);
+      const x = i * (computedBarWidth + spacing);
       
       let y = midY - barHeight;
       if (yPercent < 40) {
@@ -1132,18 +1259,18 @@ export function drawVisualizer(
         y = midY - barHeight / 2;
       }
 
-      ctx.fillStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, i / barCount);
+      ctx.fillStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, i / totalBars);
       
       // Draw nicely rounded bar rectangles
       ctx.beginPath();
       if (radius > 0) {
         if (yPercent < 40) {
-          ctx.roundRect(x, y, barWidth, barHeight, [0, 0, radius, radius]);
+          ctx.roundRect(x, y, computedBarWidth, barHeight, [0, 0, radius, radius]);
         } else {
-          ctx.roundRect(x, y, barWidth, barHeight, [radius, radius, 0, 0]);
+          ctx.roundRect(x, y, computedBarWidth, barHeight, [radius, radius, 0, 0]);
         }
       } else {
-        ctx.rect(x, y, barWidth, barHeight);
+        ctx.rect(x, y, computedBarWidth, barHeight);
       }
       ctx.fill();
     }
@@ -2655,6 +2782,550 @@ export function drawVisualizer(
     ctx.closePath();
     ctx.fill();
     ctx.stroke();
+    ctx.restore();
+  } else if (settings.style === 'digital-matrix-blocks') {
+    // Digital Matrix Blocks vertical segments
+    const barCount = settings.barFrequencyCount !== undefined && settings.barFrequencyCount > 0
+      ? Math.min(settings.barFrequencyCount, dataLen)
+      : Math.min(48, dataLen);
+    
+    const totalBars = barCount;
+    const computedBarWidth = (width / totalBars) * 0.8;
+    const spacing = (width / totalBars) * 0.2;
+    
+    const blockHeight = Math.max(2, computedBarWidth * 0.82); // Height of each block segment
+    const blockGap = Math.max(1, computedBarWidth * 0.35); // Gap between each block segment
+    
+    const maxIdx = Math.floor(dataLen * 0.65);
+    for (let i = 0; i < totalBars; i++) {
+      const idx = Math.floor(Math.pow(i / totalBars, 1.2) * maxIdx);
+      const rawValue = analyserData[idx] || 0;
+      // High-Frequency Equalization Gain
+      const value = Math.min(255, rawValue * (1 + (i / totalBars) * 1.5));
+      const barHeight = (value / 255) * (height * 0.65) * settings.sensitivity + 4;
+      
+      const x = i * (computedBarWidth + spacing);
+      const numberOfBlocks = Math.max(1, Math.floor(barHeight / (blockHeight + blockGap)));
+      
+      ctx.fillStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, i / totalBars);
+      
+      for (let b = 0; b < numberOfBlocks; b++) {
+        const blockY = midY - (b * (blockHeight + blockGap)) - blockHeight;
+        ctx.beginPath();
+        ctx.rect(x, blockY, computedBarWidth, blockHeight);
+        ctx.fill();
+      }
+    }
+
+  } else if (settings.style === 'plasma-glow-ribbon') {
+    // Plasma Glow Ribbon bezier path with intense neon aura
+    ctx.save();
+    ctx.shadowBlur = 20;
+    ctx.shadowColor = settings.primaryColor;
+    ctx.strokeStyle = settings.primaryColor;
+    ctx.lineWidth = Math.max(3, settings.lineThickness * 1.5);
+    ctx.lineCap = 'round';
+    ctx.lineJoin = 'round';
+    
+    ctx.beginPath();
+    const sliceWidth = width / (dataLen - 1);
+    
+    // Points array for easier bezier calculation
+    const points: { x: number; y: number }[] = [];
+    for (let i = 0; i < dataLen; i++) {
+      const v = waveformData[i] / 128.0; 
+      const y = (v * (height / 3.3)) * settings.sensitivity + midY - (height / 6.6);
+      points.push({ x: i * sliceWidth, y });
+    }
+    
+    if (points.length > 0) {
+      ctx.moveTo(points[0].x, points[0].y);
+      for (let i = 0; i < points.length - 2; i++) {
+        const xc = (points[i].x + points[i + 1].x) / 2;
+        const yc = (points[i].y + points[i + 1].y) / 2;
+        ctx.quadraticCurveTo(points[i].x, points[i].y, xc, yc);
+      }
+      // Curve through last point
+      ctx.quadraticCurveTo(
+        points[points.length - 2].x,
+        points[points.length - 2].y,
+        points[points.length - 1].x,
+        points[points.length - 1].y
+      );
+      ctx.stroke();
+    }
+    ctx.restore();
+
+  } else if (settings.style === 'concentric-dual-radials') {
+    // Concentric Dual Radials rings for bass and midrange
+    ctx.save();
+    
+    // 1. Calculate Bass (outer ring) and Vocal (inner ring) averages
+    let bassSum = 0;
+    let bassCount = 0;
+    const bassLimit = Math.floor(dataLen * 0.15);
+    for (let i = 0; i < bassLimit; i++) {
+      bassSum += analyserData[i] || 0;
+      bassCount++;
+    }
+    const avgBass = bassCount > 0 ? (bassSum / bassCount) / 255 : 0;
+    
+    let vocalSum = 0;
+    let vocalCount = 0;
+    const vocalStart = Math.floor(dataLen * 0.15);
+    const vocalEnd = Math.floor(dataLen * 0.55);
+    for (let i = vocalStart; i < vocalEnd; i++) {
+      vocalSum += analyserData[i] || 0;
+      vocalCount++;
+    }
+    const avgVocal = vocalCount > 0 ? (vocalSum / vocalCount) / 255 : 0;
+    
+    // Radii calculation
+    const baseInnerRadius = Math.min(width, height) * 0.15;
+    const baseOuterRadius = Math.min(width, height) * 0.28;
+    
+    const innerRadius = baseInnerRadius + avgVocal * (Math.min(width, height) * 0.12) * settings.sensitivity;
+    const outerRadius = baseOuterRadius + avgBass * (Math.min(width, height) * 0.18) * settings.sensitivity;
+    
+    const ptsCount = 120;
+    
+    // Inner Ring (Vocal)
+    ctx.strokeStyle = settings.secondaryColor;
+    ctx.lineWidth = Math.max(1.5, settings.lineThickness);
+    ctx.shadowBlur = settings.glowStrength || 10;
+    ctx.shadowColor = settings.secondaryColor;
+    ctx.beginPath();
+    for (let i = 0; i <= ptsCount; i++) {
+      const angle = (i / ptsCount) * Math.PI * 2;
+      // Add a beautiful audio-reactive micro-jitter to ring vertices using waveform lookup
+      const waveIdx = Math.floor((i / ptsCount) * dataLen * 0.3) + vocalStart;
+      const waveVal = (waveformData[waveIdx % dataLen] || 128) - 128;
+      const radJitter = (waveVal / 128) * 12 * settings.sensitivity * avgVocal;
+      
+      const r = innerRadius + radJitter;
+      const px = centerX + Math.cos(angle) * r;
+      const py = centerY + Math.sin(angle) * r;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.stroke();
+    
+    // Outer Ring (Bass)
+    ctx.strokeStyle = settings.primaryColor;
+    ctx.lineWidth = Math.max(2, settings.lineThickness * 1.3);
+    ctx.shadowColor = settings.primaryColor;
+    ctx.beginPath();
+    for (let i = 0; i <= ptsCount; i++) {
+      const angle = (i / ptsCount) * Math.PI * 2;
+      const waveIdx = Math.floor((i / ptsCount) * dataLen * 0.2);
+      const waveVal = (waveformData[waveIdx % dataLen] || 128) - 128;
+      const radJitter = (waveVal / 128) * 22 * settings.sensitivity * avgBass;
+      
+      const r = outerRadius + radJitter;
+      const px = centerX + Math.cos(angle) * r;
+      const py = centerY + Math.sin(angle) * r;
+      if (i === 0) ctx.moveTo(px, py);
+      else ctx.lineTo(px, py);
+    }
+    ctx.closePath();
+    ctx.stroke();
+    
+    ctx.restore();
+
+  } else if (settings.style === 'shaded-mirror-silhouette') {
+    // Shaded Mirror Silhouette filled custom linear gradient
+    ctx.save();
+    const step = Math.max(1, Math.floor(dataLen / 120));
+    const points: { x: number; yTop: number; yBottom: number }[] = [];
+    
+    for (let i = 0; i < dataLen; i += step) {
+      const val = waveformData[i] || 128;
+      const hVal = ((val - 128) / 128) * (height * 0.28) * settings.sensitivity;
+      const x = (i / (dataLen - 1)) * width;
+      points.push({ x, yTop: midY - hVal, yBottom: midY + hVal });
+    }
+    
+    if (points.length > 0) {
+      const rgb1 = hexToRgb(settings.primaryColor) || { r: 0, g: 255, b: 200 };
+      const rgb2 = hexToRgb(settings.secondaryColor) || { r: 255, g: 0, b: 128 };
+      
+      const gradient = ctx.createLinearGradient(0, midY - height * 0.35, 0, midY + height * 0.35);
+      gradient.addColorStop(0, `rgba(${rgb1.r}, ${rgb1.g}, ${rgb1.b}, 0.40)`);
+      gradient.addColorStop(0.5, `rgba(${rgb2.r}, ${rgb2.g}, ${rgb2.b}, 0.15)`);
+      gradient.addColorStop(1, `rgba(${rgb1.r}, ${rgb1.g}, ${rgb1.b}, 0.40)`);
+      
+      ctx.fillStyle = gradient;
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, points[0].yTop);
+      for (let i = 0; i < points.length; i++) {
+        ctx.lineTo(points[i].x, points[i].yTop);
+      }
+      for (let i = points.length - 1; i >= 0; i--) {
+        ctx.lineTo(points[i].x, points[i].yBottom);
+      }
+      ctx.closePath();
+      ctx.fill();
+      
+      // Draw subtle glowing outlines
+      ctx.strokeStyle = `rgba(${rgb1.r}, ${rgb1.g}, ${rgb1.b}, 0.8)`;
+      ctx.lineWidth = settings.lineThickness;
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, points[0].yTop);
+      for (let i = 1; i < points.length; i++) {
+        ctx.lineTo(points[i].x, points[i].yTop);
+      }
+      ctx.stroke();
+      
+      ctx.strokeStyle = `rgba(${rgb2.r}, ${rgb2.g}, ${rgb2.b}, 0.8)`;
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, points[0].yBottom);
+      for (let i = 1; i < points.length; i++) {
+        ctx.lineTo(points[i].x, points[i].yBottom);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+  } else if (settings.style === 'reflected-glow-ribbon') {
+    // Reflected Glow Ribbon: draw active curvy path, then its vertical mirror with gradient alpha
+    ctx.save();
+    
+    // Points array for bezier curve
+    const points: { x: number; yOffset: number }[] = [];
+    const sliceWidth = width / (dataLen - 1);
+    for (let i = 0; i < dataLen; i++) {
+      const v = waveformData[i] / 128.0; 
+      const yOffset = (v - 1.0) * (height * 0.25) * settings.sensitivity;
+      points.push({ x: i * sliceWidth, yOffset });
+    }
+
+    if (points.length > 0) {
+      // 1. Draw top glowing ribbon
+      ctx.save();
+      ctx.shadowBlur = 20;
+      ctx.shadowColor = settings.primaryColor;
+      ctx.strokeStyle = settings.primaryColor;
+      ctx.lineWidth = Math.max(3, settings.lineThickness * 1.5);
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, midY + points[0].yOffset);
+      for (let i = 0; i < points.length - 2; i++) {
+        const xc = (points[i].x + points[i + 1].x) / 2;
+        const yc = (midY + points[i].yOffset + midY + points[i + 1].yOffset) / 2;
+        ctx.quadraticCurveTo(points[i].x, midY + points[i].yOffset, xc, yc);
+      }
+      ctx.quadraticCurveTo(
+        points[points.length - 2].x,
+        midY + points[points.length - 2].yOffset,
+        points[points.length - 1].x,
+        midY + points[points.length - 1].yOffset
+      );
+      ctx.stroke();
+      ctx.restore();
+
+      // 2. Draw inverted mirror counterpart with fading transparency gradient
+      ctx.save();
+      // No extreme neon shadow blur on reflection, just smooth fade
+      ctx.lineWidth = Math.max(2, settings.lineThickness * 1.2);
+      ctx.lineCap = 'round';
+      ctx.lineJoin = 'round';
+      
+      const reflexGrad = ctx.createLinearGradient(0, midY, 0, height);
+      const rgb = hexToRgb(settings.primaryColor) || { r: 0, g: 255, b: 200 };
+      reflexGrad.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.55)`);
+      reflexGrad.addColorStop(1, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.0)`);
+      ctx.strokeStyle = reflexGrad;
+
+      ctx.beginPath();
+      // Invert Y offset by multiplying by -1
+      ctx.moveTo(points[0].x, midY - points[0].yOffset);
+      for (let i = 0; i < points.length - 2; i++) {
+        const xc = (points[i].x + points[i + 1].x) / 2;
+        const yc = (midY - points[i].yOffset + midY - points[i + 1].yOffset) / 2;
+        ctx.quadraticCurveTo(points[i].x, midY - points[i].yOffset, xc, yc);
+      }
+      ctx.quadraticCurveTo(
+        points[points.length - 2].x,
+        midY - points[points.length - 2].yOffset,
+        points[points.length - 1].x,
+        midY - points[points.length - 1].yOffset
+      );
+      ctx.stroke();
+      ctx.restore();
+    }
+    ctx.restore();
+
+  } else if (settings.style === 'reflected-matrix-dots') {
+    // Reflected Matrix Dots: Rows of discrete vertical dots, mirrored downwards with fading opacity
+    ctx.save();
+    const barCount = settings.barFrequencyCount !== undefined && settings.barFrequencyCount > 0
+      ? Math.min(settings.barFrequencyCount, dataLen)
+      : Math.min(48, dataLen);
+    
+    const totalBars = barCount;
+    const computedBarWidth = (width / totalBars) * 0.8;
+    const spacing = (width / totalBars) * 0.2;
+    
+    const dotRadius = Math.max(1.5, computedBarWidth * 0.45);
+    const dotGap = Math.max(2, computedBarWidth * 0.4);
+    
+    const rgbPrimary = hexToRgb(settings.primaryColor) || { r: 0, g: 255, b: 200 };
+    const rgbSecondary = hexToRgb(settings.secondaryColor) || { r: 255, g: 0, b: 128 };
+
+    const maxIdx = Math.floor(dataLen * 0.65);
+    for (let i = 0; i < totalBars; i++) {
+      const idx = Math.floor(Math.pow(i / totalBars, 1.2) * maxIdx);
+      const rawValue = analyserData[idx] || 0;
+      // High-Frequency Equalization Gain
+      const value = Math.min(255, rawValue * (1 + (i / totalBars) * 1.5));
+      const barHeight = (value / 255) * (height * 0.45) * settings.sensitivity + 4;
+      
+      const x = i * (computedBarWidth + spacing) + computedBarWidth / 2;
+      const dotCount = Math.max(1, Math.floor(barHeight / (dotRadius * 2 + dotGap)));
+      
+      const interpolationRatio = i / totalBars;
+      const r = Math.round(rgbPrimary.r + (rgbSecondary.r - rgbPrimary.r) * interpolationRatio);
+      const g = Math.round(rgbPrimary.g + (rgbSecondary.g - rgbPrimary.g) * interpolationRatio);
+      const b = Math.round(rgbPrimary.b + (rgbSecondary.b - rgbPrimary.b) * interpolationRatio);
+
+      // Top dots (above baseline)
+      for (let dotIdx = 0; dotIdx < dotCount; dotIdx++) {
+        const y = midY - (dotIdx * (dotRadius * 2 + dotGap)) - dotRadius;
+        ctx.beginPath();
+        ctx.arc(x, y, dotRadius, 0, Math.PI * 2);
+        ctx.fillStyle = `rgb(${r}, ${g}, ${b})`;
+        ctx.shadowBlur = settings.glowStrength || 8;
+        ctx.shadowColor = `rgb(${r}, ${g}, ${b})`;
+        ctx.fill();
+      }
+
+      // Bottom reflected dots (below baseline) with progressively decreasing opacity
+      for (let dotIdx = 0; dotIdx < dotCount; dotIdx++) {
+        const y = midY + (dotIdx * (dotRadius * 2 + dotGap)) + dotRadius;
+        const opacity = Math.max(0, 0.6 * (1.0 - dotIdx / dotCount));
+        ctx.beginPath();
+        ctx.arc(x, y, dotRadius, 0, Math.PI * 2);
+        ctx.fillStyle = `rgba(${r}, ${g}, ${b}, ${opacity})`;
+        ctx.shadowBlur = 0; // No shadow for reflections to maintain clean aesthetics
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+
+  } else if (settings.style === 'reflected-mountain-silhouette') {
+    // Reflected Mountain Silhouette: Filled area silhouette gradient, with a flipped 0.35 opacity reflection below
+    ctx.save();
+    const step = Math.max(1, Math.floor(dataLen / 120));
+    const points: { x: number; yTopOffset: number }[] = [];
+    
+    for (let i = 0; i < dataLen; i += step) {
+      const val = waveformData[i] || 128;
+      const yOffset = ((val - 128) / 128) * (height * 0.3) * settings.sensitivity;
+      const x = (i / (dataLen - 1)) * width;
+      points.push({ x, yTopOffset: yOffset });
+    }
+    
+    if (points.length > 0) {
+      const rgb1 = hexToRgb(settings.primaryColor) || { r: 0, g: 255, b: 200 };
+      const rgb2 = hexToRgb(settings.secondaryColor) || { r: 255, g: 0, b: 128 };
+      
+      // 1. Draw top mountain structure
+      const topGrad = ctx.createLinearGradient(0, midY - height * 0.35, 0, midY);
+      topGrad.addColorStop(0, `rgba(${rgb1.r}, ${rgb1.g}, ${rgb1.b}, 0.75)`);
+      topGrad.addColorStop(1, `rgba(${rgb2.r}, ${rgb2.g}, ${rgb2.b}, 0.1)`);
+      
+      ctx.fillStyle = topGrad;
+      ctx.beginPath();
+      ctx.moveTo(0, midY);
+      for (let i = 0; i < points.length; i++) {
+        ctx.lineTo(points[i].x, midY - points[i].yTopOffset);
+      }
+      ctx.lineTo(width, midY);
+      ctx.closePath();
+      ctx.fill();
+
+      // Subtle mountain top line
+      ctx.strokeStyle = settings.primaryColor;
+      ctx.lineWidth = Math.max(1.5, settings.lineThickness);
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, midY - points[0].yTopOffset);
+      for (let i = 1; i < points.length; i++) {
+        ctx.lineTo(points[i].x, midY - points[i].yTopOffset);
+      }
+      ctx.stroke();
+
+      // 2. Draw mirrored bottom mountain reflection with fixed translucent opacity 0.35
+      const bottomGrad = ctx.createLinearGradient(0, midY, 0, midY + height * 0.35);
+      bottomGrad.addColorStop(0, `rgba(${rgb2.r}, ${rgb2.g}, ${rgb2.b}, 0.35)`);
+      bottomGrad.addColorStop(1, `rgba(${rgb1.r}, ${rgb1.g}, ${rgb1.b}, 0.0)`);
+      
+      ctx.fillStyle = bottomGrad;
+      ctx.beginPath();
+      ctx.moveTo(0, midY);
+      for (let i = 0; i < points.length; i++) {
+        // Mirrored below horizontal axis: midY + yTopOffset
+        ctx.lineTo(points[i].x, midY + points[i].yTopOffset);
+      }
+      ctx.lineTo(width, midY);
+      ctx.closePath();
+      ctx.fill();
+
+      // Mirrored mountain bottom line with 0.35 opacity
+      ctx.strokeStyle = `rgba(${rgb2.r}, ${rgb2.g}, ${rgb2.b}, 0.35)`;
+      ctx.lineWidth = Math.max(1.0, settings.lineThickness);
+      ctx.beginPath();
+      ctx.moveTo(points[0].x, midY + points[0].yTopOffset);
+      for (let i = 1; i < points.length; i++) {
+        ctx.lineTo(points[i].x, midY + points[i].yTopOffset);
+      }
+      ctx.stroke();
+    }
+    ctx.restore();
+
+  } else if (settings.style === 'reflected-center-split-pins') {
+    // Reflected Center-Split Pins: dynamic high-density lines shooting upward and downward symmetrically with a reflection alpha mask on the bottom half
+    ctx.save();
+    
+    const pinCount = Math.min(120, dataLen);
+    const totalBars = pinCount;
+    const computedBarWidth = (width / totalBars) * 0.8;
+    const spacing = (width / totalBars) * 0.2;
+    
+    const maxIdx = Math.floor(dataLen * 0.65);
+    // Draw the pins
+    for (let i = 0; i < totalBars; i++) {
+      const idx = Math.floor(Math.pow(i / totalBars, 1.2) * maxIdx);
+      const rawValue = analyserData[idx] || 0;
+      // High-Frequency Equalization Gain
+      const value = Math.min(255, rawValue * (1 + (i / totalBars) * 1.5));
+      const pinLength = (value / 255) * (height * 0.35) * settings.sensitivity + 2;
+      const x = i * (computedBarWidth + spacing) + computedBarWidth / 2;
+      
+      const pinColor = getDynamicColor(settings.primaryColor, settings.secondaryColor, i / totalBars);
+      
+      // Top pins (glowing pins shooting upward)
+      ctx.beginPath();
+      ctx.moveTo(x, midY);
+      ctx.lineTo(x, midY - pinLength);
+      ctx.strokeStyle = pinColor;
+      ctx.lineWidth = Math.max(1.0, computedBarWidth);
+      ctx.shadowBlur = settings.glowStrength || 4;
+      ctx.shadowColor = pinColor;
+      ctx.stroke();
+      
+      // Bottom pins (mirrored downward)
+      ctx.beginPath();
+      ctx.moveTo(x, midY);
+      ctx.lineTo(x, midY + pinLength);
+      ctx.strokeStyle = pinColor;
+      ctx.lineWidth = Math.max(1.0, computedBarWidth);
+      ctx.shadowBlur = 0; // Disable shadow on mirror reflection
+      ctx.stroke();
+    }
+    
+    // Layer a secondary full-width alpha mask over the lower half
+    const alphaMaskGrad = ctx.createLinearGradient(0, midY, 0, height);
+    // Mask color blending into dark studio background
+    alphaMaskGrad.addColorStop(0, 'rgba(10, 10, 15, 0.25)');
+    alphaMaskGrad.addColorStop(0.5, 'rgba(10, 10, 15, 0.65)');
+    alphaMaskGrad.addColorStop(1, 'rgba(10, 10, 15, 0.95)');
+    
+    ctx.fillStyle = alphaMaskGrad;
+    ctx.shadowBlur = 0;
+    ctx.beginPath();
+    ctx.rect(0, midY, width, height - midY);
+    ctx.fill();
+    
+    ctx.restore();
+
+  } else if (settings.style === 'reflected-radial-ring-horizon') {
+    // Reflected Radial Ring Horizon: Radial ring centered at baseline, top half normal, bottom half clipped and mirrored down
+    ctx.save();
+    
+    // 1. Calculate overall midrange volume
+    let waveSum = 0;
+    const waveLimit = Math.floor(dataLen * 0.6);
+    for (let i = 0; i < waveLimit; i++) {
+      waveSum += analyserData[i] || 0;
+    }
+    const volumeCoeff = (waveSum / Math.max(1, waveLimit)) / 255;
+    
+    const baseRadius = Math.min(width, height) * 0.22;
+    const activeRadius = baseRadius + volumeCoeff * (Math.min(width, height) * 0.12) * settings.sensitivity;
+    
+    const ptsCount = 180;
+    const ringPoints: { x: number; y: number }[] = [];
+    
+    // Build the radial coordinate ring points
+    for (let i = 0; i <= ptsCount; i++) {
+      const angle = (i / ptsCount) * Math.PI * 2;
+      // Get waveform coordinate offset to create dynamic bumpy radial lines
+      const waveIdx = Math.floor((i / ptsCount) * dataLen * 0.4);
+      const waveValue = (waveformData[waveIdx % dataLen] || 128) - 128;
+      const offsetRadius = (waveValue / 128) * 35 * settings.sensitivity * (0.3 + 0.7 * volumeCoeff);
+      
+      const r = activeRadius + offsetRadius;
+      const px = centerX + Math.cos(angle) * r;
+      const py = midY + Math.sin(angle) * r; // Centered precisely on the baseline horizon (midY)
+      ringPoints.push({ x: px, y: py });
+    }
+    
+    // Draw Top Half (y <= midY)
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, 0, width, midY);
+    ctx.clip(); // Limit drawing strictly to the upper horizon
+    
+    ctx.beginPath();
+    ctx.moveTo(ringPoints[0].x, ringPoints[0].y);
+    for (let i = 1; i < ringPoints.length; i++) {
+      ctx.lineTo(ringPoints[i].x, ringPoints[i].y);
+    }
+    ctx.strokeStyle = settings.primaryColor;
+    ctx.lineWidth = Math.max(2, settings.lineThickness * 1.2);
+    ctx.shadowBlur = settings.glowStrength || 15;
+    ctx.shadowColor = settings.primaryColor;
+    ctx.stroke();
+    ctx.restore();
+    
+    // Draw Bottom Half (which is a mirrored counterpart reflecting straight down into floor boundary)
+    // To mirror the top half straight down below midY:
+    // If a top point has y = midY - dy, its mirrored point has yRef = midY + dy.
+    ctx.save();
+    ctx.beginPath();
+    ctx.rect(0, midY, width, height - midY);
+    ctx.clip(); // Limit drawing strictly to the lower horizon
+    
+    ctx.beginPath();
+    const firstPointYDiff = ringPoints[0].y - midY;
+    ctx.moveTo(ringPoints[0].x, midY - firstPointYDiff);
+    for (let i = 1; i < ringPoints.length; i++) {
+      const yDiff = ringPoints[i].y - midY;
+      ctx.lineTo(ringPoints[i].x, midY - yDiff);
+    }
+    
+    // Gradient reflection stroke
+    const reflectionGrad = ctx.createLinearGradient(0, midY, 0, height);
+    const rgb = hexToRgb(settings.primaryColor) || { r: 0, g: 255, b: 200 };
+    reflectionGrad.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.55)`);
+    reflectionGrad.addColorStop(1, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.0)`);
+    
+    ctx.strokeStyle = reflectionGrad;
+    ctx.lineWidth = Math.max(1.5, settings.lineThickness);
+    ctx.shadowBlur = 0; // Disable shadow on bottom reflection
+    ctx.stroke();
+    ctx.restore();
+    
+    // Draw elegant baseline horizon wire
+    ctx.strokeStyle = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.3)`;
+    ctx.lineWidth = 1;
+    ctx.beginPath();
+    ctx.moveTo(0, midY);
+    ctx.lineTo(width, midY);
+    ctx.stroke();
+    
     ctx.restore();
   }
 

@@ -27,6 +27,7 @@ import {
   FolderOpen,
   Shuffle,
   Wand2,
+  Activity,
 } from 'lucide-react';
 import {
   VisualizerStyle,
@@ -321,6 +322,81 @@ function createImpulseResponse(ctx: BaseAudioContext, duration: number, decay: n
   return impulse;
 }
 
+function createPitchShifter(ctx: AudioContext) {
+  const bufferSize = 2048;
+  const node = ctx.createScriptProcessor(bufferSize, 2, 2);
+  let pitchShiftVal = 0; // default 0 semitones
+
+  const size = 32768;
+  const inBufferL = new Float32Array(size);
+  const inBufferR = new Float32Array(size);
+  const outBufferL = new Float32Array(size);
+  const outBufferR = new Float32Array(size);
+
+  let writePos = 0;
+  let readPos = 0;
+
+  const grainSize = 512;
+  const overlap = 256;
+  const windowArray = new Float32Array(grainSize);
+  for (let i = 0; i < grainSize; i++) {
+    windowArray[i] = Math.sin((i / grainSize) * Math.PI);
+  }
+
+  node.onaudioprocess = (e) => {
+    const inputL = e.inputBuffer.getChannelData(0);
+    const inputR = e.inputBuffer.getChannelData(1);
+    const outputL = e.outputBuffer.getChannelData(0);
+    const outputR = e.outputBuffer.getChannelData(1);
+
+    const factor = Math.pow(2, pitchShiftVal / 12);
+
+    if (Math.abs(pitchShiftVal) < 0.1) {
+      outputL.set(inputL);
+      outputR.set(inputR);
+      return;
+    }
+
+    for (let i = 0; i < bufferSize; i++) {
+      inBufferL[(writePos + i) % size] = inputL[i];
+      inBufferR[(writePos + i) % size] = inputR[i];
+      outBufferL[(writePos + i) % size] = 0;
+      outBufferR[(writePos + i) % size] = 0;
+    }
+
+    let gWrite = writePos;
+    let gRead = readPos;
+
+    while (gWrite < writePos + bufferSize) {
+      for (let i = 0; i < grainSize; i++) {
+        const rIdx = Math.floor(gRead + i * factor) % size;
+        const wIdx = Math.floor(gWrite + i) % size;
+        const win = windowArray[i];
+        outBufferL[wIdx] += inBufferL[rIdx] * win;
+        outBufferR[wIdx] += inBufferR[rIdx] * win;
+      }
+      gWrite += overlap;
+      gRead += overlap * factor;
+    }
+
+    readPos = gRead % size;
+    writePos = (writePos + bufferSize) % size;
+
+    for (let i = 0; i < bufferSize; i++) {
+      const idx = (writePos + i) % size;
+      outputL[i] = outBufferL[idx];
+      outputR[i] = outBufferR[idx];
+    }
+  };
+
+  return {
+    node,
+    setPitch: (semitones: number) => {
+      pitchShiftVal = semitones;
+    }
+  };
+}
+
 export default function App() {
   // Navigation Tabs state
   const [activeTab, setActiveTab] = useState<'track' | 'background' | 'visuals' | 'particles' | 'overlay' | 'text' | 'export' | 'sfx'>('track');
@@ -381,6 +457,16 @@ export default function App() {
   const [sfxAutoPan, setSfxAutoPan] = useState<boolean>(false);
   const [sfxPlaybackRate, setSfxPlaybackRate] = useState<number>(1.0);
 
+  // DSP States
+  const [dspPlaybackSpeed, setDspPlaybackSpeed] = useState<number>(1.0);
+  const [dspPitchShift, setDspPitchShift] = useState<number>(0);
+  const [dspDelayTime, setDspDelayTime] = useState<number>(0.0);
+  const [dspDelayFeedback, setDspDelayFeedback] = useState<number>(0.0);
+  const [dspCompressorThreshold, setDspCompressorThreshold] = useState<number>(0.0); // dB Threshold: -100 to 0 (default 0)
+  const [dspSubBassSaturation, setDspSubBassSaturation] = useState<number>(0.0); // Low-shelf gain: 0 to 12 dB (default 0)
+  const [dspStereoBalance, setDspStereoBalance] = useState<number>(0.0); // panning -1.0 to 1.0 (default 0)
+  const [dspVocalAttenuator, setDspVocalAttenuator] = useState<boolean>(false);
+
   // SFX Refs
   const delayNodeRef = useRef<DelayNode | null>(null);
   const echoWetGainNodeRef = useRef<GainNode | null>(null);
@@ -388,6 +474,17 @@ export default function App() {
   const convolverNodeRef = useRef<ConvolverNode | null>(null);
   const reverbWetGainNodeRef = useRef<GainNode | null>(null);
   const stereoPannerNodeRef = useRef<StereoPannerNode | null>(null);
+
+  // DSP Refs
+  const dspDelayNodeRef = useRef<DelayNode | null>(null);
+  const dspDelayFeedbackRef = useRef<GainNode | null>(null);
+  const dspDelayWetGainRef = useRef<GainNode | null>(null);
+  const dspCompressorNodeRef = useRef<DynamicsCompressorNode | null>(null);
+  const dspBassRef = useRef<BiquadFilterNode | null>(null);
+  const dspPannerNodeRef = useRef<StereoPannerNode | null>(null);
+  const dspVocalDryGainRef = useRef<GainNode | null>(null);
+  const dspVocalWetGainRef = useRef<GainNode | null>(null);
+  const dspPitchShifterSetRef = useRef<((s: number) => void) | null>(null);
 
   const sfxAutoPanRef = useRef(sfxAutoPan);
   const sfxPanRef = useRef(sfxPan);
@@ -453,6 +550,77 @@ export default function App() {
       } catch (err) {}
     }
   }, [sfxPlaybackRate]);
+
+  // DSP parameters to AudioNode synchronization
+  useEffect(() => {
+    if (audioRef.current) {
+      try {
+        audioRef.current.playbackRate = dspPlaybackSpeed;
+      } catch (err) {}
+    }
+  }, [dspPlaybackSpeed]);
+
+  useEffect(() => {
+    if (dspPitchShifterSetRef.current) {
+      try {
+        dspPitchShifterSetRef.current(dspPitchShift);
+      } catch (err) {}
+    }
+  }, [dspPitchShift]);
+
+  useEffect(() => {
+    if (dspDelayNodeRef.current && audioContextRef.current) {
+      try {
+        dspDelayNodeRef.current.delayTime.setValueAtTime(dspDelayTime, audioContextRef.current.currentTime);
+      } catch (err) {}
+    }
+    if (dspDelayWetGainRef.current && audioContextRef.current) {
+      try {
+        dspDelayWetGainRef.current.gain.setValueAtTime(dspDelayTime > 0 ? 0.45 : 0.0, audioContextRef.current.currentTime);
+      } catch (err) {}
+    }
+  }, [dspDelayTime]);
+
+  useEffect(() => {
+    if (dspDelayFeedbackRef.current && audioContextRef.current) {
+      try {
+        dspDelayFeedbackRef.current.gain.setValueAtTime(dspDelayFeedback / 100, audioContextRef.current.currentTime);
+      } catch (err) {}
+    }
+  }, [dspDelayFeedback]);
+
+  useEffect(() => {
+    if (dspCompressorNodeRef.current && audioContextRef.current) {
+      try {
+        dspCompressorNodeRef.current.threshold.setValueAtTime(dspCompressorThreshold, audioContextRef.current.currentTime);
+      } catch (err) {}
+    }
+  }, [dspCompressorThreshold]);
+
+  useEffect(() => {
+    if (dspBassRef.current && audioContextRef.current) {
+      try {
+        dspBassRef.current.gain.setValueAtTime(dspSubBassSaturation, audioContextRef.current.currentTime);
+      } catch (err) {}
+    }
+  }, [dspSubBassSaturation]);
+
+  useEffect(() => {
+    if (dspPannerNodeRef.current && audioContextRef.current) {
+      try {
+        dspPannerNodeRef.current.pan.setValueAtTime(dspStereoBalance, audioContextRef.current.currentTime);
+      } catch (err) {}
+    }
+  }, [dspStereoBalance]);
+
+  useEffect(() => {
+    if (dspVocalDryGainRef.current && dspVocalWetGainRef.current && audioContextRef.current) {
+      try {
+        dspVocalDryGainRef.current.gain.setValueAtTime(dspVocalAttenuator ? 0.0 : 1.0, audioContextRef.current.currentTime);
+        dspVocalWetGainRef.current.gain.setValueAtTime(dspVocalAttenuator ? 1.0 : 0.0, audioContextRef.current.currentTime);
+      } catch (err) {}
+    }
+  }, [dspVocalAttenuator]);
 
   const [audioTrack, setAudioTrack] = useState<AudioTrack>({
     name: 'Dynamic Visualizer Peak',
@@ -895,9 +1063,114 @@ export default function App() {
         pannerInput.connect(pannerOutput);
       }
 
+      // --- DSP CONTROLS BLOCKS ---
+      // 1. Bass Booster low-shelf filter for Sub-Bass Saturation (targeting frequencies below 80Hz)
+      const dspBassFilter = ctx.createBiquadFilter();
+      dspBassFilter.type = 'lowshelf';
+      dspBassFilter.frequency.value = 80;
+      dspBassFilter.gain.value = dspSubBassSaturation;
+      dspBassRef.current = dspBassFilter;
+
+      // 2. Pitch Shifter ScriptProcessor
+      const dspPitchShifter = createPitchShifter(ctx);
+      dspPitchShifter.setPitch(dspPitchShift);
+      dspPitchShifterSetRef.current = dspPitchShifter.setPitch;
+
+      // 3. Audio Compressor (Master Compressor threshold)
+      const dspComp = ctx.createDynamicsCompressor();
+      dspComp.threshold.value = dspCompressorThreshold;
+      dspCompressorNodeRef.current = dspComp;
+
+      // 4. Stereo Panner for Stereo Balance
+      let dspPannerNode: StereoPannerNode | null = null;
+      const dspPannerInput = ctx.createGain();
+      const dspPannerOutput = ctx.createGain();
+      if (ctx.createStereoPanner) {
+        dspPannerNode = ctx.createStereoPanner();
+        dspPannerNode.pan.value = dspStereoBalance;
+        dspPannerNodeRef.current = dspPannerNode;
+        dspPannerInput.connect(dspPannerNode);
+        dspPannerNode.connect(dspPannerOutput);
+      } else {
+        dspPannerInput.connect(dspPannerOutput);
+      }
+
+      // 5. Echo / Delay loop block
+      const dspDelayInput = ctx.createGain();
+      const dspDelayOutput = ctx.createGain();
+      const dspDelayNode = ctx.createDelay(1.0);
+      dspDelayNode.delayTime.value = dspDelayTime;
+      const dspFeedbackGain = ctx.createGain();
+      dspFeedbackGain.gain.value = dspDelayFeedback / 100;
+      const dspDelayWetGain = ctx.createGain();
+      dspDelayWetGain.gain.value = dspDelayTime > 0 ? 0.45 : 0.0;
+
+      dspDelayInput.connect(dspDelayOutput); // dry path
+      dspDelayInput.connect(dspDelayNode); // wet input
+      dspDelayNode.connect(dspFeedbackGain);
+      dspFeedbackGain.connect(dspDelayNode); // feedback loop
+      dspDelayNode.connect(dspDelayWetGain);
+      dspDelayWetGain.connect(dspDelayOutput); // wet output mix
+
+      dspDelayNodeRef.current = dspDelayNode;
+      dspDelayFeedbackRef.current = dspFeedbackGain;
+      dspDelayWetGainRef.current = dspDelayWetGain;
+
+      // 6. Vocal Attenuator (Phase-Inversion suppress centered vocal frequencies)
+      const dspVocalInput = ctx.createGain();
+      const dspVocalOutput = ctx.createGain();
+      
+      const vocalDryGain = ctx.createGain();
+      vocalDryGain.gain.value = dspVocalAttenuator ? 0.0 : 1.0;
+      const vocalWetGain = ctx.createGain();
+      vocalWetGain.gain.value = dspVocalAttenuator ? 1.0 : 0.0;
+
+      const splitter = ctx.createChannelSplitter(2);
+      const merger = ctx.createChannelMerger(2);
+      const leftGain = ctx.createGain();
+      leftGain.gain.value = 1.0;
+      const rightGain = ctx.createGain();
+      rightGain.gain.value = -1.0; // Phase Inversion
+      const subtractor = ctx.createGain();
+      subtractor.gain.value = 0.5;
+
+      dspVocalInput.connect(vocalDryGain);
+      vocalDryGain.connect(dspVocalOutput);
+
+      dspVocalInput.connect(vocalWetGain);
+      vocalWetGain.connect(splitter);
+      splitter.connect(leftGain, 0);
+      splitter.connect(rightGain, 1);
+      leftGain.connect(subtractor);
+      rightGain.connect(subtractor);
+      subtractor.connect(merger, 0, 0);
+      subtractor.connect(merger, 0, 1);
+      merger.connect(dspVocalOutput);
+
+      dspVocalDryGainRef.current = vocalDryGain;
+      dspVocalWetGainRef.current = vocalWetGain;
+
       // --- CONNECT THE SYSTEM IN SERIES ---
-      // 10 EQ filters final node -> Echo Input
-      eqFilters[eqFilters.length - 1].connect(echoInput);
+      // 10 EQ filters final node -> low-shelf bass booster
+      eqFilters[eqFilters.length - 1].connect(dspBassFilter);
+
+      // Bass Booster -> Pitch Shifter
+      dspBassFilter.connect(dspPitchShifter.node);
+
+      // Pitch Shifter -> Dynamics Compressor
+      dspPitchShifter.node.connect(dspComp);
+
+      // Compressor -> Stereo Panner
+      dspComp.connect(dspPannerInput);
+
+      // Stereo Panner -> DSP Delay
+      dspPannerOutput.connect(dspDelayInput);
+
+      // DSP Delay -> Vocal Attenuator
+      dspDelayOutput.connect(dspVocalInput);
+
+      // Vocal Attenuator -> legacy/SFX Echo Input
+      dspVocalOutput.connect(echoInput);
       
       // Echo Output -> Reverb Input
       echoOutput.connect(reverbInput);
@@ -2353,7 +2626,7 @@ export default function App() {
           bassIntensity,
           overallVolume
         );
-        drawParticles(ctx, particlesPoolRef.current, particlesSetRef.current, isBeat, bassIntensity);
+        drawParticles(ctx, particlesPoolRef.current, particlesSetRef.current, isBeat, bassIntensity, visualsRef.current);
       }
 
       // --- SECTION 3: AUDIO-REACTIVE BEATER BURSTS / ADVANCED FIREWORKS SYSTEM ---
@@ -4098,6 +4371,236 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* Section B: DSP CONTROLS (Digital Signal Processing) */}
+                <div className="bg-zinc-950/40 p-4 rounded-xl border border-zinc-900/50 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider font-mono flex items-center space-x-2">
+                      <Activity className="w-3.5 h-3.5 text-blue-500 animate-pulse" />
+                      <span>DSP CONTROLS (Digital Signal Processing)</span>
+                    </span>
+                    {(dspPlaybackSpeed !== 1.0 || dspPitchShift !== 0 || dspDelayTime !== 0 || dspDelayFeedback !== 0 || dspCompressorThreshold !== 0 || dspSubBassSaturation !== 0 || dspStereoBalance !== 0 || dspVocalAttenuator) && (
+                      <button
+                        onClick={() => {
+                          setDspPlaybackSpeed(1.0);
+                          setDspPitchShift(0);
+                          setDspDelayTime(0.0);
+                          setDspDelayFeedback(0.0);
+                          setDspCompressorThreshold(0.0);
+                          setDspSubBassSaturation(0.0);
+                          setDspStereoBalance(0.0);
+                          setDspVocalAttenuator(false);
+                        }}
+                        className="text-[9px] font-mono text-blue-500 hover:text-blue-400 transition-colors cursor-pointer uppercase"
+                      >
+                        Reset DSP
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+                    {/* Control 1: Playback Speed */}
+                    <div className="space-y-1.5 bg-zinc-900/20 p-2.5 rounded border border-zinc-900/40">
+                      <div className="flex justify-between font-mono text-[9px]">
+                        <span className="text-zinc-300 font-semibold uppercase">Playback Speed</span>
+                        <span className="text-blue-400 font-bold">{dspPlaybackSpeed.toFixed(2)}x</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0.5"
+                        max="2.0"
+                        step="0.05"
+                        value={dspPlaybackSpeed}
+                        onChange={(e) => {
+                          initAudioSystem();
+                          setDspPlaybackSpeed(parseFloat(e.target.value));
+                        }}
+                        className="w-full accent-blue-600 h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none mt-1"
+                      />
+                      <div className="flex justify-between text-[8px] text-zinc-550 font-mono">
+                        <span>0.5x Slow</span>
+                        <span>1.0x Normal</span>
+                        <span>2.0x Fast</span>
+                      </div>
+                    </div>
+
+                    {/* Control 2: Pitch Shift */}
+                    <div className="space-y-1.5 bg-zinc-900/20 p-2.5 rounded border border-zinc-900/40">
+                      <div className="flex justify-between font-mono text-[9px]">
+                        <span className="text-zinc-300 font-semibold uppercase">Pitch Shift</span>
+                        <span className="text-blue-400 font-bold">
+                          {dspPitchShift > 0 ? `+${dspPitchShift}` : dspPitchShift} semitones
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="-12"
+                        max="12"
+                        step="1"
+                        value={dspPitchShift}
+                        onChange={(e) => {
+                          initAudioSystem();
+                          setDspPitchShift(parseInt(e.target.value));
+                        }}
+                        className="w-full accent-blue-600 h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none mt-1"
+                      />
+                      <div className="flex justify-between text-[8px] text-zinc-550 font-mono">
+                        <span>-12 Octave Down</span>
+                        <span>0 Flat</span>
+                        <span>+12 Octave Up</span>
+                      </div>
+                    </div>
+
+                    {/* Control 3: Delay Time */}
+                    <div className="space-y-1.5 bg-zinc-900/20 p-2.5 rounded border border-zinc-900/40">
+                      <div className="flex justify-between font-mono text-[9px]">
+                        <span className="text-zinc-300 font-semibold uppercase">Delay Time</span>
+                        <span className="text-blue-400 font-bold">{(dspDelayTime * 1000).toFixed(0)} ms</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        value={dspDelayTime}
+                        onChange={(e) => {
+                          initAudioSystem();
+                          setDspDelayTime(parseFloat(e.target.value));
+                        }}
+                        className="w-full accent-blue-600 h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none mt-1"
+                      />
+                      <div className="flex justify-between text-[8px] text-zinc-550 font-mono">
+                        <span>0 ms Dry</span>
+                        <span>500 ms</span>
+                        <span>1000 ms</span>
+                      </div>
+                    </div>
+
+                    {/* Control 4: Delay Feedback */}
+                    <div className="space-y-1.5 bg-zinc-900/20 p-2.5 rounded border border-zinc-900/40">
+                      <div className="flex justify-between font-mono text-[9px]">
+                        <span className="text-zinc-300 font-semibold uppercase">Delay Feedback</span>
+                        <span className="text-blue-400 font-bold">{dspDelayFeedback.toFixed(0)}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="95"
+                        step="5"
+                        value={dspDelayFeedback}
+                        onChange={(e) => {
+                          initAudioSystem();
+                          setDspDelayFeedback(parseInt(e.target.value));
+                        }}
+                        className="w-full accent-blue-600 h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none mt-1"
+                      />
+                      <div className="flex justify-between text-[8px] text-zinc-550 font-mono">
+                        <span>0% Single Delay</span>
+                        <span>50% Echo</span>
+                        <span>95% Infinite</span>
+                      </div>
+                    </div>
+
+                    {/* Control 5: Master Compressor (Threshold) */}
+                    <div className="space-y-1.5 bg-zinc-900/20 p-2.5 rounded border border-zinc-900/40">
+                      <div className="flex justify-between font-mono text-[9px]">
+                        <span className="text-zinc-300 font-semibold uppercase">Master Compressor (Threshold)</span>
+                        <span className="text-blue-400 font-bold">{dspCompressorThreshold.toFixed(0)} dB</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="-100"
+                        max="0"
+                        step="1"
+                        value={dspCompressorThreshold}
+                        onChange={(e) => {
+                          initAudioSystem();
+                          setDspCompressorThreshold(parseInt(e.target.value));
+                        }}
+                        className="w-full accent-blue-600 h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none mt-1"
+                      />
+                      <div className="flex justify-between text-[8px] text-zinc-550 font-mono">
+                        <span>-100 dB Full Squash</span>
+                        <span>-50 dB</span>
+                        <span>0 dB Bypass</span>
+                      </div>
+                    </div>
+
+                    {/* Control 6: Sub-Bass Saturation */}
+                    <div className="space-y-1.5 bg-zinc-900/20 p-2.5 rounded border border-zinc-900/40">
+                      <div className="flex justify-between font-mono text-[9px]">
+                        <span className="text-zinc-300 font-semibold uppercase">Sub-Bass Saturation</span>
+                        <span className="text-blue-400 font-bold">+{dspSubBassSaturation.toFixed(1)} dB</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="12"
+                        step="0.5"
+                        value={dspSubBassSaturation}
+                        onChange={(e) => {
+                          initAudioSystem();
+                          setDspSubBassSaturation(parseFloat(e.target.value));
+                        }}
+                        className="w-full accent-blue-600 h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none mt-1"
+                      />
+                      <div className="flex justify-between text-[8px] text-zinc-550 font-mono">
+                        <span>0 dB Neutral</span>
+                        <span>+6 dB Medium Boost</span>
+                        <span>+12 dB Heavy Sub Rumble</span>
+                      </div>
+                    </div>
+
+                    {/* Control 7: Stereo Balance */}
+                    <div className="space-y-1.5 bg-zinc-900/20 p-2.5 rounded border border-zinc-900/40">
+                      <div className="flex justify-between font-mono text-[9px]">
+                        <span className="text-zinc-300 font-semibold uppercase">Stereo Balance</span>
+                        <span className="text-blue-400 font-bold">
+                          {dspStereoBalance === 0 ? 'Center' : dspStereoBalance < 0 ? `L ${Math.abs(dspStereoBalance).toFixed(2)}` : `R ${dspStereoBalance.toFixed(2)}`}
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="-1.0"
+                        max="1.0"
+                        step="0.05"
+                        value={dspStereoBalance}
+                        onChange={(e) => {
+                          initAudioSystem();
+                          setDspStereoBalance(parseFloat(e.target.value));
+                        }}
+                        className="w-full accent-blue-600 h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none mt-1"
+                      />
+                      <div className="flex justify-between text-[8px] text-zinc-550 font-mono">
+                        <span>L (Full Left)</span>
+                        <span>0.0 Center</span>
+                        <span>R (Full Right)</span>
+                      </div>
+                    </div>
+
+                    {/* Control 8: Vocal Attenuator (Toggle) */}
+                    <div className="flex items-center justify-between bg-zinc-900/20 p-2.5 rounded border border-zinc-900/40">
+                      <div className="flex flex-col text-left">
+                        <span className="text-zinc-300 font-mono text-[9px] font-semibold uppercase">Vocal Attenuator</span>
+                        <span className="text-[8px] text-zinc-550 font-mono mt-0.5">Phase-cancels center frequencies</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          initAudioSystem();
+                          setDspVocalAttenuator(prev => !prev);
+                        }}
+                        className={`relative w-9 h-5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                          dspVocalAttenuator ? 'bg-blue-600 shadow-[0_0_8px_rgba(37,99,235,0.4)]' : 'bg-zinc-800'
+                        }`}
+                      >
+                        <span className={`absolute top-[2.5px] left-[2px] bg-zinc-100 rounded-full h-4 w-4 transition-all ${
+                          dspVocalAttenuator ? 'translate-x-4' : 'translate-x-0'
+                        }`} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
                 {/* VISIBLE TITLE TEXT OVERLAYS SETTINGS */}
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
@@ -4221,8 +4724,8 @@ export default function App() {
                     <label className="block text-xs font-semibold text-gray-300 mb-1.5 font-mono uppercase">Wave representation Style</label>
                     <div className="space-y-2 text-xs">
                       {[
-                        { id: 'bars', name: 'Rounded Bars' },
                         { id: 'waveform', name: 'Bezier Wave' },
+                        { id: 'bars', name: 'Rounded Bars' },
                         { id: 'circular', name: 'Neon Circle' },
                         { id: 'radial-bars', name: 'Sunburst Radial' },
                         { id: 'retro', name: 'Retro Sunset' },
@@ -4251,7 +4754,16 @@ export default function App() {
                         { id: 'neon-geometric-ring', name: 'Neon Geometric Ring' },
                         { id: 'retro-arcade-stack', name: 'Retro Arcade Stack' },
                         { id: 'prism-laser-scanner', name: 'Prism Laser Scanner' },
-                        { id: 'floating-wave-echo', name: 'Floating Wave Echo' }
+                        { id: 'floating-wave-echo', name: 'Floating Wave Echo' },
+                        { id: 'digital-matrix-blocks', name: 'Digital Matrix Blocks' },
+                        { id: 'plasma-glow-ribbon', name: 'Plasma Glow Ribbon' },
+                        { id: 'concentric-dual-radials', name: 'Concentric Dual Radials' },
+                        { id: 'shaded-mirror-silhouette', name: 'Shaded Mirror Silhouette' },
+                        { id: 'reflected-glow-ribbon', name: 'Reflected Glow Ribbon' },
+                        { id: 'reflected-matrix-dots', name: 'Reflected Matrix Dots' },
+                        { id: 'reflected-mountain-silhouette', name: 'Reflected Mountain Silhouette' },
+                        { id: 'reflected-center-split-pins', name: 'Reflected Center-Split Pins' },
+                        { id: 'reflected-radial-ring-horizon', name: 'Reflected Radial Ring Horizon' }
                       ].map((item) => {
                         const active = visuals.activeStyles && visuals.activeStyles.length > 0
                           ? visuals.activeStyles.includes(item.id as VisualizerStyle)
@@ -5939,6 +6451,87 @@ export default function App() {
                           />
                           <span className="font-mono text-[9px] text-zinc-400">{particlesSet.color.toUpperCase()}</span>
                         </div>
+                      </div>
+                    </div>
+
+                    {/* SUB-GROUP: PARTICLE BEAT-REACTIVE COLOR MODULE */}
+                    <div className="mt-2.5 pt-3 border-t border-zinc-900 space-y-3">
+                      <div className="font-mono text-[10px] text-zinc-400 uppercase tracking-wider">Beat color engine controls</div>
+                      
+                      {/* 1. Particle Color Invert on Beat */}
+                      <div className="flex items-center justify-between p-2 pb-2.5 bg-zinc-950/40 rounded-lg border border-zinc-900">
+                        <div className="max-w-[78%]">
+                          <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Particle Color Invert on Beat</span>
+                          <span className="text-[9.5px]/[13px] text-zinc-500 block font-sans mt-0.5">Flip primary and secondary particle colors on each beat for a strobe effect</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setParticlesSet(prev => ({ ...prev, colorInvertOnBeat: !prev.colorInvertOnBeat }))}
+                          className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                            particlesSet.colorInvertOnBeat ? 'bg-blue-600' : 'bg-zinc-800'
+                          }`}
+                        >
+                          <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                            particlesSet.colorInvertOnBeat ? 'translate-x-3.5' : 'translate-x-0'
+                          }`} />
+                        </button>
+                      </div>
+
+                      {/* 2. On-Beat Particle Color Burst */}
+                      <div className="flex items-center justify-between p-2 pb-2.5 bg-zinc-950/40 rounded-lg border border-zinc-900">
+                        <div className="max-w-[78%]">
+                          <span className="font-semibold text-zinc-300 block font-sans text-[11px]">On-Beat Particle Color Burst</span>
+                          <span className="text-[9.5px]/[13px] text-zinc-500 block font-sans mt-0.5">Briefly flash or explode particle colors with maximum brightness on every detected beat</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setParticlesSet(prev => ({ ...prev, colorBurstOnBeat: !prev.colorBurstOnBeat }))}
+                          className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                            particlesSet.colorBurstOnBeat ? 'bg-blue-600' : 'bg-zinc-800'
+                          }`}
+                        >
+                          <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                            particlesSet.colorBurstOnBeat ? 'translate-x-3.5' : 'translate-x-0'
+                          }`} />
+                        </button>
+                      </div>
+
+                      {/* 3. Beat-Reactive Particle Color Shift */}
+                      <div className="flex items-center justify-between p-2 pb-2.5 bg-zinc-950/40 rounded-lg border border-zinc-900">
+                        <div className="max-w-[78%]">
+                          <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Beat-Reactive Particle Color Shift</span>
+                          <span className="text-[9.5px]/[13px] text-zinc-500 block font-sans mt-0.5">Cycle particle colors through a palette dynamically on each bass beat</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setParticlesSet(prev => ({ ...prev, beatReactiveColorShift: !prev.beatReactiveColorShift }))}
+                          className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                            particlesSet.beatReactiveColorShift ? 'bg-blue-600' : 'bg-zinc-800'
+                          }`}
+                        >
+                          <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                            particlesSet.beatReactiveColorShift ? 'translate-x-3.5' : 'translate-x-0'
+                          }`} />
+                        </button>
+                      </div>
+
+                      {/* 4. Cycle Particle Colors */}
+                      <div className="flex items-center justify-between p-2 pb-2.5 bg-zinc-950/40 rounded-lg border border-zinc-900">
+                        <div className="max-w-[78%]">
+                          <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Cycle Particle Colors</span>
+                          <span className="text-[9.5px]/[13px] text-zinc-500 block font-sans mt-0.5">Slowly rotate particle color hues automatically over time</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setParticlesSet(prev => ({ ...prev, cycleColors: !prev.cycleColors }))}
+                          className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                            particlesSet.cycleColors ? 'bg-blue-600' : 'bg-zinc-800'
+                          }`}
+                        >
+                          <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                            particlesSet.cycleColors ? 'translate-x-3.5' : 'translate-x-0'
+                          }`} />
+                        </button>
                       </div>
                     </div>
 
