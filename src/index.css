@@ -25,3 +25,56 @@
   background: rgba(255, 255, 255, 0.25);
 }
 
+/* Symmetry Mirror Multiplier slider custom styles and audio pulse animation */
+#symmetry-mirror-multiplier-slider {
+  --multiplier: 1;
+  transition: transform 0.15s ease-out;
+}
+
+#symmetry-mirror-multiplier-slider::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #3b82f6; /* Tailwind blue-500 */
+  border: 2px solid #ffffff;
+  cursor: pointer;
+  box-shadow: 0 0 0 0px rgba(59, 130, 246, 0);
+  transition: transform 0.12s cubic-bezier(0.175, 0.885, 0.32, 1.25), box-shadow 0.12s ease-out;
+}
+
+#symmetry-mirror-multiplier-slider.beat-pulse::-webkit-slider-thumb {
+  animation: thumb-pulse-anim 0.28s cubic-bezier(0.0, 0.0, 0.2, 1) forwards;
+}
+
+#symmetry-mirror-multiplier-slider::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: #3b82f6; /* Tailwind blue-500 */
+  border: 2px solid #ffffff;
+  cursor: pointer;
+  box-shadow: 0 0 0 0px rgba(59, 130, 246, 0);
+  transition: transform 0.12s cubic-bezier(0.175, 0.885, 0.32, 1.25), box-shadow 0.12s ease-out;
+}
+
+#symmetry-mirror-multiplier-slider.beat-pulse::-moz-range-thumb {
+  animation: thumb-pulse-anim 0.28s cubic-bezier(0.0, 0.0, 0.2, 1) forwards;
+}
+
+@keyframes thumb-pulse-anim {
+  0% {
+    transform: scale(1.0);
+    box-shadow: 0 0 0 0px rgba(59, 130, 246, 0.8);
+  }
+  25% {
+    transform: scale(calc(1.15 + var(--multiplier) * 0.06));
+    box-shadow: 0 0 0 calc(3px + var(--multiplier) * 1.5px) rgba(59, 130, 246, 0.45);
+  }
+  100% {
+    transform: scale(1.0);
+    box-shadow: 0 0 0 0px rgba(59, 130, 246, 0);
+  }
+}
+

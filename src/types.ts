@@ -83,6 +83,8 @@ export interface VisualizerSettings {
   flashCustomColor?: string; // custom hex color for flash
   flipWaveform?: boolean; // vertically flip waveform rendering
   mirrorMode?: boolean; // reflect the visualizer horizontally to create a symmetrical/kaleidoscopic effect
+  mirrorAxis?: 'horizontal' | 'vertical' | 'both'; // mirrors the waveform across the horizontal, vertical, or both axes
+  symmetryColorInversion?: boolean; // alternates primary and secondary colors on mirrored segments for a high-contrast kaleidoscopic effect
   colorBurstOnBeat?: boolean; // cause the primary color to briefly flash or explode with brightness on every detected beat
   beatReactiveColorShift?: boolean; // cycle visualizer colors through a palette on each bass beat
   colorShiftIntensity?: number; // degree/speed of color shift on each beat (e.g., 5 to 60 degrees)

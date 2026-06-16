@@ -20,6 +20,14 @@ let floatingWaveHistory: { path: { x: number; y: number }[]; opacity: number; yS
 // Cached offscreen canvas for Mirror Mode horizontal reflection to prevent frame-by-frame allocation overhead
 let mirrorOffscreenCanvas: HTMLCanvasElement | null = null;
 let mirrorOffscreenCtx: CanvasRenderingContext2D | null = null;
+let mirrorOffscreenCanvasY: HTMLCanvasElement | null = null;
+let mirrorOffscreenCtxY: CanvasRenderingContext2D | null = null;
+
+// Cached offscreen canvases for symmetry color inversion to prevent frame-by-frame allocation overhead
+let mirrorInvertedOffscreenCanvas: HTMLCanvasElement | null = null;
+let mirrorInvertedOffscreenCtx: CanvasRenderingContext2D | null = null;
+let mirrorInvertedOffscreenCanvasY: HTMLCanvasElement | null = null;
+let mirrorInvertedOffscreenCtxY: CanvasRenderingContext2D | null = null;
 
 export interface RenderParticle {
   x: number;
@@ -118,6 +126,59 @@ export function shiftHexColorHue(hex: string, degreeOffset: number): string {
   if (h < 0) h += 360;
 
   return hslToHex(h, s * 100, l * 100);
+}
+
+export function swapPrimarySecondaryPixels(
+  data: Uint8ClampedArray,
+  len: number,
+  primaryColorHex: string,
+  secondaryColorHex: string
+) {
+  const rgbP = hexToRgb(primaryColorHex) || { r: 255, g: 0, b: 0 };
+  const rgbS = hexToRgb(secondaryColorHex) || { r: 0, g: 0, b: 255 };
+
+  const pR = rgbP.r, pG = rgbP.g, pB = rgbP.b;
+  const sR = rgbS.r, sG = rgbS.g, sB = rgbS.b;
+  
+  const denP = pR * pR + pG * pG + pB * pB || 1;
+  const denS = sR * sR + sG * sG + sB * sB || 1;
+
+  for (let i = 0; i < len; i += 4) {
+    const a = data[i + 3];
+    if (a === 0) continue;
+
+    const r = data[i];
+    const g = data[i + 1];
+    const b = data[i + 2];
+
+    // Dot product scalar projections
+    const factorP = (r * pR + g * pG + b * pB) / denP;
+    const factorS = (r * sR + g * sG + b * sB) / denS;
+
+    // Projection vectors
+    const projR = factorP * pR + factorS * sR;
+    const projG = factorP * pG + factorS * sG;
+    const projB = factorP * pB + factorS * sB;
+
+    // Residual (unrelated color component)
+    const resR = r - projR;
+    const resG = g - projG;
+    const resB = b - projB;
+
+    // Swapped projections + residual
+    let newR = factorP * sR + factorS * pR + resR;
+    let newG = factorP * sG + factorS * pG + resG;
+    let newB = factorP * sB + factorS * pB + resB;
+
+    // Clamp
+    if (newR < 0) newR = 0; else if (newR > 255) newR = 255;
+    if (newG < 0) newG = 0; else if (newG > 255) newG = 255;
+    if (newB < 0) newB = 0; else if (newB > 255) newB = 255;
+
+    data[i] = newR;
+    data[i + 1] = newG;
+    data[i + 2] = newB;
+  }
 }
 
 // Initialize particles pool
@@ -3334,40 +3395,124 @@ export function drawVisualizer(
 
   ctx.restore();
 
-  // Apply Mirror Mode if enabled to reflect the visualizer horizontally
+  // Apply Mirror Mode if enabled to reflect the visualizer
   if (settings.mirrorMode) {
+    const axis = settings.mirrorAxis || 'vertical';
     const symmetry = Math.max(1, Math.min(8, settings.symmetryMultiplier || 1));
-    const segmentWidth = Math.floor(width / (2 * symmetry));
 
-    if (segmentWidth > 0) {
-      if (!mirrorOffscreenCanvas) {
-        mirrorOffscreenCanvas = document.createElement('canvas');
+    // 1. Mirror across vertical axis (horizontal reflection left/right)
+    if (axis === 'vertical' || axis === 'both') {
+      const segmentWidth = Math.floor(width / (2 * symmetry));
+      if (segmentWidth > 0) {
+        if (!mirrorOffscreenCanvas) {
+          mirrorOffscreenCanvas = document.createElement('canvas');
+        }
+        if (mirrorOffscreenCanvas.width !== segmentWidth || mirrorOffscreenCanvas.height !== height) {
+          mirrorOffscreenCanvas.width = segmentWidth;
+          mirrorOffscreenCanvas.height = height;
+        }
+        mirrorOffscreenCtx = mirrorOffscreenCanvas.getContext('2d');
+        if (mirrorOffscreenCtx) {
+          mirrorOffscreenCtx.clearRect(0, 0, segmentWidth, height);
+          mirrorOffscreenCtx.drawImage(ctx.canvas, 0, 0, segmentWidth, height, 0, 0, segmentWidth, height);
+          
+          if (settings.symmetryColorInversion) {
+            if (!mirrorInvertedOffscreenCanvas) {
+              mirrorInvertedOffscreenCanvas = document.createElement('canvas');
+            }
+            if (mirrorInvertedOffscreenCanvas.width !== segmentWidth || mirrorInvertedOffscreenCanvas.height !== height) {
+              mirrorInvertedOffscreenCanvas.width = segmentWidth;
+              mirrorInvertedOffscreenCanvas.height = height;
+            }
+            mirrorInvertedOffscreenCtx = mirrorInvertedOffscreenCanvas.getContext('2d');
+            if (mirrorInvertedOffscreenCtx) {
+              mirrorInvertedOffscreenCtx.clearRect(0, 0, segmentWidth, height);
+              mirrorInvertedOffscreenCtx.drawImage(mirrorOffscreenCanvas, 0, 0, segmentWidth, height, 0, 0, segmentWidth, height);
+              const imgData = mirrorInvertedOffscreenCtx.getImageData(0, 0, segmentWidth, height);
+              swapPrimarySecondaryPixels(imgData.data, imgData.data.length, settings.primaryColor, settings.secondaryColor);
+              mirrorInvertedOffscreenCtx.putImageData(imgData, 0, 0);
+            }
+          }
+
+          // Clear the canvas to the right of the first segment
+          ctx.clearRect(segmentWidth, 0, width - segmentWidth, height);
+          
+          // Populate the remaining segments across the canvas with alternating orientations
+          for (let i = 1; i < 2 * symmetry; i++) {
+            const x = i * segmentWidth;
+            if (i % 2 === 0) {
+              // Draw normal
+              ctx.drawImage(mirrorOffscreenCanvas, 0, 0, segmentWidth, height, x, 0, segmentWidth, height);
+            } else {
+              // Draw mirrored (and color-inverted if enabled)
+              const sourceCanvas = settings.symmetryColorInversion && mirrorInvertedOffscreenCanvas
+                ? mirrorInvertedOffscreenCanvas
+                : mirrorOffscreenCanvas;
+              ctx.save();
+              ctx.translate(x + segmentWidth, 0);
+              ctx.scale(-1, 1);
+              ctx.drawImage(sourceCanvas, 0, 0, segmentWidth, height, 0, 0, segmentWidth, height);
+              ctx.restore();
+            }
+          }
+        }
       }
-      if (mirrorOffscreenCanvas.width !== segmentWidth || mirrorOffscreenCanvas.height !== height) {
-        mirrorOffscreenCanvas.width = segmentWidth;
-        mirrorOffscreenCanvas.height = height;
-      }
-      mirrorOffscreenCtx = mirrorOffscreenCanvas.getContext('2d');
-      if (mirrorOffscreenCtx) {
-        mirrorOffscreenCtx.clearRect(0, 0, segmentWidth, height);
-        mirrorOffscreenCtx.drawImage(ctx.canvas, 0, 0, segmentWidth, height, 0, 0, segmentWidth, height);
-        
-        // Clear the canvas to the right of the first segment
-        ctx.clearRect(segmentWidth, 0, width - segmentWidth, height);
-        
-        // Populate the remaining segments across the canvas with alternating orientations
-        for (let i = 1; i < 2 * symmetry; i++) {
-          const x = i * segmentWidth;
-          if (i % 2 === 0) {
-            // Draw normal
-            ctx.drawImage(mirrorOffscreenCanvas, 0, 0, segmentWidth, height, x, 0, segmentWidth, height);
-          } else {
-            // Draw mirrored
-            ctx.save();
-            ctx.translate(x + segmentWidth, 0);
-            ctx.scale(-1, 1);
-            ctx.drawImage(mirrorOffscreenCanvas, 0, 0, segmentWidth, height, 0, 0, segmentWidth, height);
-            ctx.restore();
+    }
+
+    // 2. Mirror across horizontal axis (vertical reflection top/bottom)
+    if (axis === 'horizontal' || axis === 'both') {
+      const segmentHeight = Math.floor(height / (2 * symmetry));
+      if (segmentHeight > 0) {
+        if (!mirrorOffscreenCanvasY) {
+          mirrorOffscreenCanvasY = document.createElement('canvas');
+        }
+        if (mirrorOffscreenCanvasY.width !== width || mirrorOffscreenCanvasY.height !== segmentHeight) {
+          mirrorOffscreenCanvasY.width = width;
+          mirrorOffscreenCanvasY.height = segmentHeight;
+        }
+        mirrorOffscreenCtxY = mirrorOffscreenCanvasY.getContext('2d');
+        if (mirrorOffscreenCtxY) {
+          mirrorOffscreenCtxY.clearRect(0, 0, width, segmentHeight);
+          mirrorOffscreenCtxY.drawImage(ctx.canvas, 0, 0, width, segmentHeight, 0, 0, width, segmentHeight);
+          
+          if (settings.symmetryColorInversion) {
+            if (!mirrorInvertedOffscreenCanvasY) {
+              mirrorInvertedOffscreenCanvasY = document.createElement('canvas');
+            }
+            if (mirrorInvertedOffscreenCanvasY.width !== width || mirrorInvertedOffscreenCanvasY.height !== segmentHeight) {
+              mirrorInvertedOffscreenCanvasY.width = width;
+              mirrorInvertedOffscreenCanvasY.height = segmentHeight;
+            }
+            mirrorInvertedOffscreenCtxY = mirrorInvertedOffscreenCanvasY.getContext('2d');
+            if (mirrorInvertedOffscreenCtxY) {
+              mirrorInvertedOffscreenCtxY.clearRect(0, 0, width, segmentHeight);
+              mirrorInvertedOffscreenCtxY.drawImage(mirrorOffscreenCanvasY, 0, 0, width, segmentHeight, 0, 0, width, segmentHeight);
+              const imgData = mirrorInvertedOffscreenCtxY.getImageData(0, 0, width, segmentHeight);
+              swapPrimarySecondaryPixels(imgData.data, imgData.data.length, settings.primaryColor, settings.secondaryColor);
+              mirrorInvertedOffscreenCtxY.putImageData(imgData, 0, 0);
+            }
+          }
+
+          // Clear the canvas below the first segment
+          ctx.clearRect(0, segmentHeight, width, height - segmentHeight);
+          
+          // Populate the remaining segments down the canvas with alternating orientations
+          for (let i = 1; i < 2 * symmetry; i++) {
+            const y = i * segmentHeight;
+            if (i % 2 === 0) {
+              // Draw normal
+              ctx.drawImage(mirrorOffscreenCanvasY, 0, 0, width, segmentHeight, 0, y, width, segmentHeight);
+            } else {
+              // Draw mirrored vertically (and color-inverted if enabled)
+              const sourceCanvas = settings.symmetryColorInversion && mirrorInvertedOffscreenCanvasY
+                ? mirrorInvertedOffscreenCanvasY
+                : mirrorOffscreenCanvasY;
+              ctx.save();
+              ctx.translate(0, y + segmentHeight);
+              ctx.scale(1, -1);
+              ctx.drawImage(sourceCanvas, 0, 0, width, segmentHeight, 0, 0, width, segmentHeight);
+              ctx.restore();
+            }
           }
         }
       }

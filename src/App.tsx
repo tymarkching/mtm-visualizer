@@ -2308,6 +2308,24 @@ export default function App() {
   useEffect(() => { customTextYRef.current = customTextY; }, [customTextY]);
   useEffect(() => { activeStickersRef.current = activeStickers; }, [activeStickers]);
 
+  // Listen for visualizer beat events to animate the symmetry multiplier slider thumb
+  useEffect(() => {
+    const handleBeat = () => {
+      const slider = document.getElementById('symmetry-mirror-multiplier-slider');
+      if (slider) {
+        slider.classList.remove('beat-pulse');
+        // Trigger reflow to restart css animation
+        void slider.offsetWidth;
+        slider.classList.add('beat-pulse');
+      }
+    };
+
+    window.addEventListener('audio-visualizer-beat', handleBeat);
+    return () => {
+      window.removeEventListener('audio-visualizer-beat', handleBeat);
+    };
+  }, []);
+
   // Initialize persistent overlay video element on mount
   useEffect(() => {
     const vid = document.createElement('video');
@@ -2472,6 +2490,10 @@ export default function App() {
             beatIntensity = 0.5;
           }
         }
+      }
+
+      if (isBeat && typeof window !== 'undefined') {
+        window.dispatchEvent(new CustomEvent('audio-visualizer-beat', { detail: { beatIntensity } }));
       }
 
       // Apply Motion Smoothing if enabled in main drawing loop to reduce flickering in wave patterns
@@ -5431,14 +5453,20 @@ export default function App() {
                       </button>
                     </div>
 
-                    <div className="p-2.5 bg-[#07070a]/80 rounded border border-zinc-950/60 mt-1 space-y-2">
-                      <div className="flex items-center justify-between">
+                    <div className="p-2.5 bg-[#07070a]/80 rounded border border-zinc-950/60 mt-1 space-y-3">
+                      <div>
+                        <span className="font-semibold text-zinc-300 block font-sans text-[11px] uppercase tracking-wider">Symmetry</span>
+                        <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Create vibrant kaleidoscopic reflections and geometrical visual patterns</span>
+                      </div>
+                      
+                      <div className="flex items-center justify-between border-t border-zinc-950/40 pt-2.5">
                         <div>
                           <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Mirror Mode</span>
-                          <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Reflect the rendering horizontally for a symmetrical, kaleidoscopic effect</span>
+                          <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Reflect the rendering for a symmetrical, kaleidoscopic effect</span>
                         </div>
                         <button
                           type="button"
+                          id="mirror-mode-toggle"
                           onClick={() => setVisuals(prev => ({ ...prev, mirrorMode: !prev.mirrorMode }))}
                           className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
                             visuals.mirrorMode ? 'bg-blue-600' : 'bg-zinc-800'
@@ -5451,20 +5479,68 @@ export default function App() {
                       </div>
 
                       {visuals.mirrorMode && (
-                        <div className="pt-2 border-t border-zinc-950/40 space-y-1.5 animate-fade-in">
-                          <div className="flex justify-between items-center text-[9px] font-mono">
-                            <span className="text-zinc-400 uppercase font-semibold">Symmetry Multiplier</span>
-                            <span className="text-blue-400 font-bold">{visuals.symmetryMultiplier || 1}x ({2 * (visuals.symmetryMultiplier || 1)} slices)</span>
+                        <div className="space-y-3 pt-1 border-t border-zinc-950/40 animate-fade-in">
+                          <div className="space-y-1">
+                            <label className="block text-[9px] font-semibold text-zinc-400 font-mono uppercase">Mirror Axis</label>
+                            <div className="grid grid-cols-3 gap-1 bg-[#0a0a0f] p-1 border border-zinc-900 rounded-lg text-center">
+                              {[
+                                { id: 'vertical', name: 'Vertical' },
+                                { id: 'horizontal', name: 'Horizontal' },
+                                { id: 'both', name: 'Both' }
+                              ].map((axis) => (
+                                <button
+                                  key={axis.id}
+                                  id={`mirror-axis-btn-${axis.id}`}
+                                  type="button"
+                                  onClick={() => setVisuals(prev => ({ ...prev, mirrorAxis: axis.id as any }))}
+                                  className={`py-1 px-1 rounded font-mono text-[9px] font-semibold transition-all cursor-pointer ${
+                                    (visuals.mirrorAxis || 'vertical') === axis.id
+                                      ? 'bg-blue-600 border border-blue-500 text-white'
+                                      : 'border border-transparent text-gray-400 hover:text-white'
+                                  }`}
+                                >
+                                  {axis.name}
+                                </button>
+                              ))}
+                            </div>
                           </div>
-                          <input
-                            type="range"
-                            min="1"
-                            max="8"
-                            step="1"
-                            value={visuals.symmetryMultiplier || 1}
-                            onChange={(e) => setVisuals(prev => ({ ...prev, symmetryMultiplier: parseInt(e.target.value, 10) }))}
-                            className="w-full h-1 bg-zinc-950 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                          />
+
+                          <div className="flex items-center justify-between pt-1">
+                            <div>
+                              <span className="block text-[10px] font-semibold text-zinc-400 font-sans uppercase">Symmetry Color Inversion</span>
+                              <span className="text-[9px] text-zinc-500 block font-sans">Swap primary & secondary colors on mirrored segments</span>
+                            </div>
+                            <button
+                              type="button"
+                              id="symmetry-color-inversion-toggle"
+                              onClick={() => setVisuals(prev => ({ ...prev, symmetryColorInversion: !prev.symmetryColorInversion }))}
+                              className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                                visuals.symmetryColorInversion ? 'bg-blue-600' : 'bg-zinc-800'
+                              }`}
+                            >
+                              <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                                visuals.symmetryColorInversion ? 'translate-x-3.5' : 'translate-x-0'
+                              }`} />
+                            </button>
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <div className="flex justify-between items-center text-[9px] font-mono">
+                              <span className="text-zinc-400 uppercase font-semibold">Symmetry Mirror Multiplier</span>
+                              <span className="text-blue-400 font-bold">{visuals.symmetryMultiplier || 1}x ({2 * (visuals.symmetryMultiplier || 1)} slices)</span>
+                            </div>
+                            <input
+                              type="range"
+                              id="symmetry-mirror-multiplier-slider"
+                              min="1"
+                              max="8"
+                              step="1"
+                              value={visuals.symmetryMultiplier || 1}
+                              onChange={(e) => setVisuals(prev => ({ ...prev, symmetryMultiplier: parseInt(e.target.value, 10) }))}
+                              style={{ '--multiplier': visuals.symmetryMultiplier || 1 } as React.CSSProperties}
+                              className="w-full h-1 bg-zinc-950 rounded-lg appearance-none cursor-pointer accent-blue-500"
+                            />
+                          </div>
                         </div>
                       )}
                     </div>
