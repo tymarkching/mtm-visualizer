@@ -39,6 +39,7 @@ export interface RenderParticle {
   baseSize?: number;
   hue?: number;
   burstFlash?: number;
+  decay?: number;
 }
 
 // Color conversion helpers
@@ -185,10 +186,13 @@ export function createParticle(
     }
   }
 
-  // Lifespan
+  // Lifespan & individualized fade decay matched to the UI lifetime slider
   const maxLife = settings.lifetime
     ? Math.round(settings.lifetime * 60)
     : (50 + Math.random() * 100);
+
+  const baseLifetime = settings.lifetime !== undefined ? settings.lifetime : 3.0;
+  const decay = (Math.random() * 0.01 + 0.005) * (3.0 / Math.max(0.1, baseLifetime));
 
   return {
     x,
@@ -197,8 +201,8 @@ export function createParticle(
     vy,
     size,
     color: settings.color,
-    alpha: 0.1 + Math.random() * 0.8,
-    life: maxLife,
+    alpha: 1.0, // starts fully visible
+    life: Math.random() * 0.5 + 0.5, // randomized lifetime duration multiplier
     maxLife,
     angle: Math.random() * Math.PI * 2,
     spin: (Math.random() - 0.5) * 0.05,
@@ -208,6 +212,7 @@ export function createParticle(
     baseSize: size,
     hue: Math.random() * 360,
     burstFlash: 0,
+    decay,
   };
 }
 
@@ -223,168 +228,181 @@ export function updateParticles(
 ): RenderParticle[] {
   const result: RenderParticle[] = [];
 
-  const beatReactivePulseEnabled = !!settings.beatReactive;
-  const audioReactiveParticleBurstEnabled = !!settings.beatBurst;
-  const particlePhysicsCollisionEnabled = !!settings.enablePhysics;
+  // Robustly sanitize inputs and set bulletproof defaults for math stability
+  const safeIsBeat = !!isBeat;
+  let safeBassIntensity = typeof bassIntensity === 'number' ? bassIntensity : 0.15;
+  if (isNaN(safeBassIntensity)) safeBassIntensity = 0.15;
 
-  const floor = settings.sensitivityFloor !== undefined ? settings.sensitivityFloor : 0.0;
-  const dynamicVolume = floor + (1.0 - floor) * overallVolume;
+  let safeOverallVolume = typeof overallVolume === 'number' ? overallVolume : 0.15;
+  if (isNaN(safeOverallVolume)) safeOverallVolume = 0.15;
+
+  const safeSettings = settings || {} as ParticleSettings;
+  const beatReactivePulseEnabled = !!safeSettings.beatReactive;
+  const audioReactiveParticleBurstEnabled = !!safeSettings.beatBurst;
+  const particlePhysicsCollisionEnabled = !!safeSettings.enablePhysics;
+
+  let floor = 0.0;
+  try {
+    const val = parseFloat(String(safeSettings.sensitivityFloor));
+    floor = isNaN(val) ? 0.0 : Math.max(0.0, Math.min(1.0, val));
+  } catch (e) {
+    floor = 0.0;
+  }
+
+  // Gracefully ensure dynamicVolume has a minimum default baseline so particles keep drifting smoothly instead of freezing entirely when silent
+  const dynamicVolume = Math.max(0.15, floor + (1.0 - floor) * safeOverallVolume);
 
   for (let p of particles) {
-    // Decrement life proportionally to the movement speed multiplier so particles travel the full distance before fading out
-    p.life -= Math.max(0.005, dynamicVolume);
+    try {
+      // Decrement life proportionally to the movement speed multiplier so particles travel the full distance before fading out
+      p.life -= Math.max(0.005, dynamicVolume);
 
-    // Update dynamic colors and bursts
-    if (settings.colorBurstOnBeat) {
-      if (isBeat) {
-        p.burstFlash = 1.0;
+      const pDecay = p.decay !== undefined ? p.decay : 0.01;
+      p.alpha = Math.max(0, p.alpha - pDecay);
+
+      // Update dynamic colors and bursts
+      if (safeSettings.colorBurstOnBeat) {
+        if (safeIsBeat) {
+          p.burstFlash = 1.0;
+        } else {
+          p.burstFlash = (p.burstFlash || 0) * 0.92;
+          if (p.burstFlash < 0.01) p.burstFlash = 0;
+        }
       } else {
-        p.burstFlash = (p.burstFlash || 0) * 0.92;
-        if (p.burstFlash < 0.01) p.burstFlash = 0;
+        p.burstFlash = 0;
       }
-    } else {
-      p.burstFlash = 0;
-    }
 
-    let hueDelta = 0;
-    if (settings.cycleColors) {
-      hueDelta += 0.5;
-    }
-    if (settings.beatReactiveColorShift && isBeat) {
-      hueDelta += 24;
-    }
-    if (hueDelta > 0) {
-      p.hue = ((p.hue || 0) + hueDelta) % 360;
-    }
+      let hueDelta = 0;
+      if (safeSettings.cycleColors) {
+        hueDelta += 0.5;
+      }
+      if (safeSettings.beatReactiveColorShift && safeIsBeat) {
+        hueDelta += 24;
+      }
+      if (hueDelta > 0) {
+        p.hue = ((p.hue || 0) + hueDelta) % 360;
+      }
 
-    // Resolve baseline properties
-    const baseVx = p.baseVx !== undefined ? p.baseVx : p.vx;
-    const baseVy = p.baseVy !== undefined ? p.baseVy : p.vy;
-    const baseSize = p.baseSize !== undefined ? p.baseSize : p.size;
+      // Resolve baseline properties
+      const baseVx = p.baseVx !== undefined ? p.baseVx : p.vx;
+      const baseVy = p.baseVy !== undefined ? p.baseVy : p.vy;
+      const baseSize = p.baseSize !== undefined ? p.baseSize : p.size;
 
-    // SECTION 2: RE-AMPLIFYING THE TOGGLE INTERACTION EFFECTS
-    // 1. Beat-Reactive Pulse: When beatReactivePulse is true AND a kick/bass beat is actively detected,
-    // apply a pronounced, immediate velocity burst and radius expansion factor to the particles.
-    // The pulse must feel sharp and instantaneous, decaying smoothly back down using linear interpolation (lerp).
-    // 3. Toggle Off Behavior: If either toggle is turned off, ensure the particle behavior instantly falls back to a clean, smooth, un-reactive state.
-    if (beatReactivePulseEnabled) {
-      if (isBeat) {
-        // Immediate, sharp velocity burst and expansion
-        const intensityScale = Math.max(0.5, bassIntensity); // make it pronounced
-        p.vx = baseVx * (1.6 + intensityScale * 1.8);
-        p.vy = baseVy * (1.6 + intensityScale * 1.8);
-        p.size = Math.min(settings.maxSize * 2.8, baseSize * (1.4 + intensityScale * 0.4));
+      // SECTION 2: RE-AMPLIFYING THE TOGGLE INTERACTION EFFECTS
+      if (beatReactivePulseEnabled) {
+        if (safeIsBeat) {
+          // Immediate, sharp velocity burst and expansion
+          const intensityScale = Math.max(0.5, safeBassIntensity); // make it pronounced
+          p.vx = baseVx * (1.6 + intensityScale * 1.8);
+          p.vy = baseVy * (1.6 + intensityScale * 1.8);
+          p.size = Math.min((safeSettings.maxSize || 20) * 2.8, baseSize * (1.4 + intensityScale * 0.4));
+        } else {
+          // Smoothly decay back to standard baseline using linear interpolation (lerp) with 0.08 dampening factor
+          p.vx = p.vx + (baseVx - p.vx) * 0.08;
+          p.vy = p.vy + (baseVy - p.vy) * 0.08;
+          p.size = p.size + (baseSize - p.size) * 0.08;
+        }
       } else {
-        // Smoothly decay back to standard baseline using linear interpolation (lerp) with 0.08 dampening factor
-        p.vx = p.vx + (baseVx - p.vx) * 0.08;
-        p.vy = p.vy + (baseVy - p.vy) * 0.08;
-        p.size = p.size + (baseSize - p.size) * 0.08;
+        // Toggle off: instantly fall back to a clean, smooth, un-reactive state
+        p.vx = baseVx;
+        p.vy = baseVy;
+        p.size = baseSize;
       }
-    } else {
-      // Toggle off: instantly fall back to a clean, smooth, un-reactive state
-      p.vx = baseVx;
-      p.vy = baseVy;
-      p.size = baseSize;
-    }
 
-    // Apply winds & gravity
-    p.vx += settings.wind * 0.01;
-    p.vy += settings.gravity * 0.01;
+      // Apply winds & gravity
+      p.vx += (safeSettings.wind || 0) * 0.01;
+      p.vy += (safeSettings.gravity || 0) * 0.01;
 
-    // Decoloration or drift friction depending on particle type
-    if (settings.type === 'sakura') {
-      // Wind-swept sway
-      p.vx += Math.sin(p.life * 0.05) * 0.05;
-    } else if (settings.type === 'bubbles' || settings.type === 'floating-bubbles') {
-      // Bobbing wobble
-      p.vx += Math.sin(p.life * 0.1) * 0.08;
-    }
-
-    // Record history before position changes
-    if (!p.history) {
-      p.history = [];
-    }
-    const trailLen = settings.trailLength !== undefined ? settings.trailLength : 0;
-    if (trailLen > 0) {
-      p.history.push({ x: p.x, y: p.y });
-      if (p.history.length > trailLen) {
-        p.history.shift();
+      // Decoloration or drift friction depending on particle type
+      if (safeSettings.type === 'sakura') {
+        // Wind-swept sway
+        p.vx += Math.sin(p.life * 0.05) * 0.05;
+      } else if (safeSettings.type === 'bubbles' || safeSettings.type === 'floating-bubbles') {
+        // Bobbing wobble
+        p.vx += Math.sin(p.life * 0.1) * 0.08;
       }
-    } else if (p.history.length > 0) {
-      p.history = [];
-    }
 
-    const speedFactor = settings.movementSpeed !== undefined ? settings.movementSpeed : 1.0;
-    // Map non-linearly for pristine slow-drift base scaling
-    const scaleMultiplier = speedFactor < 1.0
-      ? Math.pow(speedFactor, 1.8) // smooth curved drop towards 0 for graceful cinematic floats
-      : speedFactor;
+      // Record history before position changes
+      if (!p.history) {
+        p.history = [];
+      }
+      const trailLen = safeSettings.trailLength !== undefined ? safeSettings.trailLength : 0;
+      if (trailLen > 0) {
+        p.history.push({ x: p.x, y: p.y });
+        if (p.history.length > trailLen) {
+          p.history.shift();
+        }
+      } else if (p.history.length > 0) {
+        p.history = [];
+      }
 
-    // SECTION 2: RE-AMPLIFYING THE TOGGLE INTERACTION EFFECTS
-    // 2. Audio-Reactive Particle Burst: When audioReactiveParticleBurst is true, look directly at the real-time sub-bass frequency thresholds.
-    // Scale the particle burst count or instantaneous velocity vector dramatically during high-energy transients so that intense parts of the music feel completely distinct from quiet parts.
-    // 3. Toggle Off Behavior: If either toggle is turned off, ensure the particle behavior instantly falls back to a clean, smooth, un-reactive state.
-    let burstSpeedMult = 1.0;
-    if (audioReactiveParticleBurstEnabled) {
-      // Look directly at real-time sub-bass frequency threshold (bassIntensity represents this).
-      // Scale velocity vector dramatically during high-energy transients
-      if (bassIntensity > 0.4) {
-        burstSpeedMult = 1.0 + Math.pow(bassIntensity, 2.8) * 8.0;
+      const speedFactor = safeSettings.movementSpeed !== undefined ? safeSettings.movementSpeed : 1.0;
+      // Map non-linearly for pristine slow-drift base scaling
+      const scaleMultiplier = speedFactor < 1.0
+        ? Math.pow(speedFactor, 1.8) // smooth curved drop towards 0 for graceful cinematic floats
+        : speedFactor;
+
+      // SECTION 2: RE-AMPLIFYING THE TOGGLE INTERACTION EFFECTS
+      let burstSpeedMult = 1.0;
+      if (audioReactiveParticleBurstEnabled) {
+        if (safeBassIntensity > 0.4) {
+          burstSpeedMult = 1.0 + Math.pow(safeBassIntensity, 2.8) * 8.0;
+        } else {
+          burstSpeedMult = 1.0 + safeBassIntensity * 1.0;
+        }
+      }
+
+      // SECTION 1: ENVELOPE-BASED VELOCITY SCALING
+      const dynamicBaseSpeedMultiplier = scaleMultiplier * dynamicVolume;
+
+      p.x += p.vx * dynamicBaseSpeedMultiplier * burstSpeedMult;
+      p.y += p.vy * dynamicBaseSpeedMultiplier * burstSpeedMult;
+      p.angle += p.spin;
+
+      // Apply physics boundary bounces (bouncing off walls)
+      if (particlePhysicsCollisionEnabled) {
+        const bMultiplier = 0.85; // coefficient of restitution with walls
+        if (p.x - p.size < 0) {
+          p.x = p.size;
+          p.vx = -p.vx * bMultiplier;
+        } else if (p.x + p.size > width) {
+          p.x = width - p.size;
+          p.vx = -p.vx * bMultiplier;
+        }
+
+        if (p.y - p.size < 0) {
+          p.y = p.size;
+          p.vy = -p.vy * bMultiplier;
+        } else if (p.y + p.size > height) {
+          p.y = height - p.size;
+          p.vy = -p.vy * bMultiplier;
+        }
+      }
+
+      // Filter out dead or off-screen particles, spawn replacements
+      const isOffScreen =
+        p.x < -100 || p.x > width + 100 || p.y < -100 || p.y > height + 100;
+
+      if (p.alpha > 0 && !isOffScreen) {
+        result.push(p);
       } else {
-        burstSpeedMult = 1.0 + bassIntensity * 1.0;
+        result.push(createParticle(safeSettings, width, height, false));
       }
-    }
-
-    // SECTION 1: ENVELOPE-BASED VELOCITY SCALING (THE FADE-OUT FIX)
-    // The base movement speed of the particles must be directly multiplied by this live dynamicVolume coefficient.
-    // This guarantees that if the music slows down, softens, or fades to silence, the particles automatically lose momentum and come to an absolute, complete stop.
-    // (Or gracefully slide at the Sensitivity Floor baseline if configured).
-    const dynamicBaseSpeedMultiplier = scaleMultiplier * dynamicVolume;
-
-    p.x += p.vx * dynamicBaseSpeedMultiplier * burstSpeedMult;
-    p.y += p.vy * dynamicBaseSpeedMultiplier * burstSpeedMult;
-    p.angle += p.spin;
-
-    // Apply physics boundary bounces (bouncing off walls)
-    if (particlePhysicsCollisionEnabled) {
-      const bMultiplier = 0.85; // coefficient of restitution with walls
-      if (p.x - p.size < 0) {
-        p.x = p.size;
-        p.vx = -p.vx * bMultiplier;
-      } else if (p.x + p.size > width) {
-        p.x = width - p.size;
-        p.vx = -p.vx * bMultiplier;
-      }
-
-      if (p.y - p.size < 0) {
-        p.y = p.size;
-        p.vy = -p.vy * bMultiplier;
-      } else if (p.y + p.size > height) {
-        p.y = height - p.size;
-        p.vy = -p.vy * bMultiplier;
-      }
-    }
-
-    // Fade out as life ends
-    p.alpha = Math.max(0, (p.life / p.maxLife) * 0.8);
-
-    // Filter out dead or off-screen particles, spawn replacements
-    const isOffScreen =
-      p.x < -100 || p.x > width + 100 || p.y < -100 || p.y > height + 100;
-
-    if (p.life > 0 && !isOffScreen) {
-      result.push(p);
-    } else {
-      result.push(createParticle(settings, width, height, false));
+    } catch (e) {
+      // Catch exceptions and safely recover/reinsert a standard particle to prevent rendering freeze
+      try {
+        result.push(createParticle(safeSettings, width, height, false));
+      } catch (innerErr) {}
     }
   }
 
   // Adjust count if settings changed
-  while (result.length < settings.count) {
-    result.push(createParticle(settings, width, height, true));
+  const countVal = typeof safeSettings.count === 'number' && !isNaN(safeSettings.count) ? safeSettings.count : 150;
+  while (result.length < countVal) {
+    result.push(createParticle(safeSettings, width, height, true));
   }
-  if (result.length > settings.count) {
-    result.length = settings.count;
+  if (result.length > countVal) {
+    result.length = countVal;
   }
 
   // If particle physics is enabled, resolve particle-to-particle collisions
@@ -585,54 +603,85 @@ export function drawParticles(
   const canvasW = ctx.canvas?.width || 800;
 
   for (const p of particles) {
-    // SECTION 2: LINKING PARTICLE FIELD TO GLOBAL COLOR MODES
-    let baseColor = p.color || settings.color || '#ff007f';
+    let baseColor = settings.color || '#ff007f';
+    try {
+      // SECTION 2: LINKING PARTICLE FIELD TO GLOBAL COLOR MODES
+      baseColor = p.color || settings.color || '#ff007f';
 
-    if (globalVisuals) {
-      const mode = globalVisuals.colorMode || 'solid';
-      if (mode === 'rainbow') {
+      if (globalVisuals) {
+        const mode = globalVisuals.colorMode || 'solid';
+        if (mode === 'rainbow') {
+          baseColor = `hsl(${p.hue || 0}, 100%, 60%)`;
+        } else if (mode === 'gradient') {
+          let colorA = globalVisuals.primaryColor || '#ff007f';
+          let colorB = globalVisuals.secondaryColor || '#00ffff';
+          
+          // Strobe effect: instantly swap colorA and colorB on each beat
+          if (settings.colorInvertOnBeat && isBeat) {
+            const temp = colorA;
+            colorA = colorB;
+            colorB = temp;
+          }
+          
+          const xRatio = Math.max(0, Math.min(1, p.x / canvasW));
+          baseColor = lerpColor(colorA, colorB, xRatio);
+        } else {
+          // solid color mode
+          baseColor = settings.color || '#ff007f';
+        }
+      }
+
+      // Overriding if Cycle Particle Colors or Beat-Reactive Particle Color Shift is enabled
+      if (settings.cycleColors || settings.beatReactiveColorShift) {
         baseColor = `hsl(${p.hue || 0}, 100%, 60%)`;
-      } else if (mode === 'gradient') {
-        let colorA = globalVisuals.primaryColor || '#ff007f';
-        let colorB = globalVisuals.secondaryColor || '#00ffff';
-        
-        // Strobe effect: instantly swap colorA and colorB on each beat
-        if (settings.colorInvertOnBeat && isBeat) {
-          const temp = colorA;
-          colorA = colorB;
-          colorB = temp;
-        }
-        
-        const xRatio = Math.max(0, Math.min(1, p.x / canvasW));
-        baseColor = lerpColor(colorA, colorB, xRatio);
-      } else {
-        // solid color mode
-        baseColor = settings.color || '#ff007f';
       }
+    } catch (err) {
+      baseColor = settings.color || '#ff007f';
     }
 
-    // Overriding if Cycle Particle Colors or Beat-Reactive Particle Color Shift is enabled
-    if (settings.cycleColors || settings.beatReactiveColorShift) {
-      baseColor = `hsl(${p.hue || 0}, 100%, 60%)`;
-    }
-
-    // SECTION 3: PROCESSING COMBINED INTERACTIVE EFFECT STATES (Color Burst on Beat)
+    // SECTION 3: PROCESSING COMBINED INTERACTIVE EFFECT STATES (Color Burst on Beat) with isolated alpha styling and strict catch blocks
     let finalColor = baseColor;
-    let finalAlpha = p.alpha;
-    
-    // Dynamic luminescence glow for Color Burst On Beat
+    let finalAlpha = isNaN(p.alpha) ? 1.0 : p.alpha;
     let glowOnBurst = false;
-    if (settings.colorBurstOnBeat && p.burstFlash && p.burstFlash > 0) {
-      if (baseColor.startsWith('#')) {
-        finalColor = lerpColor(baseColor, '#ffffff', p.burstFlash);
-      } else {
-        // HSL or other color format
-        if (p.burstFlash > 0.8) {
-          finalColor = '#ffffff';
+
+    try {
+      // Dynamic luminescence glow for Color Burst On Beat
+      if (settings.colorBurstOnBeat && p.burstFlash && p.burstFlash > 0) {
+        if (baseColor.startsWith('#')) {
+          finalColor = lerpColor(baseColor, '#ffffff', p.burstFlash);
+        } else {
+          // HSL or other color format
+          if (p.burstFlash > 0.8) {
+            finalColor = '#ffffff';
+          }
         }
+        finalAlpha = Math.max(p.alpha, p.burstFlash);
+        glowOnBurst = true;
       }
-      finalAlpha = Math.max(p.alpha, p.burstFlash);
-      glowOnBurst = true;
+    } catch (err) {
+      finalColor = settings.color || '#ff007f';
+      finalAlpha = isNaN(p.alpha) ? 1.0 : p.alpha;
+      glowOnBurst = false;
+    }
+
+    // SECTION 1: RENDERING ISOLATED ALPHA STYLINGS (No global canvas opacity dependency / isolated alpha coloring)
+    try {
+      if (finalColor.startsWith('#')) {
+        const rgb = hexToRgb(finalColor);
+        if (rgb) {
+          finalColor = `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${finalAlpha})`;
+        } else {
+          finalColor = `rgba(255, 0, 127, ${finalAlpha})`; // Fallback
+        }
+      } else if (finalColor.startsWith('hsl(')) {
+        finalColor = finalColor.replace('hsl(', 'hsla(').replace(')', `, ${finalAlpha})`);
+      } else if (finalColor.startsWith('rgb(')) {
+        finalColor = finalColor.replace('rgb(', 'rgba(').replace(')', `, ${finalAlpha})`);
+      } else {
+        finalColor = `rgba(255, 0, 127, ${finalAlpha})`; // Fallback
+      }
+    } catch (err) {
+      finalColor = `rgba(255, 0, 127, ${finalAlpha})`; // Fallback
     }
 
     const trailLenValue = settings.trailLength !== undefined ? settings.trailLength : 0;
