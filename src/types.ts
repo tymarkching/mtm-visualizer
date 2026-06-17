@@ -131,8 +131,8 @@ export interface VisualizerSettings {
   fireworksAltitude?: number;
   fireworksRadius?: number;
   fireworksSparkSize?: number;
-  stylePositions?: { [styleId: string]: { xOffset: number; yOffset: number; verticalScale?: number; horizontalScale?: number } };
-  styleSettings?: { [styleId: string]: { xOffset: number; yOffset: number; scale?: number } };
+  stylePositions?: { [styleId: string]: { xOffset: number; yOffset: number; verticalScale?: number; horizontalScale?: number; masterScale?: number; horizontalSpan?: number } };
+  styleSettings?: { [styleId: string]: { xOffset: number; yOffset: number; scale?: number; masterScale?: number; horizontalSpan?: number } };
   barFrequencyCount?: number;
   glowIntensity?: number;
   glitchFrequency?: number;

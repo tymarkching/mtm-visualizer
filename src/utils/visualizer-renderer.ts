@@ -1228,6 +1228,19 @@ export function drawVisualizer(
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
 
+    // Retrieve Master Global Scale and Total Horizontal Span config
+    const styleMasterScale = styleSetting?.masterScale !== undefined ? styleSetting.masterScale : (stylePosition?.masterScale !== undefined ? stylePosition.masterScale : 100);
+    const styleHorizontalSpan = styleSetting?.horizontalSpan !== undefined ? styleSetting.horizontalSpan : (stylePosition?.horizontalSpan !== undefined ? stylePosition.horizontalSpan : 100);
+
+    const masterScaleFactor = styleMasterScale / 100;
+    const horizontalSpanFactor = styleHorizontalSpan / 100;
+
+    if (masterScaleFactor !== 1.0 || horizontalSpanFactor !== 1.0) {
+      ctx.translate(centerX, centerY);
+      ctx.scale(masterScaleFactor * horizontalSpanFactor, masterScaleFactor);
+      ctx.translate(-centerX, -centerY);
+    }
+
     if (settings.style === 'waveform') {
     if (settings.spectrumAnalyzer) {
       // Replaces standard waveform with a frequency-domain bar chart view

@@ -4796,6 +4796,8 @@ export default function App() {
                         const styleY = visuals.styleSettings?.[item.id]?.yOffset ?? visuals.stylePositions?.[item.id]?.yOffset ?? (visuals.waveformOffsetY !== undefined ? visuals.waveformOffsetY : (visuals.placement === 'top' ? 25 : visuals.placement === 'bottom' ? 75 : 50));
                         const styleScale = visuals.styleSettings?.[item.id]?.scale ?? visuals.stylePositions?.[item.id]?.verticalScale ?? visuals.sensitivity;
                         const styleHorizontalScale = visuals.stylePositions?.[item.id]?.horizontalScale ?? visuals.lineThickness;
+                        const styleMasterScale = visuals.styleSettings?.[item.id]?.masterScale ?? visuals.stylePositions?.[item.id]?.masterScale ?? 100;
+                        const styleHorizontalSpan = visuals.styleSettings?.[item.id]?.horizontalSpan ?? visuals.stylePositions?.[item.id]?.horizontalSpan ?? 100;
 
                         return (
                           <div key={item.id} className="bg-zinc-950/25 rounded-lg border border-zinc-900/50 p-1 space-y-1">
@@ -4949,38 +4951,122 @@ export default function App() {
                                     }}
                                     className="w-full h-1 bg-zinc-950 rounded appearance-none cursor-pointer accent-indigo-500"
                                   />
-                                </div>
+                                </div>                                 <div className="space-y-1">
+                                   <div className="flex justify-between items-center text-[9px] font-mono">
+                                     <span className="text-zinc-500 uppercase font-bold text-sky-400">Horizontal Scale / Thickness</span>
+                                     <span className="text-indigo-400 font-semibold font-mono">{styleHorizontalScale}px</span>
+                                   </div>
+                                   <input
+                                     type="range"
+                                     min="1"
+                                     max="12"
+                                     step="1"
+                                     value={styleHorizontalScale}
+                                     onChange={(e) => {
+                                       const val = parseInt(e.target.value);
+                                       setVisuals(prev => {
+                                         const positions = prev.stylePositions ? { ...prev.stylePositions } : {};
+                                         positions[item.id] = {
+                                           xOffset: positions[item.id]?.xOffset ?? styleX,
+                                           yOffset: positions[item.id]?.yOffset ?? styleY,
+                                           verticalScale: positions[item.id]?.verticalScale ?? styleScale,
+                                           horizontalScale: val,
+                                           masterScale: positions[item.id]?.masterScale ?? styleMasterScale,
+                                           horizontalSpan: positions[item.id]?.horizontalSpan ?? styleHorizontalSpan
+                                         };
+                                         return {
+                                           ...prev,
+                                           stylePositions: positions
+                                         };
+                                       });
+                                     }}
+                                     className="w-full h-1 bg-zinc-950 rounded appearance-none cursor-pointer accent-indigo-500"
+                                   />
+                                 </div>
 
-                                <div className="space-y-1">
-                                  <div className="flex justify-between items-center text-[9px] font-mono">
-                                    <span className="text-zinc-500 uppercase font-bold text-sky-400">Horizontal Scale / Thickness</span>
-                                    <span className="text-indigo-400 font-semibold font-mono">{styleHorizontalScale}px</span>
-                                  </div>
-                                  <input
-                                    type="range"
-                                    min="1"
-                                    max="12"
-                                    step="1"
-                                    value={styleHorizontalScale}
-                                    onChange={(e) => {
-                                      const val = parseInt(e.target.value);
-                                      setVisuals(prev => {
-                                        const positions = prev.stylePositions ? { ...prev.stylePositions } : {};
-                                        positions[item.id] = {
-                                          xOffset: positions[item.id]?.xOffset ?? styleX,
-                                          yOffset: positions[item.id]?.yOffset ?? styleY,
-                                          verticalScale: positions[item.id]?.verticalScale ?? styleScale,
-                                          horizontalScale: val
-                                        };
-                                        return {
-                                          ...prev,
-                                          stylePositions: positions
-                                        };
-                                      });
-                                    }}
-                                    className="w-full h-1 bg-zinc-950 rounded appearance-none cursor-pointer accent-indigo-500"
-                                  />
-                                </div>
+                                 <div className="space-y-1 pt-1.5 border-t border-zinc-900/40">
+                                   <div className="flex justify-between items-center text-[9px] font-mono">
+                                     <span className="text-zinc-500 uppercase font-bold text-[#818cf8]">MASTER GLOBAL SCALE</span>
+                                     <span className="text-indigo-400 font-semibold font-mono">{styleMasterScale}%</span>
+                                   </div>
+                                   <input
+                                     type="range"
+                                     min="10"
+                                     max="200"
+                                     step="5"
+                                     value={styleMasterScale}
+                                     onChange={(e) => {
+                                       const val = parseInt(e.target.value);
+                                       setVisuals(prev => {
+                                         const positions = prev.stylePositions ? { ...prev.stylePositions } : {};
+                                         positions[item.id] = {
+                                           xOffset: positions[item.id]?.xOffset ?? styleX,
+                                           yOffset: positions[item.id]?.yOffset ?? styleY,
+                                           verticalScale: positions[item.id]?.verticalScale ?? styleScale,
+                                           horizontalScale: positions[item.id]?.horizontalScale ?? styleHorizontalScale,
+                                           masterScale: val,
+                                           horizontalSpan: positions[item.id]?.horizontalSpan ?? styleHorizontalSpan
+                                         };
+                                         const settingsMap = prev.styleSettings ? { ...prev.styleSettings } : {};
+                                         settingsMap[item.id] = {
+                                           xOffset: settingsMap[item.id]?.xOffset ?? styleX,
+                                           yOffset: settingsMap[item.id]?.yOffset ?? styleY,
+                                           scale: settingsMap[item.id]?.scale ?? styleScale,
+                                           masterScale: val,
+                                           horizontalSpan: settingsMap[item.id]?.horizontalSpan ?? styleHorizontalSpan
+                                         };
+                                         return {
+                                           ...prev,
+                                           stylePositions: positions,
+                                           styleSettings: settingsMap
+                                         };
+                                       });
+                                     }}
+                                     className="w-full h-1 bg-zinc-950 rounded appearance-none cursor-pointer accent-indigo-500"
+                                   />
+                                 </div>
+
+                                 <div className="space-y-1">
+                                   <div className="flex justify-between items-center text-[9px] font-mono">
+                                     <span className="text-zinc-500 uppercase font-bold text-[#818cf8]">TOTAL HORIZONTAL SPAN</span>
+                                     <span className="text-indigo-400 font-semibold font-mono">{styleHorizontalSpan}%</span>
+                                   </div>
+                                   <input
+                                     type="range"
+                                     min="20"
+                                     max="100"
+                                     step="5"
+                                     value={styleHorizontalSpan}
+                                     onChange={(e) => {
+                                       const val = parseInt(e.target.value);
+                                       setVisuals(prev => {
+                                         const positions = prev.stylePositions ? { ...prev.stylePositions } : {};
+                                         positions[item.id] = {
+                                           xOffset: positions[item.id]?.xOffset ?? styleX,
+                                           yOffset: positions[item.id]?.yOffset ?? styleY,
+                                           verticalScale: positions[item.id]?.verticalScale ?? styleScale,
+                                           horizontalScale: positions[item.id]?.horizontalScale ?? styleHorizontalScale,
+                                           masterScale: positions[item.id]?.masterScale ?? styleMasterScale,
+                                           horizontalSpan: val
+                                         };
+                                         const settingsMap = prev.styleSettings ? { ...prev.styleSettings } : {};
+                                         settingsMap[item.id] = {
+                                           xOffset: settingsMap[item.id]?.xOffset ?? styleX,
+                                           yOffset: settingsMap[item.id]?.yOffset ?? styleY,
+                                           scale: settingsMap[item.id]?.scale ?? styleScale,
+                                           masterScale: settingsMap[item.id]?.masterScale ?? styleMasterScale,
+                                           horizontalSpan: val
+                                         };
+                                         return {
+                                           ...prev,
+                                           stylePositions: positions,
+                                           styleSettings: settingsMap
+                                         };
+                                       });
+                                     }}
+                                     className="w-full h-1 bg-zinc-950 rounded appearance-none cursor-pointer accent-indigo-500"
+                                   />
+                                 </div>
                               </div>
                             )}
                           </div>
