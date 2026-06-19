@@ -4798,6 +4798,8 @@ export default function App() {
                         const styleHorizontalScale = visuals.stylePositions?.[item.id]?.horizontalScale ?? visuals.lineThickness;
                         const styleMasterScale = visuals.styleSettings?.[item.id]?.masterScale ?? visuals.stylePositions?.[item.id]?.masterScale ?? 100;
                         const styleHorizontalSpan = visuals.styleSettings?.[item.id]?.horizontalSpan ?? visuals.stylePositions?.[item.id]?.horizontalSpan ?? 100;
+                        const styleSpringTension = visuals.styleSettings?.[item.id]?.springTension ?? visuals.stylePositions?.[item.id]?.springTension ?? 0.1;
+                        const styleSpringDampening = visuals.styleSettings?.[item.id]?.springDampening ?? visuals.stylePositions?.[item.id]?.springDampening ?? 0.8;
 
                         return (
                           <div key={item.id} className="bg-zinc-950/25 rounded-lg border border-zinc-900/50 p-1 space-y-1">
@@ -4859,13 +4861,21 @@ export default function App() {
                                           xOffset: val,
                                           yOffset: positions[item.id]?.yOffset ?? styleY,
                                           verticalScale: positions[item.id]?.verticalScale ?? styleScale,
-                                          horizontalScale: positions[item.id]?.horizontalScale ?? styleHorizontalScale
+                                          horizontalScale: positions[item.id]?.horizontalScale ?? styleHorizontalScale,
+                                          masterScale: positions[item.id]?.masterScale ?? styleMasterScale,
+                                          horizontalSpan: positions[item.id]?.horizontalSpan ?? styleHorizontalSpan,
+                                          springTension: positions[item.id]?.springTension ?? styleSpringTension,
+                                          springDampening: positions[item.id]?.springDampening ?? styleSpringDampening
                                         };
                                         const settingsMap = prev.styleSettings ? { ...prev.styleSettings } : {};
                                         settingsMap[item.id] = {
                                           xOffset: val,
                                           yOffset: settingsMap[item.id]?.yOffset ?? styleY,
-                                          scale: settingsMap[item.id]?.scale ?? styleScale
+                                          scale: settingsMap[item.id]?.scale ?? styleScale,
+                                          masterScale: settingsMap[item.id]?.masterScale ?? styleMasterScale,
+                                          horizontalSpan: settingsMap[item.id]?.horizontalSpan ?? styleHorizontalSpan,
+                                          springTension: settingsMap[item.id]?.springTension ?? styleSpringTension,
+                                          springDampening: settingsMap[item.id]?.springDampening ?? styleSpringDampening
                                         };
                                         return {
                                           ...prev,
@@ -4896,13 +4906,21 @@ export default function App() {
                                           xOffset: positions[item.id]?.xOffset ?? styleX,
                                           yOffset: val,
                                           verticalScale: positions[item.id]?.verticalScale ?? styleScale,
-                                          horizontalScale: positions[item.id]?.horizontalScale ?? styleHorizontalScale
+                                          horizontalScale: positions[item.id]?.horizontalScale ?? styleHorizontalScale,
+                                          masterScale: positions[item.id]?.masterScale ?? styleMasterScale,
+                                          horizontalSpan: positions[item.id]?.horizontalSpan ?? styleHorizontalSpan,
+                                          springTension: positions[item.id]?.springTension ?? styleSpringTension,
+                                          springDampening: positions[item.id]?.springDampening ?? styleSpringDampening
                                         };
                                         const settingsMap = prev.styleSettings ? { ...prev.styleSettings } : {};
                                         settingsMap[item.id] = {
                                           xOffset: settingsMap[item.id]?.xOffset ?? styleX,
                                           yOffset: val,
-                                          scale: settingsMap[item.id]?.scale ?? styleScale
+                                          scale: settingsMap[item.id]?.scale ?? styleScale,
+                                          masterScale: settingsMap[item.id]?.masterScale ?? styleMasterScale,
+                                          horizontalSpan: settingsMap[item.id]?.horizontalSpan ?? styleHorizontalSpan,
+                                          springTension: settingsMap[item.id]?.springTension ?? styleSpringTension,
+                                          springDampening: settingsMap[item.id]?.springDampening ?? styleSpringDampening
                                         };
                                         return {
                                           ...prev,
@@ -4934,13 +4952,21 @@ export default function App() {
                                           xOffset: positions[item.id]?.xOffset ?? styleX,
                                           yOffset: positions[item.id]?.yOffset ?? styleY,
                                           verticalScale: val,
-                                          horizontalScale: positions[item.id]?.horizontalScale ?? styleHorizontalScale
+                                          horizontalScale: positions[item.id]?.horizontalScale ?? styleHorizontalScale,
+                                          masterScale: positions[item.id]?.masterScale ?? styleMasterScale,
+                                          horizontalSpan: positions[item.id]?.horizontalSpan ?? styleHorizontalSpan,
+                                          springTension: positions[item.id]?.springTension ?? styleSpringTension,
+                                          springDampening: positions[item.id]?.springDampening ?? styleSpringDampening
                                         };
                                         const settingsMap = prev.styleSettings ? { ...prev.styleSettings } : {};
                                         settingsMap[item.id] = {
                                           xOffset: settingsMap[item.id]?.xOffset ?? styleX,
                                           yOffset: settingsMap[item.id]?.yOffset ?? styleY,
-                                          scale: val
+                                          scale: val,
+                                          masterScale: settingsMap[item.id]?.masterScale ?? styleMasterScale,
+                                          horizontalSpan: settingsMap[item.id]?.horizontalSpan ?? styleHorizontalSpan,
+                                          springTension: settingsMap[item.id]?.springTension ?? styleSpringTension,
+                                          springDampening: settingsMap[item.id]?.springDampening ?? styleSpringDampening
                                         };
                                         return {
                                           ...prev,
@@ -4972,11 +4998,24 @@ export default function App() {
                                            verticalScale: positions[item.id]?.verticalScale ?? styleScale,
                                            horizontalScale: val,
                                            masterScale: positions[item.id]?.masterScale ?? styleMasterScale,
-                                           horizontalSpan: positions[item.id]?.horizontalSpan ?? styleHorizontalSpan
+                                           horizontalSpan: positions[item.id]?.horizontalSpan ?? styleHorizontalSpan,
+                                           springTension: positions[item.id]?.springTension ?? styleSpringTension,
+                                           springDampening: positions[item.id]?.springDampening ?? styleSpringDampening
+                                         };
+                                         const settingsMap = prev.styleSettings ? { ...prev.styleSettings } : {};
+                                         settingsMap[item.id] = {
+                                           xOffset: settingsMap[item.id]?.xOffset ?? styleX,
+                                           yOffset: settingsMap[item.id]?.yOffset ?? styleY,
+                                           scale: settingsMap[item.id]?.scale ?? styleScale,
+                                           masterScale: settingsMap[item.id]?.masterScale ?? styleMasterScale,
+                                           horizontalSpan: settingsMap[item.id]?.horizontalSpan ?? styleHorizontalSpan,
+                                           springTension: settingsMap[item.id]?.springTension ?? styleSpringTension,
+                                           springDampening: settingsMap[item.id]?.springDampening ?? styleSpringDampening
                                          };
                                          return {
                                            ...prev,
-                                           stylePositions: positions
+                                           stylePositions: positions,
+                                           styleSettings: settingsMap
                                          };
                                        });
                                      }}
@@ -5005,7 +5044,9 @@ export default function App() {
                                            verticalScale: positions[item.id]?.verticalScale ?? styleScale,
                                            horizontalScale: positions[item.id]?.horizontalScale ?? styleHorizontalScale,
                                            masterScale: val,
-                                           horizontalSpan: positions[item.id]?.horizontalSpan ?? styleHorizontalSpan
+                                           horizontalSpan: positions[item.id]?.horizontalSpan ?? styleHorizontalSpan,
+                                           springTension: positions[item.id]?.springTension ?? styleSpringTension,
+                                           springDampening: positions[item.id]?.springDampening ?? styleSpringDampening
                                          };
                                          const settingsMap = prev.styleSettings ? { ...prev.styleSettings } : {};
                                          settingsMap[item.id] = {
@@ -5013,7 +5054,9 @@ export default function App() {
                                            yOffset: settingsMap[item.id]?.yOffset ?? styleY,
                                            scale: settingsMap[item.id]?.scale ?? styleScale,
                                            masterScale: val,
-                                           horizontalSpan: settingsMap[item.id]?.horizontalSpan ?? styleHorizontalSpan
+                                           horizontalSpan: settingsMap[item.id]?.horizontalSpan ?? styleHorizontalSpan,
+                                           springTension: settingsMap[item.id]?.springTension ?? styleSpringTension,
+                                           springDampening: settingsMap[item.id]?.springDampening ?? styleSpringDampening
                                          };
                                          return {
                                            ...prev,
@@ -5047,7 +5090,9 @@ export default function App() {
                                            verticalScale: positions[item.id]?.verticalScale ?? styleScale,
                                            horizontalScale: positions[item.id]?.horizontalScale ?? styleHorizontalScale,
                                            masterScale: positions[item.id]?.masterScale ?? styleMasterScale,
-                                           horizontalSpan: val
+                                           horizontalSpan: val,
+                                           springTension: positions[item.id]?.springTension ?? styleSpringTension,
+                                           springDampening: positions[item.id]?.springDampening ?? styleSpringDampening
                                          };
                                          const settingsMap = prev.styleSettings ? { ...prev.styleSettings } : {};
                                          settingsMap[item.id] = {
@@ -5055,7 +5100,101 @@ export default function App() {
                                            yOffset: settingsMap[item.id]?.yOffset ?? styleY,
                                            scale: settingsMap[item.id]?.scale ?? styleScale,
                                            masterScale: settingsMap[item.id]?.masterScale ?? styleMasterScale,
-                                           horizontalSpan: val
+                                           horizontalSpan: val,
+                                           springTension: settingsMap[item.id]?.springTension ?? styleSpringTension,
+                                           springDampening: settingsMap[item.id]?.springDampening ?? styleSpringDampening
+                                         };
+                                         return {
+                                           ...prev,
+                                           stylePositions: positions,
+                                           styleSettings: settingsMap
+                                         };
+                                       });
+                                     }}
+                                     className="w-full h-1 bg-zinc-950 rounded appearance-none cursor-pointer accent-indigo-500"
+                                   />
+                                 </div>
+
+                                 <div className="space-y-1 pt-1.5 border-t border-zinc-900/40">
+                                   <div className="flex justify-between items-center text-[9px] font-mono">
+                                     <span className="text-zinc-500 uppercase font-bold text-[#818cf8]">WAVE SPRING TENSION</span>
+                                     <span className="text-indigo-400 font-semibold font-mono">{styleSpringTension.toFixed(2)}</span>
+                                   </div>
+                                   <input
+                                     type="range"
+                                     min="0.01"
+                                     max="0.50"
+                                     step="0.01"
+                                     value={styleSpringTension}
+                                     onChange={(e) => {
+                                       const val = parseFloat(e.target.value);
+                                       setVisuals(prev => {
+                                         const positions = prev.stylePositions ? { ...prev.stylePositions } : {};
+                                         positions[item.id] = {
+                                           xOffset: positions[item.id]?.xOffset ?? styleX,
+                                           yOffset: positions[item.id]?.yOffset ?? styleY,
+                                           verticalScale: positions[item.id]?.verticalScale ?? styleScale,
+                                           horizontalScale: positions[item.id]?.horizontalScale ?? styleHorizontalScale,
+                                           masterScale: positions[item.id]?.masterScale ?? styleMasterScale,
+                                           horizontalSpan: positions[item.id]?.horizontalSpan ?? styleHorizontalSpan,
+                                           springTension: val,
+                                           springDampening: positions[item.id]?.springDampening ?? styleSpringDampening
+                                         };
+                                         const settingsMap = prev.styleSettings ? { ...prev.styleSettings } : {};
+                                         settingsMap[item.id] = {
+                                           xOffset: settingsMap[item.id]?.xOffset ?? styleX,
+                                           yOffset: settingsMap[item.id]?.yOffset ?? styleY,
+                                           scale: settingsMap[item.id]?.scale ?? styleScale,
+                                           masterScale: settingsMap[item.id]?.masterScale ?? styleMasterScale,
+                                           horizontalSpan: settingsMap[item.id]?.horizontalSpan ?? styleHorizontalSpan,
+                                           springTension: val,
+                                           springDampening: settingsMap[item.id]?.springDampening ?? styleSpringDampening
+                                         };
+                                         return {
+                                           ...prev,
+                                           stylePositions: positions,
+                                           styleSettings: settingsMap
+                                         };
+                                       });
+                                     }}
+                                     className="w-full h-1 bg-zinc-950 rounded appearance-none cursor-pointer accent-indigo-500"
+                                   />
+                                 </div>
+
+                                 <div className="space-y-1">
+                                   <div className="flex justify-between items-center text-[9px] font-mono">
+                                     <span className="text-zinc-500 uppercase font-bold text-[#818cf8]">WAVE DAMPENING FRICTION</span>
+                                     <span className="text-indigo-400 font-semibold font-mono">{styleSpringDampening.toFixed(2)}</span>
+                                   </div>
+                                   <input
+                                     type="range"
+                                     min="0.05"
+                                     max="0.95"
+                                     step="0.05"
+                                     value={styleSpringDampening}
+                                     onChange={(e) => {
+                                       const val = parseFloat(e.target.value);
+                                       setVisuals(prev => {
+                                         const positions = prev.stylePositions ? { ...prev.stylePositions } : {};
+                                         positions[item.id] = {
+                                           xOffset: positions[item.id]?.xOffset ?? styleX,
+                                           yOffset: positions[item.id]?.yOffset ?? styleY,
+                                           verticalScale: positions[item.id]?.verticalScale ?? styleScale,
+                                           horizontalScale: positions[item.id]?.horizontalScale ?? styleHorizontalScale,
+                                           masterScale: positions[item.id]?.masterScale ?? styleMasterScale,
+                                           horizontalSpan: positions[item.id]?.horizontalSpan ?? styleHorizontalSpan,
+                                           springTension: positions[item.id]?.springTension ?? styleSpringTension,
+                                           springDampening: val
+                                         };
+                                         const settingsMap = prev.styleSettings ? { ...prev.styleSettings } : {};
+                                         settingsMap[item.id] = {
+                                           xOffset: settingsMap[item.id]?.xOffset ?? styleX,
+                                           yOffset: settingsMap[item.id]?.yOffset ?? styleY,
+                                           scale: settingsMap[item.id]?.scale ?? styleScale,
+                                           masterScale: settingsMap[item.id]?.masterScale ?? styleMasterScale,
+                                           horizontalSpan: settingsMap[item.id]?.horizontalSpan ?? styleHorizontalSpan,
+                                           springTension: settingsMap[item.id]?.springTension ?? styleSpringTension,
+                                           springDampening: val
                                          };
                                          return {
                                            ...prev,

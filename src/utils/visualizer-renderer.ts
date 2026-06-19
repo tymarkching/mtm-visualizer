@@ -29,6 +29,15 @@ let mirrorInvertedOffscreenCtx: CanvasRenderingContext2D | null = null;
 let mirrorInvertedOffscreenCanvasY: HTMLCanvasElement | null = null;
 let mirrorInvertedOffscreenCtxY: CanvasRenderingContext2D | null = null;
 
+// Dedicated offscreen canvas for isolating visualizer drawing from main canvas background/videos/text
+let visualizerWavesCanvas: HTMLCanvasElement | null = null;
+
+interface PhysicsState {
+  current: Float32Array;
+  velocity: Float32Array;
+}
+const stylePhysicsCache: { [styleId: string]: PhysicsState } = {};
+
 export interface RenderParticle {
   x: number;
   y: number;
@@ -925,7 +934,7 @@ export function drawParticles(
 
 // DRAW VISUALIZER INTERACTIVE STYLES
 export function drawVisualizer(
-  ctx: CanvasRenderingContext2D,
+  mainCtx: CanvasRenderingContext2D,
   width: number,
   height: number,
   incomingSettings: VisualizerSettings,
@@ -933,6 +942,16 @@ export function drawVisualizer(
   waveformData: Uint8Array,
   beatIntensity: number
 ) {
+  if (!visualizerWavesCanvas) {
+    visualizerWavesCanvas = document.createElement('canvas');
+  }
+  if (visualizerWavesCanvas.width !== width || visualizerWavesCanvas.height !== height) {
+    visualizerWavesCanvas.width = width;
+    visualizerWavesCanvas.height = height;
+  }
+  const ctx = visualizerWavesCanvas.getContext('2d')!;
+  ctx.clearRect(0, 0, width, height);
+
   let settings = incomingSettings;
   const isPortrait = height > width;
 
@@ -1160,14 +1179,59 @@ export function drawVisualizer(
     ? currentSettingsState.activeStyles
     : [currentSettingsState.style];
 
+  // Capture original raw waveform data statically prior to the loop to resolve block shadow TDZ compilation issues
+  const outerRawWaveformData = waveformData;
+
   stylesToDraw.forEach((styleId) => {
     ctx.save();
 
-    let width = originalWidth;
-    let height = originalHeight;
-    
     const styleSetting = currentSettingsState.styleSettings?.[styleId];
     const stylePosition = currentSettingsState.stylePositions?.[styleId];
+
+    // Retrieve physics parameters (tension default 0.1, dampening / friction default 0.8)
+    const styleSpringTension = styleSetting?.springTension !== undefined ? styleSetting.springTension : (stylePosition?.springTension !== undefined ? stylePosition.springTension : 0.1);
+    const styleSpringDampening = styleSetting?.springDampening !== undefined ? styleSetting.springDampening : (stylePosition?.springDampening !== undefined ? stylePosition.springDampening : 0.8);
+
+    // Dynamic point transition smoothing using continuous Hooke's Law physics solver
+    const rawWaveTemp = outerRawWaveformData;
+    const dataLenVal = rawWaveTemp.length;
+    if (!stylePhysicsCache[styleId] || stylePhysicsCache[styleId].current.length !== dataLenVal) {
+      const initialArray = new Float32Array(dataLenVal);
+      for (let i = 0; i < dataLenVal; i++) {
+        initialArray[i] = rawWaveTemp[i];
+      }
+      stylePhysicsCache[styleId] = {
+        current: initialArray,
+        velocity: new Float32Array(dataLenVal)
+      };
+    }
+
+    const cacheObj = stylePhysicsCache[styleId];
+    const smoothedWave = new Uint8Array(dataLenVal);
+
+    for (let i = 0; i < dataLenVal; i++) {
+      const target = rawWaveTemp[i];
+      const current = cacheObj.current[i];
+      let velocity = cacheObj.velocity[i];
+
+      // Hooke's Law Spring force combined with dampening friction resistance
+      const displacement = target - current;
+      const force = displacement * styleSpringTension;
+      velocity = (velocity + force) * (1 - styleSpringDampening);
+
+      const nextCurrent = current + velocity;
+
+      cacheObj.current[i] = nextCurrent;
+      cacheObj.velocity[i] = velocity;
+
+      smoothedWave[i] = Math.max(0, Math.min(255, Math.round(nextCurrent)));
+    }
+
+    // Shadow waveformData with physics-smoothed data so all drawings inherit it seamlessly
+    const waveformData = smoothedWave;
+
+    let width = originalWidth;
+    let height = originalHeight;
 
     const styleScale = styleSetting?.scale !== undefined 
       ? styleSetting.scale 
@@ -3578,6 +3642,9 @@ export function drawVisualizer(
       }
     }
   }
+
+  // Copy the completed visualizer from offscreen canvas onto the main canvas
+  mainCtx.drawImage(visualizerWavesCanvas, 0, 0);
 }
 
 // DRAW TEXT OVERLAYS
