@@ -730,9 +730,6 @@ export default function App() {
   // Active launching firework rockets Ref
   const fireworkRocketsRef = useRef<FireworkRocket[]>([]);
 
-  // Isolated firework sparks pool Ref
-  const fireworkSparksRef = useRef<SparkParticle[]>([]);
-
   // Recording Stream & Recorder refs
   const mediaRecorderRef = useRef<MediaRecorder | null>(null);
   const recordedChunksRef = useRef<Blob[]>([]);
@@ -2433,7 +2430,6 @@ export default function App() {
     let animationId: number;
     let lastBeatTime = 0;
     const beatCooldown = 150; // ms
-    let currentShakeAmt = 0;
 
     // Persistent interpolation arrays for motion smoothing
     let smoothAnalyser: Float32Array | null = null;
@@ -2533,6 +2529,31 @@ export default function App() {
         window.dispatchEvent(new CustomEvent('audio-visualizer-beat', { detail: { beatIntensity } }));
       }
 
+      // Apply Motion Smoothing if enabled in main drawing loop to reduce flickering in wave patterns
+      const motionSmoothing = visualsRef.current.motionSmoothing;
+      if (typeof motionSmoothing === 'number' && motionSmoothing > 0) {
+        if (!smoothAnalyser || smoothAnalyser.length !== analyserData.length) {
+          smoothAnalyser = new Float32Array(analyserData.length);
+          for (let i = 0; i < analyserData.length; i++) {
+            smoothAnalyser[i] = analyserData[i];
+          }
+        }
+        if (!smoothWaveform || smoothWaveform.length !== waveformData.length) {
+          smoothWaveform = new Float32Array(waveformData.length);
+          for (let i = 0; i < waveformData.length; i++) {
+            smoothWaveform[i] = waveformData[i];
+          }
+        }
+
+        const smoothFactor = Math.max(0, Math.min(0.99, motionSmoothing));
+        for (let i = 0; i < analyserData.length; i++) {
+          smoothAnalyser[i] = smoothAnalyser[i] * smoothFactor + analyserData[i] * (1 - smoothFactor);
+          smoothWaveform[i] = smoothWaveform[i] * smoothFactor + waveformData[i] * (1 - smoothFactor);
+          analyserData[i] = Math.round(smoothAnalyser[i]);
+          waveformData[i] = Math.round(smoothWaveform[i]);
+        }
+      }
+
       // Calculate dynamic average weights for sticker/background/shake beat reactions in real-time
       let avgBass = 0;
       let avgMain = 0;
@@ -2561,26 +2582,7 @@ export default function App() {
       const bassReactiveFactor = avgBass / 255;
       const mainBeatReactiveFactor = avgMain / 255;
 
-      // Camera Beat Shake translation logic decays per frame or boosts on transient beats
-      if (isBeat) {
-        const shakeMultiplier = visualsRef.current.cameraShake !== undefined ? visualsRef.current.cameraShake : 5;
-        currentShakeAmt = beatIntensity * shakeMultiplier;
-      } else {
-        currentShakeAmt *= 0.88;
-      }
-      if (currentShakeAmt < 0.1) {
-        currentShakeAmt = 0;
-      }
-
       ctx.save();
-
-      // Viewport screenshake translations synced directly to peak music beats
-      if (visualsRef.current.cameraShake !== undefined && visualsRef.current.cameraShake > 0 && currentShakeAmt > 0) {
-        const shakeMagnitude = currentShakeAmt;
-        const shakeX = (Math.random() - 0.5) * shakeMagnitude * 2;
-        const shakeY = (Math.random() - 0.5) * shakeMagnitude * 2;
-        ctx.translate(shakeX, shakeY);
-      }
 
       // Global Canvas Rotation (Subtle persistent rotation of the entire stage)
       const rotDeg = visualsRef.current.canvasRotation || 0;
@@ -2601,6 +2603,9 @@ export default function App() {
         } else {
           activeBgBeatPulse = bassReactiveFactor;
         }
+      } else if (visualsRef.current && visualsRef.current.enableBeatPulse) {
+        isBgBeatReactEnabled = true;
+        activeBgBeatPulse = beatIntensity;
       }
 
       // 1. Draw Background (dim / blurred appropriately with potential beat pulse zoom)
@@ -2674,9 +2679,7 @@ export default function App() {
           canvas.height,
           isBeat,
           bassIntensity,
-          overallVolume,
-          analyserData,
-          visualsRef.current.enableShockwaveDrop
+          overallVolume
         );
         drawParticles(ctx, particlesPoolRef.current, particlesSetRef.current, isBeat, bassIntensity, visualsRef.current);
       }
@@ -2709,8 +2712,10 @@ export default function App() {
       if (enableFireworks) {
         // Rocket launcher: triggers on on-beat bass cuts of high intensity
         if (isBeat && beatIntensity > 0.45) {
-          // Launch from a fully randomized X-coordinate source across the canvas width (with 5% margin)
-          const spawnX = canvas.width * 0.05 + Math.random() * canvas.width * 0.9;
+          const xPercent = visualsRef.current.waveformOffsetX !== undefined ? visualsRef.current.waveformOffsetX : 50;
+          
+          // Launch from near the baseline bottom of the canvas
+          const spawnX = canvas.width * (xPercent / 100) + (Math.random() - 0.5) * 150;
           const spawnY = canvas.height;
           
           // Flight Height / Altitude slider controls detonation (defaults to 50%)
@@ -2720,29 +2725,18 @@ export default function App() {
           // Adaptive Color Syncing
           const primaryCol = visualsRef.current.primaryColor || '#ff007f';
           const secondaryCol = visualsRef.current.secondaryColor || '#00ffff';
-          const particleGlowTint = particlesSetRef.current?.color || '#00ffcc';
-          const fireworksColorMode = visualsRef.current.fireworksColorMode || 'dynamic-rainbow';
+          const colorMode = visualsRef.current.colorMode || 'gradient';
 
           let rocketColor = primaryCol;
-          if (fireworksColorMode === 'dynamic-rainbow') {
+          if (colorMode === 'rainbow') {
             rocketColor = `hsl(${Math.floor(Math.random() * 280)}, 100%, 55%)`;
-          } else if (fireworksColorMode === 'match-glow') {
-            rocketColor = particleGlowTint;
-          } else if (fireworksColorMode === 'solid-white') {
-            rocketColor = '#ffffff';
-          } else {
-            const colorMode = visualsRef.current.colorMode || 'gradient';
-            if (colorMode === 'rainbow') {
-              rocketColor = `hsl(${Math.floor(Math.random() * 280)}, 100%, 55%)`;
-            } else if (colorMode === 'gradient') {
-              rocketColor = interpolateColor(primaryCol, secondaryCol, Math.random());
-            }
+          } else if (colorMode === 'gradient') {
+            rocketColor = interpolateColor(primaryCol, secondaryCol, Math.random());
           }
 
           fireworkRocketsRef.current.push({
             x: spawnX,
             y: spawnY,
-            vx: (Math.random() - 0.5) * 3, // dynamic vx random X drift between -1.5 and 1.5
             startX: spawnX,
             startY: spawnY,
             targetY: targetY,
@@ -2760,7 +2754,6 @@ export default function App() {
 
           for (const rocket of fireworkRocketsRef.current) {
             rocket.y -= rocket.speed;
-            rocket.x += rocket.vx || 0; // apply random horizontal drift
 
             if (rocket.y > rocket.targetY) {
               // Draw launching rocket flare
@@ -2778,7 +2771,7 @@ export default function App() {
               ctx.strokeStyle = rocket.color;
               ctx.lineWidth = rocket.size * 0.8;
               ctx.moveTo(rocket.x, rocket.y);
-              ctx.lineTo(rocket.x - (rocket.vx || 0) * 1.5, rocket.y + 15);
+              ctx.lineTo(rocket.x, rocket.y + 15);
               ctx.stroke();
 
               activeRockets.push(rocket);
@@ -2790,39 +2783,27 @@ export default function App() {
 
               const primaryCol = visualsRef.current.primaryColor || '#ff007f';
               const secondaryCol = visualsRef.current.secondaryColor || '#00ffff';
-              const particleGlowTint = particlesSetRef.current?.color || '#00ffcc';
-              const fireworksColorMode = visualsRef.current.fireworksColorMode || 'dynamic-rainbow';
+              const colorMode = visualsRef.current.colorMode || 'gradient';
 
               for (let i = 0; i < sparkCount; i++) {
-                // Randomize fragmentation angles in a full 360-degree chaos cluster
                 const angle = Math.random() * Math.PI * 2;
-                // Add minor random noise for dispersion variation to make it look exceptionally organic
-                const radialSpeed = (3 + Math.random() * 7) * radiusMult * (0.85 + Math.random() * 0.3);
+                // "Explosion Size / Radius" adjusts spread velocity of sparks
+                const radialSpeed = (3 + Math.random() * 7) * radiusMult;
                 // "Spark Particle Size" adjusts thickness/size of sparks
                 const size = (1.2 + Math.random() * 3.0) * sparkSizeVal / 1.5;
                 const maxLife = 25 + Math.floor(Math.random() * 25);
 
-                // Selecting spark color based on Fireworks Color Mode
+                // Adaptive Color Syncing inheritance
                 let sparkColor = primaryCol;
-                if (fireworksColorMode === 'dynamic-rainbow') {
+                if (colorMode === 'rainbow') {
                   const ratio = i / sparkCount;
                   sparkColor = `hsl(${Math.floor(ratio * 280)}, 100%, 55%)`;
-                } else if (fireworksColorMode === 'match-glow') {
-                  sparkColor = particleGlowTint;
-                } else if (fireworksColorMode === 'solid-white') {
-                  sparkColor = '#ffffff';
-                } else {
-                  const colorMode = visualsRef.current.colorMode || 'gradient';
-                  if (colorMode === 'rainbow') {
-                    const ratio = i / sparkCount;
-                    sparkColor = `hsl(${Math.floor(ratio * 280)}, 100%, 55%)`;
-                  } else if (colorMode === 'gradient') {
-                    const ratio = Math.random();
-                    sparkColor = interpolateColor(primaryCol, secondaryCol, ratio);
-                  }
+                } else if (colorMode === 'gradient') {
+                  const ratio = Math.random();
+                  sparkColor = interpolateColor(primaryCol, secondaryCol, ratio);
                 }
 
-                fireworkSparksRef.current.push({
+                beatBurstsRef.current.push({
                   x: rocket.x,
                   y: rocket.targetY,
                   vx: Math.cos(angle) * radialSpeed,
@@ -2842,11 +2823,11 @@ export default function App() {
         }
 
         // Physics Simulation and Trail Drawing of active Sparks
-        if (fireworkSparksRef.current.length > 0) {
+        if (beatBurstsRef.current.length > 0) {
           ctx.save();
           const activeSparks: SparkParticle[] = [];
 
-          for (const spark of fireworkSparksRef.current) {
+          for (const spark of beatBurstsRef.current) {
             spark.life -= 1;
 
             if (spark.life > 0) {
@@ -2877,7 +2858,7 @@ export default function App() {
             }
           }
 
-          fireworkSparksRef.current = activeSparks;
+          beatBurstsRef.current = activeSparks;
           ctx.restore();
         }
       } else {
@@ -2885,8 +2866,8 @@ export default function App() {
         if (fireworkRocketsRef.current.length > 0) {
           fireworkRocketsRef.current = [];
         }
-        if (fireworkSparksRef.current.length > 0) {
-          fireworkSparksRef.current = [];
+        if (beatBurstsRef.current.length > 0) {
+          beatBurstsRef.current = [];
         }
       }
 
@@ -5037,8 +5018,7 @@ export default function App() {
                         { id: 'reflected-matrix-dots', name: 'Reflected Matrix Dots' },
                         { id: 'reflected-mountain-silhouette', name: 'Reflected Mountain Silhouette' },
                         { id: 'reflected-center-split-pins', name: 'Reflected Center-Split Pins' },
-                        { id: 'reflected-radial-ring-horizon', name: 'Reflected Radial Ring Horizon' },
-                        { id: 'bouncing-circles', name: 'Bouncing Circles' }
+                        { id: 'reflected-radial-ring-horizon', name: 'Reflected Radial Ring Horizon' }
                       ].map((item) => {
                         const active = visuals.activeStyles && visuals.activeStyles.length > 0
                           ? visuals.activeStyles.includes(item.id as VisualizerStyle)
@@ -5631,15 +5611,15 @@ export default function App() {
                     <div className="space-y-1">
                       <div className="flex justify-between font-mono text-[9px] text-zinc-400 font-bold">
                         <span>MAX LINE WIDTH / HORIZONTAL SCALE</span>
-                        <span className="text-white font-semibold">{(visuals.horizontalScale !== undefined ? visuals.horizontalScale : 1.0).toFixed(1)}x</span>
+                        <span className="text-white font-semibold">{visuals.lineThickness} px</span>
                       </div>
                       <input
                         type="range"
-                        min="0.1"
-                        max="3.0"
-                        step="0.1"
-                        value={visuals.horizontalScale !== undefined ? visuals.horizontalScale : 1.0}
-                        onChange={(e) => setVisuals(prev => ({ ...prev, horizontalScale: parseFloat(e.target.value) }))}
+                        min="1"
+                        max="12"
+                        step="1"
+                        value={visuals.lineThickness}
+                        onChange={(e) => setVisuals(prev => ({ ...prev, lineThickness: parseInt(e.target.value) }))}
                         className="w-full accent-blue-600 cursor-pointer"
                       />
                     </div>
@@ -5770,32 +5750,16 @@ export default function App() {
 
                     <div className="space-y-1">
                       <div className="flex justify-between font-mono text-[9px] text-zinc-400 font-bold">
-                        <span>WAVEFORM DENSITY / BAR COUNT</span>
-                        <span className="text-white font-semibold">{(visuals.barFrequencyCount !== undefined ? visuals.barFrequencyCount : 64)} bars</span>
+                        <span>LINE WIDTH / THICKNESS</span>
+                        <span className="text-white font-semibold">{visuals.lineThickness} px</span>
                       </div>
                       <input
                         type="range"
-                        min="32"
-                        max="512"
-                        step="8"
-                        value={visuals.barFrequencyCount !== undefined ? visuals.barFrequencyCount : 64}
-                        onChange={(e) => setVisuals(prev => ({ ...prev, barFrequencyCount: parseInt(e.target.value) }))}
-                        className="w-full accent-blue-600 cursor-pointer"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <div className="flex justify-between font-mono text-[9px] text-zinc-400 font-bold">
-                        <span>LINE THICKNESS / THINNESS</span>
-                        <span className="text-white font-semibold">{(visuals.lineThickness !== undefined ? visuals.lineThickness : 3).toFixed(1)} px</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="0.2"
-                        max="15"
-                        step="0.1"
-                        value={visuals.lineThickness !== undefined ? visuals.lineThickness : 3}
-                        onChange={(e) => setVisuals(prev => ({ ...prev, lineThickness: parseFloat(e.target.value) }))}
+                        min="1"
+                        max="12"
+                        step="1"
+                        value={visuals.lineThickness}
+                        onChange={(e) => setVisuals(prev => ({ ...prev, lineThickness: parseInt(e.target.value) }))}
                         className="w-full accent-blue-600 cursor-pointer"
                       />
                     </div>
@@ -6035,23 +5999,6 @@ export default function App() {
                               className="w-full h-1 bg-zinc-950 rounded-lg appearance-none cursor-pointer accent-blue-500"
                             />
                           </div>
-
-                          <div className="space-y-1.5">
-                            <div className="flex justify-between items-center text-[9px] font-mono">
-                              <span className="text-zinc-400 uppercase font-semibold">Mirror Effect Opacity</span>
-                              <span className="text-blue-400 font-bold">{visuals.mirrorOpacity !== undefined ? visuals.mirrorOpacity : 100}%</span>
-                            </div>
-                            <input
-                              type="range"
-                              id="mirror-opacity-slider"
-                              min="0"
-                              max="100"
-                              step="1"
-                              value={visuals.mirrorOpacity !== undefined ? visuals.mirrorOpacity : 100}
-                              onChange={(e) => setVisuals(prev => ({ ...prev, mirrorOpacity: parseInt(e.target.value, 10) }))}
-                              className="w-full h-1 bg-zinc-950 rounded-lg appearance-none cursor-pointer accent-blue-500"
-                            />
-                          </div>
                         </div>
                       )}
                     </div>
@@ -6268,13 +6215,96 @@ export default function App() {
                         </p>
                       </div>
 
+                      {/* Intensity-Based Continuous Shake Toggle */}
+                      <div className="border-t border-zinc-800/60 pt-3.5 space-y-2 animate-fade-in">
+                        <div className="flex items-center justify-between">
+                          <div className="text-left space-y-0.5">
+                            <span className="font-semibold text-zinc-300 block font-sans text-[11px] uppercase tracking-wider">Intensity-Based Shake</span>
+                            <span className="text-[10px] text-zinc-500 font-sans block leading-normal">Uses frequency bin levels to trigger continuous subtle canvas vibration rather than binary trigger</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setVisuals(prev => ({ ...prev, intensityBasedShake: !prev.intensityBasedShake }))}
+                            className={`relative inline-flex h-5 w-9 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                              visuals.intensityBasedShake ? 'bg-indigo-600' : 'bg-zinc-800'
+                            }`}
+                          >
+                            <span
+                              className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                                visuals.intensityBasedShake ? 'translate-x-4' : 'translate-x-0'
+                              }`}
+                            />
+                          </button>
+                        </div>
+                      </div>
 
+                      {/* Motion Smoothing Slider */}
+                      <div className="border-t border-zinc-800/60 pt-3.5 space-y-1.5 animate-fade-in">
+                        <div className="flex justify-between font-mono text-[9px] text-zinc-400">
+                          <span>MOTION SMOOTHING (INTERPOLATION)</span>
+                          <span className="text-teal-400 font-mono font-semibold">
+                            {visuals.motionSmoothing ? `${visuals.motionSmoothing.toFixed(2)}` : 'DISABLED'}
+                          </span>
+                        </div>
+                        <input
+                          id="motion-smoothing-slider"
+                          type="range"
+                          min="0.0"
+                          max="0.95"
+                          step="0.05"
+                          value={typeof visuals.motionSmoothing === 'number' ? visuals.motionSmoothing : 0}
+                          onChange={(e) => setVisuals(prev => ({ ...prev, motionSmoothing: parseFloat(e.target.value) }))}
+                          className="w-full accent-blue-650 cursor-pointer"
+                        />
+                        <p className="text-[9px] text-zinc-500 font-sans leading-relaxed">
+                          Controls real-time frame-to-frame interpolation to reduce flickering in wave patterns
+                        </p>
+                      </div>
 
                       {/* Audio-Reactive FX Section */}
                       <div id="audio-reactive-fx-section" className="border-t border-zinc-800/60 pt-4 mt-4 space-y-3">
                         <div>
                           <h4 className="text-xs font-semibold text-zinc-300 font-mono uppercase tracking-wider text-left">Audio-Reactive FX</h4>
                           <p className="text-[10px] text-zinc-500 mt-0.5 text-left">Extra sound-reactive canvas effects</p>
+                        </div>
+
+                        {/* Enable Camera Beat Shake Toggle */}
+                        <div className="flex items-center justify-between p-2.5 bg-[#07070a]/80 rounded border border-zinc-950/60 mt-1">
+                          <div className="text-left">
+                            <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Enable Camera Beat Shake</span>
+                            <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Apply high-energy viewport screenshake translations synced directly to peak music beats</span>
+                          </div>
+                          <button
+                            id="enable-camera-beat-shake-toggle"
+                            type="button"
+                            onClick={() => setVisuals(prev => ({ ...prev, enableCameraBeatShake: !prev.enableCameraBeatShake }))}
+                            className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                              visuals.enableCameraBeatShake ? 'bg-blue-600' : 'bg-zinc-800'
+                            }`}
+                          >
+                            <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                              visuals.enableCameraBeatShake ? 'translate-x-3.5' : 'translate-x-0'
+                            }`} />
+                          </button>
+                        </div>
+
+                        {/* Enable Beat Pulse Toggle */}
+                        <div className="flex items-center justify-between p-2.5 bg-[#07070a]/80 rounded border border-zinc-950/60 mt-1">
+                          <div className="text-left">
+                            <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Enable Beat Pulse (Camera Shake)</span>
+                            <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Apply subtle temporary 1.03x zoom pulse to background on bass peaks</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setVisuals(prev => ({ ...prev, enableBeatPulse: !prev.enableBeatPulse }))}
+                            className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                              visuals.enableBeatPulse ? 'bg-blue-600' : 'bg-zinc-800'
+                            }`}
+                          >
+                            <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                              visuals.enableBeatPulse ? 'translate-x-3.5' : 'translate-x-0'
+                            }`} />
+                          </button>
                         </div>
 
                         {/* Reactive Text Glow Toggle */}
@@ -6538,8 +6568,7 @@ export default function App() {
                         { id: 'glowing-stars', name: 'Glowing Stars' },
                         { id: 'cyber-triangles', name: 'Cyber Triangles' },
                         { id: 'floating-bubbles', name: 'Floating Bubbles' },
-                        { id: 'music-notes', name: 'Music Notes' },
-                        { id: 'glitch-vectors', name: 'Glitch Vectors' }
+                        { id: 'music-notes', name: 'Music Notes' }
                       ].map((item) => (
                         <button
                           key={item.id}
@@ -6567,7 +6596,6 @@ export default function App() {
                       <option value="float-up">Float Up (Default)</option>
                       <option value="fall-down">Fall Down</option>
                       <option value="center-explosion">Center Explosion</option>
-                      <option value="spiral-vortex">Spiral Vortex</option>
                     </select>
                   </div>
 
@@ -6798,25 +6826,6 @@ export default function App() {
                       </button>
                     </div>
 
-                    {/* Feature 3: Waveform Apex Attractor behavior toggle */}
-                    <div className="flex items-center justify-between p-2.5 bg-zinc-950/60 rounded border border-zinc-850">
-                      <div>
-                        <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Enable Waveform Apex Attractor</span>
-                        <span className="text-[10px] text-zinc-500 block font-sans mt-0.5 font-mono text-zinc-400">Gravitationally pull particles toward active wave peaks on heavy bass beats</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setParticlesSet(prev => ({ ...prev, enableApexAttractor: !prev.enableApexAttractor }))}
-                        className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
-                          particlesSet.enableApexAttractor ? 'bg-blue-600' : 'bg-zinc-800'
-                        }`}
-                      >
-                        <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
-                          particlesSet.enableApexAttractor ? 'translate-x-3.5' : 'translate-x-0'
-                        }`} />
-                      </button>
-                    </div>
-
                     <div className="flex items-center justify-between p-2.5 bg-zinc-950/60 rounded border border-zinc-850">
                       <div>
                         <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Particle Physics Collision</span>
@@ -7027,41 +7036,6 @@ export default function App() {
                                 setVisuals(prev => ({ ...prev, fireworksSparkSize: val }));
                               }}
                               className="w-full h-1 bg-[#050508] rounded appearance-none cursor-pointer accent-indigo-500"
-                            />
-                          </div>
-
-                          {/* Fireworks Color Mode */}
-                          <div className="space-y-1 pt-1">
-                            <div className="flex justify-between items-center text-[10px] font-mono">
-                              <span className="text-zinc-400 uppercase font-bold">Fireworks Color Mode</span>
-                            </div>
-                            <select
-                              value={visuals.fireworksColorMode || 'dynamic-rainbow'}
-                              onChange={(e) => {
-                                const val = e.target.value as any;
-                                setVisuals(prev => ({ ...prev, fireworksColorMode: val }));
-                              }}
-                              className="w-full bg-[#050508] border border-zinc-900 rounded text-[11px] px-2 py-1.5 font-mono text-zinc-300 focus:outline-none focus:ring-1 focus:ring-indigo-500 cursor-pointer"
-                            >
-                              <option value="dynamic-rainbow">Dynamic Rainbow Map</option>
-                              <option value="match-glow">Match Particle Glow Tint</option>
-                              <option value="solid-white">Solid White Sparkle</option>
-                            </select>
-                          </div>
-
-                          {/* Enable Particle Shockwave Drop */}
-                          <div className="flex items-center justify-between pt-2 border-t border-zinc-950">
-                            <div>
-                              <span className="text-[10px] text-zinc-400 font-mono uppercase font-bold">Enable Particle Shockwave Drop</span>
-                              <span className="text-[8px] text-zinc-500 block">Radial vector explosion wave on high amplitude drops (&gt;245)</span>
-                            </div>
-                            <input
-                              type="checkbox"
-                              checked={visuals.enableShockwaveDrop ?? false}
-                              onChange={(e) => {
-                                setVisuals(prev => ({ ...prev, enableShockwaveDrop: e.target.checked }));
-                              }}
-                              className="w-4 h-4 accent-indigo-500 cursor-pointer rounded border-zinc-900 bg-[#050508]"
                             />
                           </div>
                         </div>

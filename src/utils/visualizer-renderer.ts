@@ -32,6 +32,25 @@ let mirrorInvertedOffscreenCtxY: CanvasRenderingContext2D | null = null;
 // Dedicated offscreen canvas for isolating visualizer drawing from main canvas background/videos/text
 let visualizerWavesCanvas: HTMLCanvasElement | null = null;
 
+interface Shockwave {
+  x: number;
+  y: number;
+  radius: number;
+  maxRadius: number;
+  speed: number;
+  strength: number;
+  color: string;
+}
+export const activeShockwaves: Shockwave[] = [];
+let lastShockwaveTime = 0;
+
+interface BouncingCircleState {
+  currentY: number;
+  velocity: number;
+  currentOpacity: number;
+}
+const bouncingCirclesCache: { [key: number]: BouncingCircleState } = {};
+
 interface PhysicsState {
   current: Float32Array;
   velocity: Float32Array;
@@ -56,6 +75,9 @@ export interface RenderParticle {
   baseSize?: number;
   hue?: number;
   burstFlash?: number;
+  radius?: number;
+  velocityOffset?: number;
+  speed?: number;
 }
 
 // Color conversion helpers
@@ -213,8 +235,16 @@ export function createParticle(
   // Starting positions based on gravity and direction
   let x = Math.random() * width;
   let y = 0;
+  let radiusVal = 0;
+  const angle = (Math.random() * Math.PI * 2);
+  const centerX = width / 2;
+  const centerY = height / 2;
   
-  if (randomY) {
+  if (dir === 'spiral-vortex') {
+    radiusVal = randomY ? Math.random() * (Math.min(width, height) * 0.45) : 0;
+    x = centerX + Math.cos(angle) * radiusVal;
+    y = centerY + Math.sin(angle) * radiusVal;
+  } else if (randomY) {
     y = Math.random() * height;
   } else {
     if (dir === 'fall-down') {
@@ -229,7 +259,6 @@ export function createParticle(
 
   // Velocity
   const baseSpeed = settings.speed;
-  const angle = (Math.random() * Math.PI * 2);
   let vx = Math.cos(angle) * (baseSpeed * 0.5) + settings.wind;
   let vy = Math.sin(angle) * (baseSpeed * 0.5) + settings.gravity;
 
@@ -242,6 +271,9 @@ export function createParticle(
     const explosionSpeed = (0.3 + Math.random() * 0.8) * baseSpeed;
     vx = Math.cos(angle) * explosionSpeed + settings.wind;
     vy = Math.sin(angle) * explosionSpeed + settings.gravity;
+  } else if (dir === 'spiral-vortex') {
+    vx = 0;
+    vy = 0;
   }
 
   // Preserve legacy types' special speeds if direction is default/implicit
@@ -270,7 +302,7 @@ export function createParticle(
     alpha: 0.1 + Math.random() * 0.8,
     life: maxLife,
     maxLife,
-    angle: Math.random() * Math.PI * 2,
+    angle: dir === 'spiral-vortex' ? angle : Math.random() * Math.PI * 2,
     spin: (Math.random() - 0.5) * 0.05,
     history: [],
     baseVx: vx,
@@ -278,6 +310,9 @@ export function createParticle(
     baseSize: size,
     hue: Math.random() * 360,
     burstFlash: 0,
+    radius: radiusVal,
+    velocityOffset: (0.4 + Math.random() * 0.8) * Math.max(0.5, baseSpeed),
+    speed: baseSpeed
   };
 }
 
@@ -289,7 +324,9 @@ export function updateParticles(
   height: number,
   isBeat: boolean,
   bassIntensity: number,
-  overallVolume: number = 1.0
+  overallVolume: number = 1.0,
+  analyserData?: Uint8Array,
+  enableShockwaveDrop?: boolean
 ): RenderParticle[] {
   const result: RenderParticle[] = [];
 
@@ -299,6 +336,40 @@ export function updateParticles(
 
   const floor = settings.sensitivityFloor !== undefined ? settings.sensitivityFloor : 0.0;
   const dynamicVolume = floor + (1.0 - floor) * overallVolume;
+
+  // Update active independent shockwaves
+  for (let i = activeShockwaves.length - 1; i >= 0; i--) {
+    const sw = activeShockwaves[i];
+    sw.radius += sw.speed;
+    if (sw.radius > sw.maxRadius) {
+      activeShockwaves.splice(i, 1);
+    }
+  }
+
+  // Trigger shockwave with threshold > 245 inside analyserData-cooldown of 1200ms
+  if (enableShockwaveDrop && analyserData) {
+    let peakValue = 0;
+    for (let idx = 0; idx < analyserData.length; idx++) {
+      if (analyserData[idx] > peakValue) {
+        peakValue = analyserData[idx];
+      }
+    }
+    if (peakValue > 245) {
+      const now = Date.now();
+      if (now - lastShockwaveTime > 1200) {
+        lastShockwaveTime = now;
+        activeShockwaves.push({
+          x: width / 2,
+          y: height / 2,
+          radius: 10,
+          maxRadius: Math.sqrt(width * width + height * height) * 0.55,
+          speed: 10,
+          strength: 40,
+          color: settings.color || '#00ffff'
+        });
+      }
+    }
+  }
 
   for (let p of particles) {
     // Decrement life proportionally to the movement speed multiplier so particles travel the full distance before fading out
@@ -405,14 +476,65 @@ export function updateParticles(
       }
     }
 
+    // Apply Shockwave Drop outward push if active
+    if (activeShockwaves.length > 0) {
+      for (const sw of activeShockwaves) {
+        const dx = p.x - sw.x;
+        const dy = p.y - sw.y;
+        const dist = Math.sqrt(dx * dx + dy * dy);
+        const shellWidth = 40;
+        if (Math.abs(dist - sw.radius) < shellWidth && dist > 0.1) {
+          const pushAngle = Math.atan2(dy, dx);
+          const pushAmt = sw.strength * (1.0 - Math.abs(dist - sw.radius) / shellWidth);
+          p.vx += Math.cos(pushAngle) * pushAmt * 0.15;
+          p.vy += Math.sin(pushAngle) * pushAmt * 0.15;
+        }
+      }
+    }
+
+    // Apply Waveform Apex Attractor dynamic pull
+    if (settings.enableApexAttractor && analyserData && analyserData.length > 0 && bassIntensity > 0.4) {
+      const sampleCount = 32;
+      let nearestX = p.x;
+      let nearestY = p.y;
+      let minDist = Infinity;
+      for (let s = 0; s < sampleCount; s++) {
+        const idx = Math.floor((s / sampleCount) * analyserData.length);
+        const amp = (analyserData[idx] - 128) / 128; // -1 to 1
+        const nodeX = (s / (sampleCount - 1)) * width;
+        const nodeY = (height / 2) + amp * (height * 0.35);
+
+        const dx = nodeX - p.x;
+        const dy = nodeY - p.y;
+        const distance = dx * dx + dy * dy;
+        if (distance < minDist) {
+          minDist = distance;
+          nearestX = nodeX;
+          nearestY = nodeY;
+        }
+      }
+      const attractForce = 0.08 * bassIntensity;
+      p.vx += (nearestX - p.x) * attractForce - p.vx * 0.1;
+      p.vy += (nearestY - p.y) * attractForce - p.vy * 0.1;
+    }
+
     // SECTION 1: ENVELOPE-BASED VELOCITY SCALING (THE FADE-OUT FIX)
     // The base movement speed of the particles must be directly multiplied by this live dynamicVolume coefficient.
     // This guarantees that if the music slows down, softens, or fades to silence, the particles automatically lose momentum and come to an absolute, complete stop.
     // (Or gracefully slide at the Sensitivity Floor baseline if configured).
     const dynamicBaseSpeedMultiplier = scaleMultiplier * dynamicVolume;
 
-    p.x += p.vx * dynamicBaseSpeedMultiplier * burstSpeedMult;
-    p.y += p.vy * dynamicBaseSpeedMultiplier * burstSpeedMult;
+    if (settings.emittingDirection === 'spiral-vortex') {
+      const angleStep = (p.speed || settings.speed || 1) * 0.02 * dynamicBaseSpeedMultiplier * burstSpeedMult;
+      p.angle += angleStep;
+      const radStep = (p.velocityOffset || 1) * dynamicBaseSpeedMultiplier * burstSpeedMult;
+      p.radius = (p.radius ?? 0) + radStep;
+      p.x = width / 2 + Math.cos(p.angle) * p.radius;
+      p.y = height / 2 + Math.sin(p.angle) * p.radius;
+    } else {
+      p.x += p.vx * dynamicBaseSpeedMultiplier * burstSpeedMult;
+      p.y += p.vy * dynamicBaseSpeedMultiplier * burstSpeedMult;
+    }
     p.angle += p.spin;
 
     // Apply physics boundary bounces (bouncing off walls)
@@ -926,7 +1048,42 @@ export function drawParticles(
       ctx.closePath();
       ctx.fill();
       ctx.restore();
+    } else if (settings.type === 'glitch-vectors') {
+      ctx.save();
+      const isHighEndTrigger = isBeat && (settings.audioDriveTarget === 'high-end' || Math.random() > 0.4);
+      let alphaMultiplier = 1.0;
+      if (isHighEndTrigger) {
+        alphaMultiplier = Math.random() > 0.15 ? Math.random() * 1.25 : 0.05;
+      }
+      ctx.globalAlpha = finalAlpha * alphaMultiplier;
+
+      const w = 1 + Math.floor((p.size || 4) % 8); // width 1px to 8px
+      const h = 1;
+      let xOffset = 0;
+      if (isHighEndTrigger && Math.random() > 0.5) {
+        xOffset = (Math.random() - 0.5) * 12;
+      }
+
+      ctx.fillStyle = finalColor;
+      ctx.fillRect(p.x - w / 2 + xOffset, p.y - h / 2, w, h);
+      ctx.restore();
     }
+  }
+
+  // Render clean, transparent expanding shockwave rings
+  if (activeShockwaves.length > 0) {
+    ctx.save();
+    for (const sw of activeShockwaves) {
+      const ratio = sw.radius / sw.maxRadius;
+      const alpha = Math.max(0, 0.7 * (1.0 - ratio));
+      ctx.beginPath();
+      ctx.arc(sw.x, sw.y, sw.radius, 0, Math.PI * 2);
+      ctx.strokeStyle = sw.color;
+      ctx.lineWidth = 4 * (1.0 - ratio) + 1;
+      ctx.globalAlpha = alpha;
+      ctx.stroke();
+    }
+    ctx.restore();
   }
 
   ctx.restore();
@@ -994,7 +1151,7 @@ export function drawVisualizer(
       ...settings,
       barSpacing: Math.min(suggestedSpacing, maxAllowedSpacing),
       barFrequencyCount: suggestedBarCount,
-      lineThickness: Math.max(1, Math.min(settings.lineThickness || 2, 2)),
+      lineThickness: Math.max(0.1, Math.min(settings.lineThickness || 2, 2)),
     };
   }
 
@@ -1270,9 +1427,9 @@ export function drawVisualizer(
     const xOffset = styleSetting?.xOffset !== undefined ? styleSetting.xOffset : (stylePosition?.xOffset !== undefined ? stylePosition.xOffset : undefined);
     const yOffset = styleSetting?.yOffset !== undefined ? styleSetting.yOffset : (stylePosition?.yOffset !== undefined ? stylePosition.yOffset : undefined);
 
-    const xPercent = xOffset !== undefined ? xOffset : (settings.waveformOffsetX !== undefined ? settings.waveformOffsetX : 50);
+    const xPercent = xOffset !== undefined ? xOffset : 50;
     const defaultYPercent = placement === 'top' ? 25 : placement === 'bottom' ? 75 : 50;
-    const yPercent = yOffset !== undefined ? yOffset : (settings.waveformOffsetY !== undefined ? settings.waveformOffsetY : defaultYPercent);
+    const yPercent = yOffset !== undefined ? yOffset : defaultYPercent;
     activeYPercent = yPercent;
 
     let centerX = width * (xPercent / 100);
@@ -1313,7 +1470,12 @@ export function drawVisualizer(
         : Math.min(64, dataLen);
       const spacing = settings.barSpacing !== undefined ? settings.barSpacing : 4;
       const totalSpacing = spacing * (barCount - 1);
-      const barWidth = (width - totalSpacing) / barCount;
+      const originalBarWidth = (width - totalSpacing) / barCount;
+      const multiplier = (settings.lineThickness !== undefined ? settings.lineThickness : 3) / 3;
+      const barWidth = originalBarWidth * multiplier;
+      const step = barWidth + spacing;
+      const totalWidth = barCount * barWidth + (barCount - 1) * spacing;
+      const startX = (width - totalWidth) / 2;
       const radius = settings.barRoundness !== undefined ? settings.barRoundness : 3;
 
       for (let i = 0; i < barCount; i++) {
@@ -1322,7 +1484,7 @@ export function drawVisualizer(
         const value = analyserData[idx] || 0;
         const barHeight = (value / 255) * (height * 0.65) * settings.sensitivity + 4;
 
-        const x = i * (barWidth + spacing);
+        const x = startX + i * step;
         
         let y = midY - barHeight;
         if (yPercent < 40) {
@@ -1346,21 +1508,32 @@ export function drawVisualizer(
         ctx.fill();
       }
     } else {
-      // Smooth flowing bezier wave path
+      // Smooth flowing bezier wave path with density matched exactly to barFrequencyCount
+      const densityPoints = settings.barFrequencyCount !== undefined && settings.barFrequencyCount > 0
+        ? settings.barFrequencyCount
+        : dataLen;
+
+      // Ensure lineWidth perfectly matches the slider settings, supporting sub-pixel thickness
+      ctx.lineWidth = settings.lineThickness !== undefined ? settings.lineThickness : 2;
+
       ctx.beginPath();
-      const sliceWidth = width / dataLen;
+      const sliceWidth = width / densityPoints;
       let x = 0;
 
-      for (let i = 0; i < dataLen; i++) {
+      for (let i = 0; i < densityPoints; i++) {
+        // Map to original data length indices evenly
+        const idx = Math.min(dataLen - 1, Math.floor((i / densityPoints) * dataLen));
+        const prevIdx = Math.max(0, Math.min(dataLen - 1, Math.floor(((i - 1) / densityPoints) * dataLen)));
+
         // wave value is normalized around 128 (for 8-bit unsigned integer)
-        const v = waveformData[i] / 128.0; 
+        const v = waveformData[idx] / 128.0; 
         const y = (v * (height / 3)) * settings.sensitivity + midY - (height / 6);
 
         if (i === 0) {
           ctx.moveTo(x, y);
         } else {
           const prevX = x - sliceWidth;
-          const prevV = waveformData[i - 1]/128.0;
+          const prevV = waveformData[prevIdx] / 128.0;
           const prevY = (prevV * (height / 3)) * settings.sensitivity + midY - (height / 6);
           ctx.bezierCurveTo(prevX + sliceWidth / 2, prevY, prevX + sliceWidth / 2, y, x, y);
         }
@@ -1374,10 +1547,14 @@ export function drawVisualizer(
     const barCount = settings.barFrequencyCount !== undefined && settings.barFrequencyCount > 0
       ? Math.min(settings.barFrequencyCount, dataLen)
       : Math.min(64, dataLen);
-    
     const totalBars = barCount;
-    const computedBarWidth = (width / totalBars) * 0.8;
-    const spacing = (width / totalBars) * 0.2;
+    const spacing = settings.barSpacing !== undefined ? settings.barSpacing : 4;
+    const originalBarWidth = (width / totalBars) * 0.8;
+    const multiplier = (settings.lineThickness !== undefined ? settings.lineThickness : 3) / 3;
+    const computedBarWidth = originalBarWidth * multiplier;
+    const step = computedBarWidth + spacing;
+    const totalWidth = totalBars * computedBarWidth + (totalBars - 1) * spacing;
+    const startX = (width - totalWidth) / 2;
     const radius = settings.barRoundness;
 
     const maxIdx = Math.floor(dataLen * 0.65);
@@ -1388,7 +1565,7 @@ export function drawVisualizer(
       const value = Math.min(255, rawValue * (1 + (i / totalBars) * 1.5));
       const barHeight = (value / 255) * (height * 0.6) * settings.sensitivity + 4;
 
-      const x = i * (computedBarWidth + spacing);
+      const x = startX + i * step;
       
       let y = midY - barHeight;
       if (yPercent < 40) {
@@ -1466,7 +1643,7 @@ export function drawVisualizer(
       const yEnd = centerY + sin * (baseRadius + len);
 
       ctx.strokeStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, i / itemSlots);
-      ctx.lineWidth = Math.max(2, settings.lineThickness);
+      ctx.lineWidth = settings.lineThickness;
       
       ctx.beginPath();
       ctx.moveTo(xStart, yStart);
@@ -1476,19 +1653,32 @@ export function drawVisualizer(
 
   } else if (settings.style === 'retro') {
     // VHS Retro grids and sound wave reflection
-    let localCenterY = midY;
-    let gridY = midY + height * 0.2;
-    if (yPercent < 40) {
-      gridY = midY + height * 0.1; // keep it below the top sun
-    }
+    const gridY = midY; // Ensure BOTH the top and bottom rendering loops strictly inherit the exact same Global Baseline positioning
 
     const mode = settings.colorMode || 'gradient';
-    const numBars = 50;
-    const barW = width / numBars;
+    
+    // Share exact same Resolution Density variable for the loops
+    const numBars = settings.barFrequencyCount !== undefined && settings.barFrequencyCount > 0
+      ? Math.min(settings.barFrequencyCount, dataLen)
+      : 50;
+
+    const spacing = settings.barSpacing !== undefined ? settings.barSpacing : 4;
+    const totalSpacing = spacing * (numBars - 1);
+    const originalBarW = (width - totalSpacing) / numBars;
+
+    // Share exact same Thickness/Thinness inputs
+    const multiplier = (settings.lineThickness !== undefined ? settings.lineThickness : 3) / 3;
+    const barW = Math.max(1, originalBarW * multiplier);
+    const step = barW + spacing;
+    const totalWidth = numBars * barW + (numBars - 1) * spacing;
+    const startX = (width - totalWidth) / 2;
+
+    const glowStrength = settings.glowStrength !== undefined ? settings.glowStrength : 12;
 
     // Save state before rendering the retro visualizer wave elements
     ctx.save();
 
+    // 1. TOP Loop (Main waveform going UP from the baseline)
     for (let i = 0; i < numBars; i++) {
       // Symmetric sound wave output
       const rawIdx = Math.abs(i - numBars / 2);
@@ -1499,10 +1689,10 @@ export function drawVisualizer(
 
       // Dynamically resolve bar color based on selected Color Mode
       const barColor = getDynamicColor(settings.primaryColor, settings.secondaryColor, ratio);
+      const xPos = startX + i * step;
 
       // Render Main Bar with custom Glow & Alpha
       ctx.save();
-      const glowStrength = settings.glowStrength !== undefined ? settings.glowStrength : 12;
       if (glowStrength > 0) {
         ctx.shadowBlur = glowStrength;
         ctx.shadowColor = settings.glowColor || barColor;
@@ -1510,12 +1700,20 @@ export function drawVisualizer(
       ctx.globalAlpha = 0.4 + (val / 255) * 0.6;
       ctx.fillStyle = barColor;
 
-      if (yPercent < 40) {
-        ctx.fillRect(i * barW + 1, gridY, barW - 2, barH);
-      } else {
-        ctx.fillRect(i * barW + 1, gridY - barH, barW - 2, barH);
-      }
+      ctx.fillRect(xPos, gridY - barH, barW, barH);
       ctx.restore();
+    }
+
+    // 2. BOTTOM Loop (Reflection waveform going DOWN from the baseline)
+    for (let i = 0; i < numBars; i++) {
+      const rawIdx = Math.abs(i - numBars / 2);
+      const ratio = rawIdx / (numBars / 2);
+      const dataIdx = Math.floor(ratio * (dataLen * 0.5));
+      const val = analyserData[dataIdx] || 0;
+      const barH = (val / 255) * 150 * settings.sensitivity;
+
+      const barColor = getDynamicColor(settings.primaryColor, settings.secondaryColor, ratio);
+      const xPos = startX + i * step;
 
       // Render Reflection Wave with dynamic colors matching the main bar and adjusted opacity
       ctx.save();
@@ -1526,17 +1724,13 @@ export function drawVisualizer(
       ctx.globalAlpha = (val / 255) * 0.3;
       ctx.fillStyle = barColor;
 
-      if (yPercent < 40) {
-        ctx.fillRect(i * barW + 1, gridY - barH * 0.5, barW - 2, barH * 0.5);
-      } else {
-        ctx.fillRect(i * barW + 1, gridY, barW - 2, barH * 0.5);
-      }
+      ctx.fillRect(xPos, gridY, barW, barH * 0.5);
       ctx.restore();
     }
 
     ctx.restore(); // Restore context back to its original state
 
-    // Render Grid Baseline dynamically styled with color schemes
+    // Render Grid Baseline dynamically styled with color schemes and Thickness/Thinness slider lineThickness
     ctx.save();
     let baselineColor = '#ff007f'; // default classic retro magenta/pink
     if (mode === 'solid') {
@@ -1554,7 +1748,7 @@ export function drawVisualizer(
     }
 
     ctx.strokeStyle = baselineColor;
-    ctx.lineWidth = 4;
+    ctx.lineWidth = settings.lineThickness !== undefined ? settings.lineThickness : 4;
     ctx.beginPath();
     ctx.moveTo(0, gridY);
     ctx.lineTo(width, gridY);
@@ -1841,7 +2035,7 @@ export function drawVisualizer(
       else ctx.lineTo(x, y);
     }
     ctx.strokeStyle = settings.glowColor || '#ffffff';
-    ctx.lineWidth = Math.max(1, settings.lineThickness * 0.7);
+    ctx.lineWidth = settings.lineThickness * 0.7;
     ctx.globalAlpha = 0.9;
     ctx.stroke();
     ctx.restore();
@@ -1881,7 +2075,7 @@ export function drawVisualizer(
       ctx.beginPath();
       ctx.moveTo(x, y1);
       ctx.lineTo(x, y2);
-      ctx.lineWidth = Math.max(1, settings.lineThickness / 2);
+      ctx.lineWidth = settings.lineThickness / 2;
       // Give 3D alpha cues matching sine rotation depth
       ctx.globalAlpha = 0.25 + Math.abs(zOffset) * 0.55;
       ctx.strokeStyle = `rgba(255, 255, 255, 0.4)`;
@@ -1890,7 +2084,7 @@ export function drawVisualizer(
       // Draw shiny atom joints (nucleobase nodes)
       // Joint A
       ctx.beginPath();
-      const dotRadiusA = Math.max(3, settings.lineThickness * 1.5 + zOffset * 2.5);
+      const dotRadiusA = Math.max(0.5, settings.lineThickness * 1.5 + zOffset * 2.5);
       ctx.arc(x, y1, dotRadiusA, 0, Math.PI * 2);
       ctx.fillStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, i / totalRungs);
       ctx.shadowBlur = dotRadiusA * 1.5;
@@ -1899,7 +2093,7 @@ export function drawVisualizer(
 
       // Joint B
       ctx.beginPath();
-      const dotRadiusB = Math.max(3, settings.lineThickness * 1.5 - zOffset * 2.5);
+      const dotRadiusB = Math.max(0.5, settings.lineThickness * 1.5 - zOffset * 2.5);
       ctx.arc(x, y2, dotRadiusB, 0, Math.PI * 2);
       ctx.fillStyle = getDynamicColor(settings.secondaryColor, settings.primaryColor, i / totalRungs);
       ctx.shadowBlur = dotRadiusB * 1.5;
@@ -1936,15 +2130,20 @@ export function drawVisualizer(
       : Math.min(64, dataLen);
     const spacing = settings.barSpacing !== undefined ? settings.barSpacing : 4;
     const totalSpacing = spacing * (barCount - 1);
-    const barWidth = (width - totalSpacing) / barCount;
+    const originalBarWidth = (width - totalSpacing) / barCount;
+    const multiplier = (settings.lineThickness !== undefined ? settings.lineThickness : 3) / 3;
+    const barWidth = originalBarWidth * multiplier;
+    const step = barWidth + spacing;
+    const totalWidth = barCount * barWidth + (barCount - 1) * spacing;
+    const startX = (width - totalWidth) / 2;
     const radius = settings.barRoundness !== undefined ? settings.barRoundness : 3;
 
     for (let i = 0; i < barCount; i++) {
-      const idx = Math.floor(Math.pow(i / barCount, 1.3) * (dataLen * 0.7));
-      const value = analyserData[idx] || 0;
-      const barHeight = (value / 255) * (height * 0.35) * settings.sensitivity + 2;
+       const idx = Math.floor(Math.pow(i / barCount, 1.3) * (dataLen * 0.7));
+       const value = analyserData[idx] || 0;
+       const barHeight = (value / 255) * (height * 0.35) * settings.sensitivity + 2;
 
-      const x = i * (barWidth + spacing);
+       const x = startX + i * step;
       
       ctx.fillStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, i / barCount);
       
@@ -2048,7 +2247,12 @@ export function drawVisualizer(
     const colCount = Math.min(32, dataLen);
     const spacing = settings.barSpacing !== undefined ? settings.barSpacing : 6;
     const totalSpacing = spacing * (colCount - 1);
-    const colWidth = (width - totalSpacing) / colCount;
+    const originalColWidth = (width - totalSpacing) / colCount;
+    const multiplier = (settings.lineThickness !== undefined ? settings.lineThickness : 3) / 3;
+    const colWidth = originalColWidth * multiplier;
+    const step = colWidth + spacing;
+    const totalWidth = colCount * colWidth + (colCount - 1) * spacing;
+    const startX = (width - totalWidth) / 2;
     const blockRows = 12; 
     const blockHeight = Math.max(1.5, (height * 0.45) / blockRows - 2.5);
 
@@ -2060,7 +2264,7 @@ export function drawVisualizer(
       const val = analyserData[idx] || 0;
       const activeRows = Math.floor((val / 255) * blockRows * settings.sensitivity);
 
-      const x = i * (colWidth + spacing);
+      const x = startX + i * step;
 
       for (let r = 0; r < blockRows; r++) {
         const segmentActive = r < activeRows;
@@ -2206,7 +2410,7 @@ export function drawVisualizer(
           y = midY - yOffset;
         }
 
-        const size = Math.max(1, (settings.lineThickness * 1.5) * (1 - ratio * 0.45) + beatIntensity * 2.5);
+        const size = Math.max(0.1, (settings.lineThickness * 1.5) * (1 - ratio * 0.45) + beatIntensity * 2.5);
         const alpha = (1 - ratio * 0.75) * (val / 255);
 
         ctx.beginPath();
@@ -2224,7 +2428,12 @@ export function drawVisualizer(
       : Math.min(48, dataLen);
     const spacing = settings.barSpacing !== undefined ? settings.barSpacing : 6;
     const totalSpacing = spacing * (barCount - 1);
-    const barWidth = (width - totalSpacing) / barCount;
+    const originalBarWidth = (width - totalSpacing) / barCount;
+    const multiplier = (settings.lineThickness !== undefined ? settings.lineThickness : 3) / 3;
+    const barWidth = originalBarWidth * multiplier;
+    const step = barWidth + spacing;
+    const totalWidth = barCount * barWidth + (barCount - 1) * spacing;
+    const startX = (width - totalWidth) / 2;
     const radius = barWidth / 2;
 
     ctx.save();
@@ -2233,7 +2442,7 @@ export function drawVisualizer(
       const value = analyserData[idx] || 0;
       const barHeight = (value / 255) * (height * 0.6) * settings.sensitivity + 4;
 
-      const x = i * (barWidth + spacing);
+      const x = startX + i * step;
       
       let y = midY - barHeight;
       if (yPercent < 40) {
@@ -2681,7 +2890,7 @@ export function drawVisualizer(
 
     ctx.save();
     ctx.shadowBlur = settings.glowStrength !== undefined ? settings.glowStrength : 12;
-    ctx.lineWidth = Math.max(1.5, settings.lineThickness);
+    ctx.lineWidth = settings.lineThickness;
 
     const numRings = 5;
     const maxRadius = Math.min(width, height) * 0.4;
@@ -2727,9 +2936,14 @@ export function drawVisualizer(
   } else if (settings.style === 'retro-arcade-stack') {
     // Retro Arcade Stack
     const numColumns = Math.min(32, dataLen);
-    const colW = width / numColumns;
-    const gapX = colW * 0.2;
-    const drawW = colW - gapX;
+    const gapX = settings.barSpacing !== undefined ? settings.barSpacing : 4;
+    const totalSpacing = gapX * (numColumns - 1);
+    const originalDrawW = (width - totalSpacing) / numColumns;
+    const multiplier = (settings.lineThickness !== undefined ? settings.lineThickness : 3) / 3;
+    const drawW = originalDrawW * multiplier;
+    const step = drawW + gapX;
+    const totalWidth = numColumns * drawW + (numColumns - 1) * gapX;
+    const startX = (width - totalWidth) / 2;
 
     ctx.save();
     ctx.shadowBlur = settings.glowStrength !== undefined ? settings.glowStrength : 10;
@@ -2740,7 +2954,7 @@ export function drawVisualizer(
       const val = analyserData[freqIdx] || 0;
       const magnitude = (val / 255.0) * (height * 0.55) * settings.sensitivity;
 
-      const x = c * colW + gapX / 2;
+      const x = startX + c * step;
       const numBlocks = 12;
       const blockH = Math.max(2, (height * 0.4) / numBlocks);
       const gapY = blockH * 0.25;
@@ -2788,7 +3002,7 @@ export function drawVisualizer(
 
     ctx.save();
     ctx.shadowBlur = settings.glowStrength !== undefined ? settings.glowStrength : 15;
-    ctx.lineWidth = Math.max(1.0, settings.lineThickness);
+    ctx.lineWidth = settings.lineThickness;
 
     const leftX = 0;
     const leftY = 0;
@@ -2904,7 +3118,7 @@ export function drawVisualizer(
     const currentTrailColor = settings.primaryColor;
     ctx.fillStyle = colorToRgba(currentTrailColor, 0.45);
     ctx.strokeStyle = currentTrailColor;
-    ctx.lineWidth = Math.max(1.5, settings.lineThickness);
+    ctx.lineWidth = settings.lineThickness;
     ctx.shadowBlur = settings.glowStrength !== undefined ? settings.glowStrength : 12;
     ctx.shadowColor = currentTrailColor;
 
@@ -2926,10 +3140,15 @@ export function drawVisualizer(
     const barCount = settings.barFrequencyCount !== undefined && settings.barFrequencyCount > 0
       ? Math.min(settings.barFrequencyCount, dataLen)
       : Math.min(48, dataLen);
-    
     const totalBars = barCount;
-    const computedBarWidth = (width / totalBars) * 0.8;
-    const spacing = (width / totalBars) * 0.2;
+    const spacing = settings.barSpacing !== undefined ? settings.barSpacing : 4;
+    const totalSpacing = spacing * (totalBars - 1);
+    const originalBarWidth = (width - totalSpacing) / totalBars;
+    const multiplier = (settings.lineThickness !== undefined ? settings.lineThickness : 3) / 3;
+    const computedBarWidth = originalBarWidth * multiplier;
+    const step = computedBarWidth + spacing;
+    const totalWidth = totalBars * computedBarWidth + (totalBars - 1) * spacing;
+    const startX = (width - totalWidth) / 2;
     
     const blockHeight = Math.max(2, computedBarWidth * 0.82); // Height of each block segment
     const blockGap = Math.max(1, computedBarWidth * 0.35); // Gap between each block segment
@@ -2942,7 +3161,7 @@ export function drawVisualizer(
       const value = Math.min(255, rawValue * (1 + (i / totalBars) * 1.5));
       const barHeight = (value / 255) * (height * 0.65) * settings.sensitivity + 4;
       
-      const x = i * (computedBarWidth + spacing);
+      const x = startX + i * step;
       const numberOfBlocks = Math.max(1, Math.floor(barHeight / (blockHeight + blockGap)));
       
       ctx.fillStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, i / totalBars);
@@ -2961,7 +3180,7 @@ export function drawVisualizer(
     ctx.shadowBlur = 20;
     ctx.shadowColor = settings.primaryColor;
     ctx.strokeStyle = settings.primaryColor;
-    ctx.lineWidth = Math.max(3, settings.lineThickness * 1.5);
+    ctx.lineWidth = settings.lineThickness * 1.5;
     ctx.lineCap = 'round';
     ctx.lineJoin = 'round';
     
@@ -3029,7 +3248,7 @@ export function drawVisualizer(
     
     // Inner Ring (Vocal)
     ctx.strokeStyle = settings.secondaryColor;
-    ctx.lineWidth = Math.max(1.5, settings.lineThickness);
+    ctx.lineWidth = settings.lineThickness;
     ctx.shadowBlur = settings.glowStrength || 10;
     ctx.shadowColor = settings.secondaryColor;
     ctx.beginPath();
@@ -3051,7 +3270,7 @@ export function drawVisualizer(
     
     // Outer Ring (Bass)
     ctx.strokeStyle = settings.primaryColor;
-    ctx.lineWidth = Math.max(2, settings.lineThickness * 1.3);
+    ctx.lineWidth = settings.lineThickness * 1.3;
     ctx.shadowColor = settings.primaryColor;
     ctx.beginPath();
     for (let i = 0; i <= ptsCount; i++) {
@@ -3143,7 +3362,7 @@ export function drawVisualizer(
       ctx.shadowBlur = 20;
       ctx.shadowColor = settings.primaryColor;
       ctx.strokeStyle = settings.primaryColor;
-      ctx.lineWidth = Math.max(3, settings.lineThickness * 1.5);
+      ctx.lineWidth = settings.lineThickness * 1.5;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       
@@ -3166,7 +3385,7 @@ export function drawVisualizer(
       // 2. Draw inverted mirror counterpart with fading transparency gradient
       ctx.save();
       // No extreme neon shadow blur on reflection, just smooth fade
-      ctx.lineWidth = Math.max(2, settings.lineThickness * 1.2);
+      ctx.lineWidth = settings.lineThickness * 1.2;
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       
@@ -3286,7 +3505,7 @@ export function drawVisualizer(
 
       // Subtle mountain top line
       ctx.strokeStyle = settings.primaryColor;
-      ctx.lineWidth = Math.max(1.5, settings.lineThickness);
+      ctx.lineWidth = settings.lineThickness;
       ctx.beginPath();
       ctx.moveTo(points[0].x, midY - points[0].yTopOffset);
       for (let i = 1; i < points.length; i++) {
@@ -3312,7 +3531,7 @@ export function drawVisualizer(
 
       // Mirrored mountain bottom line with 0.35 opacity
       ctx.strokeStyle = `rgba(${rgb2.r}, ${rgb2.g}, ${rgb2.b}, 0.35)`;
-      ctx.lineWidth = Math.max(1.0, settings.lineThickness);
+      ctx.lineWidth = settings.lineThickness;
       ctx.beginPath();
       ctx.moveTo(points[0].x, midY + points[0].yTopOffset);
       for (let i = 1; i < points.length; i++) {
@@ -3422,7 +3641,7 @@ export function drawVisualizer(
       ctx.lineTo(ringPoints[i].x, ringPoints[i].y);
     }
     ctx.strokeStyle = settings.primaryColor;
-    ctx.lineWidth = Math.max(2, settings.lineThickness * 1.2);
+    ctx.lineWidth = settings.lineThickness * 1.2;
     ctx.shadowBlur = settings.glowStrength || 15;
     ctx.shadowColor = settings.primaryColor;
     ctx.stroke();
@@ -3451,7 +3670,7 @@ export function drawVisualizer(
     reflectionGrad.addColorStop(1, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.0)`);
     
     ctx.strokeStyle = reflectionGrad;
-    ctx.lineWidth = Math.max(1.5, settings.lineThickness);
+    ctx.lineWidth = settings.lineThickness;
     ctx.shadowBlur = 0; // Disable shadow on bottom reflection
     ctx.stroke();
     ctx.restore();
@@ -3465,6 +3684,90 @@ export function drawVisualizer(
     ctx.stroke();
     
     ctx.restore();
+  } else if (settings.style === 'bouncing-circles') {
+    // Discrete Circle Array bouncing UP/DOWN to frequency bins
+    const barCount = settings.barFrequencyCount !== undefined && settings.barFrequencyCount > 0
+      ? Math.min(settings.barFrequencyCount, dataLen)
+      : Math.min(64, dataLen);
+    const totalCircles = barCount;
+    const step = (width - 40) / totalCircles;
+    const startX = 20 + step / 2;
+
+    const baseThicknessMultiplier = settings.lineThickness !== undefined ? settings.lineThickness : 2;
+    const circleRadius = Math.max(1, baseThicknessMultiplier * 2.5);
+
+    const maxIdx = Math.floor(dataLen * 0.65);
+    const baselineY = midY;
+    const isTopAligned = yPercent < 40;
+
+    for (let i = 0; i < totalCircles; i++) {
+      const idx = Math.floor(Math.pow(i / totalCircles, 1.1) * maxIdx);
+      const rawValue = analyserData[idx] || 0;
+      const value = Math.min(255, rawValue * (1 + (i / totalCircles) * 1.5));
+      const targetHeight = (value / 255) * (height * 0.4) * settings.sensitivity;
+
+      let targetY = baselineY - targetHeight;
+      if (isTopAligned) {
+        targetY = baselineY + targetHeight;
+      }
+
+      if (!bouncingCirclesCache[i]) {
+        bouncingCirclesCache[i] = {
+          currentY: baselineY,
+          velocity: 0,
+          currentOpacity: 0.0
+        };
+      }
+      const state = bouncingCirclesCache[i];
+
+      // Determine movement compared to baseline
+      const targetDisplacement = targetHeight;
+      const currentDisplacement = Math.abs(state.currentY - baselineY);
+
+      const springStiffness = 0.16; // Elastic spring stiffness
+      const springDamping = 0.82;   // Physical damping/friction multiplier
+
+      if (targetDisplacement > currentDisplacement) {
+        // High-energy snap response on sudden audio/frequency volume peaks
+        const diffY = targetY - state.currentY;
+        state.velocity += diffY * 0.38; // Rapidly accelerate up
+        state.currentY += state.velocity;
+        state.currentOpacity = Math.min(1.0, state.currentOpacity + 0.35);
+      } else {
+        // Fluid spring-damping harmonic oscillation to drop down and bounce settling transitions
+        const forceY = (targetY - state.currentY) * springStiffness;
+        state.velocity = (state.velocity + forceY) * springDamping;
+        state.currentY += state.velocity;
+        
+        // Solid fluid decay on opacity to prevent trail clutter and maintain a responsive look
+        state.currentOpacity = Math.max(0, state.currentOpacity * 0.90 - 0.015);
+      }
+
+      const circleColor = getDynamicColor(settings.primaryColor, settings.secondaryColor, i / totalCircles);
+      const x = startX + i * step;
+
+      const drawCircle = (cX: number, cY: number, r: number, alpha: number, col: string) => {
+        if (alpha <= 0) return;
+        ctx.beginPath();
+        ctx.arc(cX, cY, r, 0, Math.PI * 2);
+        ctx.fillStyle = col;
+        ctx.save();
+        ctx.globalAlpha = alpha;
+        ctx.shadowColor = settings.glowColor || col;
+        ctx.shadowBlur = settings.glowStrength !== undefined ? settings.glowStrength * 3 : 15;
+        ctx.fill();
+        ctx.restore();
+      };
+
+      // Render main circle
+      drawCircle(x, state.currentY, circleRadius, state.currentOpacity, circleColor);
+
+      // Render vertical symmetrical pair when Mirror Mode is active
+      if (settings.mirrorMode) {
+        const mirroredY = baselineY + (baselineY - state.currentY);
+        drawCircle(x, mirroredY, circleRadius, state.currentOpacity, circleColor);
+      }
+    }
   }
 
     ctx.restore();
@@ -3515,6 +3818,10 @@ export function drawVisualizer(
           ctx.clearRect(segmentWidth, 0, width - segmentWidth, height);
           
           // Populate the remaining segments across the canvas with alternating orientations
+          ctx.save();
+          if (settings.mirrorOpacity !== undefined) {
+            ctx.globalAlpha = settings.mirrorOpacity / 100;
+          }
           for (let i = 1; i < 2 * symmetry; i++) {
             const x = i * segmentWidth;
             if (i % 2 === 0) {
@@ -3532,6 +3839,7 @@ export function drawVisualizer(
               ctx.restore();
             }
           }
+          ctx.restore();
         }
       }
     }
@@ -3574,6 +3882,10 @@ export function drawVisualizer(
           ctx.clearRect(0, segmentHeight, width, height - segmentHeight);
           
           // Populate the remaining segments down the canvas with alternating orientations
+          ctx.save();
+          if (settings.mirrorOpacity !== undefined) {
+            ctx.globalAlpha = settings.mirrorOpacity / 100;
+          }
           for (let i = 1; i < 2 * symmetry; i++) {
             const y = i * segmentHeight;
             if (i % 2 === 0) {
@@ -3591,6 +3903,7 @@ export function drawVisualizer(
               ctx.restore();
             }
           }
+          ctx.restore();
         }
       }
     }
@@ -3643,8 +3956,30 @@ export function drawVisualizer(
     }
   }
 
-  // Copy the completed visualizer from offscreen canvas onto the main canvas
+  // Copy the completed visualizer from offscreen canvas onto the main canvas with global offset translation
+  const defaultXPercentForOffset = 50;
+  const placementForOffset = settings.placement || 'bottom';
+  const defaultYPercentForOffset = placementForOffset === 'top' ? 25 : placementForOffset === 'bottom' ? 75 : 50;
+
+  const xPercentForOffset = settings.waveformOffsetX !== undefined ? settings.waveformOffsetX : 50;
+  const yPercentForOffset = settings.waveformOffsetY !== undefined ? settings.waveformOffsetY : defaultYPercentForOffset;
+
+  const shiftX = width * (xPercentForOffset - defaultXPercentForOffset) / 100;
+  const shiftY = height * (yPercentForOffset - defaultYPercentForOffset) / 100;
+
+  mainCtx.save();
+  mainCtx.translate(shiftX, shiftY);
+
+  // Apply MAX LINE WIDTH / HORIZONTAL SCALE (Slider 2) centered on the canvas width
+  const hScale = settings.horizontalScale !== undefined ? settings.horizontalScale : 1.0;
+  if (hScale !== 1.0) {
+    mainCtx.translate(width / 2, 0);
+    mainCtx.scale(hScale, 1.0);
+    mainCtx.translate(-width / 2, 0);
+  }
+
   mainCtx.drawImage(visualizerWavesCanvas, 0, 0);
+  mainCtx.restore();
 }
 
 // DRAW TEXT OVERLAYS
@@ -3914,7 +4249,7 @@ export function drawWatermark(
 
   ctx.save();
   
-  const opacity = settings.watermarkOpacity !== undefined ? settings.watermarkOpacity : 0.8;
+  const opacity = settings.logoWatermarkOpacity !== undefined ? settings.logoWatermarkOpacity : (settings.watermarkOpacity !== undefined ? settings.watermarkOpacity : 0.8);
   ctx.globalAlpha = opacity;
 
   const maxDim = 120;
@@ -3931,7 +4266,8 @@ export function drawWatermark(
     dstWidth = (imgWidth / imgHeight) * maxDim;
   }
 
-  const scale = (settings.watermarkScale !== undefined ? settings.watermarkScale : 100) / 100;
+  const scaleVal = settings.logoWatermarkScale !== undefined ? settings.logoWatermarkScale : (settings.watermarkScale !== undefined ? settings.watermarkScale : 100);
+  const scale = scaleVal / 100;
   dstWidth *= scale;
   dstHeight *= scale;
 
@@ -3939,24 +4275,49 @@ export function drawWatermark(
   let x = padding;
   let y = padding;
 
-  const pos = settings.watermarkPosition || 'top-right';
-  if (pos === 'top-left') {
-    x = padding;
-    y = padding;
-  } else if (pos === 'top-right') {
-    x = width - dstWidth - padding;
-    y = padding;
-  } else if (pos === 'bottom-left') {
-    x = padding;
+  const align = settings.logoWatermarkAlignment || 'top-right';
+
+  if (align === 'manual') {
+    const xPct = settings.logoWatermarkX !== undefined ? settings.logoWatermarkX : (settings.watermarkX !== undefined ? settings.watermarkX : 90);
+    const yPct = settings.logoWatermarkY !== undefined ? settings.logoWatermarkY : (settings.watermarkY !== undefined ? settings.watermarkY : 10);
+    x = (xPct / 100) * width - dstWidth / 2;
+    y = (yPct / 100) * height - dstHeight / 2;
+  } else if (align === 'bottom-center') {
+    x = width / 2 - dstWidth / 2;
     y = height - dstHeight - padding;
     if (settings.showProgressBar) {
       y -= 15;
     }
-  } else if (pos === 'bottom-right') {
+  } else if (align === 'top-left') {
+    x = padding;
+    y = padding;
+  } else if (align === 'bottom-right') {
     x = width - dstWidth - padding;
     y = height - dstHeight - padding;
     if (settings.showProgressBar) {
       y -= 15;
+    }
+  } else {
+    // Check watermarkPosition for fallback or legacy setups
+    const pos = settings.watermarkPosition || 'top-right';
+    if (pos === 'top-left') {
+      x = padding;
+      y = padding;
+    } else if (pos === 'top-right') {
+      x = width - dstWidth - padding;
+      y = padding;
+    } else if (pos === 'bottom-left') {
+      x = padding;
+      y = height - dstHeight - padding;
+      if (settings.showProgressBar) {
+        y -= 15;
+      }
+    } else if (pos === 'bottom-right') {
+      x = width - dstWidth - padding;
+      y = height - dstHeight - padding;
+      if (settings.showProgressBar) {
+        y -= 15;
+      }
     }
   }
 

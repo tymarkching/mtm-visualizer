@@ -38,7 +38,8 @@ export type VisualizerStyle =
   | 'reflected-matrix-dots'     // Reflected Matrix Dots glowing circular dots mirrored downward
   | 'reflected-mountain-silhouette' // Reflected Mountain Silhouette filled area with flipped reflection
   | 'reflected-center-split-pins' // Reflected Center-Split Pins symmetrical outward needle tracks
-  | 'reflected-radial-ring-horizon'; // Reflected Radial Ring Horizon vertical splitting and mirroring floor
+  | 'reflected-radial-ring-horizon' // Reflected Radial Ring Horizon vertical splitting and mirroring floor
+  | 'bouncing-circles'; // Bouncing circles reacting to frequency bins in a discrete array
 
 export type ParticleType =
   | 'stars'
@@ -54,7 +55,8 @@ export type ParticleType =
   | 'glowing-stars'
   | 'cyber-triangles'
   | 'floating-bubbles'
-  | 'music-notes';
+  | 'music-notes'
+  | 'glitch-vectors';
 
 export interface VisualizerSettings {
   style: VisualizerStyle;
@@ -65,13 +67,13 @@ export interface VisualizerSettings {
   glowStrength: number;
   lineThickness: number;
   sensitivity: number; // multiplier for Audio Analyser data
+  horizontalScale?: number; // horizontal layout stretch scale
   fftSize: number; // resolution of audio detail
   barRoundness: number; // border radius for bars
   barSpacing: number;
   spectrumAnalyzer?: boolean; // toggle to replace standard waveform with a frequency bar chart view
   smoothing?: number; // transition speed between frequency frames (0.0 to 1.0)
   cameraShake?: number; // intensity/multiplier slider for high-bass dynamic shake offsets
-  motionSmoothing?: number; // interpolation factor (0.0 to 1.0) to reduce flickering in wave patterns
   placement?: 'bottom' | 'top' | 'center' | 'left' | 'right'; // baseline placement for rendering coordinates
   waveformOffsetX?: number; // manual fine-tuning horizontal offset (0-100%, default 50)
   waveformOffsetY?: number; // manual fine-tuning vertical offset (0-100%, default 50)
@@ -89,14 +91,12 @@ export interface VisualizerSettings {
   beatReactiveColorShift?: boolean; // cycle visualizer colors through a palette on each bass beat
   colorShiftIntensity?: number; // degree/speed of color shift on each beat (e.g., 5 to 60 degrees)
   symmetryMultiplier?: number; // horizontal reflection symmetry multiplier (values 1 to 8)
+  mirrorOpacity?: number; // independent mirror transparency/opacity slider (0 to 100)
   colorInvertOnBeat?: boolean; // flip the primary/secondary spectrum colors on a beat-triggered basis for a strobe-like flashing effect
   cycleColors?: boolean; // slowly rotate the primary and secondary colors over time
   colorCycleSpeed?: number; // speed multiplier for color hue rotation cycling over time (e.g. 0.1 to 10)
   beatSensitivity?: number; // threshold sensitivity for beat detection (e.g. 1.0 to 10.0 or 0 to 1)
-  enableBeatPulse?: boolean; // temporary zoom/scale effect of background on beats
   reactiveTextGlow?: boolean; // link on-screen text glow to middle/high frequency audio data
-  enableCameraBeatShake?: boolean; // enable camera beat shake based on bass beats
-  intensityBasedShake?: boolean; // use frequency bins for continuous translation intensity shake
   shakeIntensity?: number; // multiplier/slider for camera shake response
   speakerBassResponse?: number; // multiplier/slider for speaker woofer pulsing scale
   renderWatermark?: boolean; // render top/bottom branding watermark text "Made with Storyahe FX"
@@ -124,13 +124,41 @@ export interface VisualizerSettings {
   overlayVolume?: number; // 0 to 100 (default 100)
   overlayMuted?: boolean; // default false
   overlayScaleMode?: 'fit' | 'cover'; // sizing Mode: fit or cover
+  overlayBlendMode?: 'normal' | 'screen' | 'multiply' | 'color-dodge' | 'difference';
+  overlayBeatPulse?: boolean;
+  overlayPulseIntensity?: number;
+  stickerFloatRotate?: boolean;
+  stickerFloatSpeed?: number;
+  stickerSize?: number; // independent sticker size 10 to 200 (default 40)
+  stickerX?: number; // independent sticker position X (0 to 100)
+  stickerY?: number; // independent sticker position Y (0 to 100)
+  textRenderStyle?: 'standard' | 'neon' | 'shadow' | 'stroke' | 'retro'; // standard, neon, shadow, stroke, retro
+  customTextInvertBlend?: boolean;
+  customTextMarquee?: boolean;
+  customTextScrollSpeed?: number;
   watermarkScale?: number; // scale/resize of watermark (10% to 200%, default 100%)
+  watermarkX?: number; // manual X position (0 to 100)
+  watermarkY?: number; // manual Y position (0 to 100)
+  watermarkFontSize?: number;
+  watermarkAlignment?: 'top-left' | 'bottom-center' | 'bottom-right' | 'manual';
+  textWatermarkOpacity?: number;
+  textWatermarkFontSize?: number;
+  textWatermarkAlignment?: 'top-left' | 'bottom-center' | 'bottom-right' | 'manual';
+  textWatermarkX?: number;
+  textWatermarkY?: number;
+  logoWatermarkOpacity?: number;
+  logoWatermarkScale?: number;
+  logoWatermarkAlignment?: 'top-left' | 'bottom-center' | 'bottom-right' | 'manual';
+  logoWatermarkX?: number;
+  logoWatermarkY?: number;
   fadeInDuration?: number; // fade in duration in seconds (0 to 10, default 0)
   fadeOutDuration?: number; // fade out duration in seconds (0 to 10, default 0)
   enableFireworks?: boolean;
   fireworksAltitude?: number;
   fireworksRadius?: number;
   fireworksSparkSize?: number;
+  fireworksColorMode?: 'dynamic-rainbow' | 'match-glow' | 'solid-white';
+  enableShockwaveDrop?: boolean;
   stylePositions?: { [styleId: string]: { xOffset: number; yOffset: number; verticalScale?: number; horizontalScale?: number; masterScale?: number; horizontalSpan?: number; springTension?: number; springDampening?: number } };
   styleSettings?: { [styleId: string]: { xOffset: number; yOffset: number; scale?: number; masterScale?: number; horizontalSpan?: number; springTension?: number; springDampening?: number } };
   barFrequencyCount?: number;
@@ -151,7 +179,8 @@ export interface ParticleSettings {
   beatReactive: boolean; // do they burst/react on beat?
   beatThreshold: number; // frequency index or amplitude required
   enablePhysics?: boolean; // simple canvas-based particle collisions (bouncing off each other)
-  emittingDirection?: 'float-up' | 'fall-down' | 'center-explosion';
+  emittingDirection?: 'float-up' | 'fall-down' | 'center-explosion' | 'spiral-vortex';
+  enableApexAttractor?: boolean;
   movementSpeed?: number;
   beatBurst?: boolean;
   trailLength?: number;
@@ -229,6 +258,7 @@ export interface SparkParticle {
 export interface FireworkRocket {
   x: number;
   y: number;
+  vx?: number;
   startX: number;
   startY: number;
   targetY: number;
