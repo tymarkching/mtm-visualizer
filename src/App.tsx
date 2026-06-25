@@ -28,6 +28,9 @@ import {
   Shuffle,
   Wand2,
   Activity,
+  Columns,
+  Rows,
+  LayoutGrid,
 } from 'lucide-react';
 import {
   VisualizerStyle,
@@ -5831,6 +5834,24 @@ export default function App() {
                       />
                     </div>
 
+                    <div className="space-y-1 border-t border-zinc-850 pt-2 bg-transparent">
+                      <div className="flex justify-between font-mono text-[9px] text-zinc-400 font-bold">
+                        <span>VISUALIZER CONTRAST</span>
+                        <span className="text-white font-semibold">{(visuals.visualizerContrast !== undefined ? visuals.visualizerContrast : 1.0).toFixed(2)}x</span>
+                      </div>
+                      <input
+                        id="visualizer-contrast-slider"
+                        type="range"
+                        min="0.1"
+                        max="3.0"
+                        step="0.05"
+                        value={visuals.visualizerContrast !== undefined ? visuals.visualizerContrast : 1.0}
+                        onChange={(e) => setVisuals(prev => ({ ...prev, visualizerContrast: parseFloat(e.target.value) }))}
+                        className="w-full accent-blue-600 cursor-pointer"
+                      />
+                      <span className="text-[8px] text-zinc-500 block">Modulates base line thickness and glow strength dynamically to fit ambient vs high-intensity music style styles</span>
+                    </div>
+
                     <div className="space-y-1">
                       <div className="flex justify-between font-mono text-[9px] text-zinc-400 font-bold">
                         <span>DIGITAL GLITCH FREQUENCY</span>
@@ -5976,26 +5997,32 @@ export default function App() {
                         <div className="space-y-3 pt-1 border-t border-zinc-950/40 animate-fade-in">
                           <div className="space-y-1">
                             <label className="block text-[9px] font-semibold text-zinc-400 font-mono uppercase">Mirror Axis</label>
-                            <div className="grid grid-cols-3 gap-1 bg-[#0a0a0f] p-1 border border-zinc-900 rounded-lg text-center">
+                            <div className="grid grid-cols-3 gap-1.5 bg-[#050508]/80 p-1.5 border border-zinc-900 rounded-lg text-center">
                               {[
-                                { id: 'vertical', name: 'Vertical' },
-                                { id: 'horizontal', name: 'Horizontal' },
-                                { id: 'both', name: 'Both' }
-                              ].map((axis) => (
-                                <button
-                                  key={axis.id}
-                                  id={`mirror-axis-btn-${axis.id}`}
-                                  type="button"
-                                  onClick={() => setVisuals(prev => ({ ...prev, mirrorAxis: axis.id as any }))}
-                                  className={`py-1 px-1 rounded font-mono text-[9px] font-semibold transition-all cursor-pointer ${
-                                    (visuals.mirrorAxis || 'vertical') === axis.id
-                                      ? 'bg-blue-600 border border-blue-500 text-white'
-                                      : 'border border-transparent text-gray-400 hover:text-white'
-                                  }`}
-                                >
-                                  {axis.name}
-                                </button>
-                              ))}
+                                { id: 'vertical', name: 'Vertical', icon: Columns, desc: 'Left/Right split' },
+                                { id: 'horizontal', name: 'Horizontal', icon: Rows, desc: 'Top/Bottom split' },
+                                { id: 'both', name: 'Both Axes', icon: LayoutGrid, desc: '4 quadrants' }
+                              ].map((axis) => {
+                                const IconComponent = axis.icon;
+                                const isActive = (visuals.mirrorAxis || 'vertical') === axis.id;
+                                return (
+                                  <button
+                                    key={axis.id}
+                                    id={`mirror-axis-btn-${axis.id}`}
+                                    type="button"
+                                    onClick={() => setVisuals(prev => ({ ...prev, mirrorAxis: axis.id as any }))}
+                                    className={`py-2 px-1 rounded-md font-sans transition-all cursor-pointer flex flex-col items-center justify-center gap-1.5 ${
+                                      isActive
+                                        ? 'bg-blue-600/95 border border-blue-500 text-white shadow-md shadow-blue-950/40'
+                                        : 'bg-zinc-950/55 border border-zinc-900/80 text-zinc-400 hover:text-zinc-200 hover:border-zinc-800'
+                                    }`}
+                                    title={axis.desc}
+                                  >
+                                    <IconComponent className={`w-4 h-4 transition-transform ${isActive ? 'scale-110' : ''}`} />
+                                    <span className="text-[9px] font-bold font-mono tracking-tight">{axis.name}</span>
+                                  </button>
+                                );
+                              })}
                             </div>
                           </div>
 
@@ -6539,7 +6566,8 @@ export default function App() {
                         { id: 'cyber-triangles', name: 'Cyber Triangles' },
                         { id: 'floating-bubbles', name: 'Floating Bubbles' },
                         { id: 'music-notes', name: 'Music Notes' },
-                        { id: 'glitch-vectors', name: 'Glitch Vectors' }
+                        { id: 'glitch-vectors', name: 'Glitch Vectors' },
+                        { id: 'swerve-plexus', name: 'Swerve Plexus' }
                       ].map((item) => (
                         <button
                           key={item.id}
@@ -6819,8 +6847,8 @@ export default function App() {
 
                     <div className="flex items-center justify-between p-2.5 bg-zinc-950/60 rounded border border-zinc-850">
                       <div>
-                        <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Particle Physics Collision</span>
-                        <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Enable interactive collisions where particles bounce off walls & each other</span>
+                        <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Particle Physics Collision (Wall Bounce)</span>
+                        <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Enable interactive collisions where particles bounce off viewport boundary walls</span>
                       </div>
                       <button
                         type="button"
@@ -6835,7 +6863,67 @@ export default function App() {
                       </button>
                     </div>
 
-                    <div className="flex items-center justify-between">
+                    <div className="flex items-center justify-between p-2.5 bg-zinc-950/60 rounded border border-zinc-850 mt-2">
+                      <div>
+                        <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Particle Radius Collisions (Bounce Off Each Other)</span>
+                        <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Enables particle-to-particle collision detection, causing particles to bounce off each other based on their radius</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setParticlesSet(prev => ({ ...prev, enableParticleCollisions: !prev.enableParticleCollisions }))}
+                        className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                          particlesSet.enableParticleCollisions ? 'bg-blue-600' : 'bg-zinc-800'
+                        }`}
+                      >
+                        <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                          particlesSet.enableParticleCollisions ? 'translate-x-3.5' : 'translate-x-0'
+                        }`} />
+                      </button>
+                    </div>
+
+                    {/* Collision Damping Slider */}
+                    {(particlesSet.enablePhysics || particlesSet.enableParticleCollisions) && (
+                      <div className="space-y-1 bg-zinc-950/40 p-2 rounded border border-zinc-900 mt-2">
+                        <div className="flex justify-between font-mono text-[9px] text-zinc-400">
+                          <span>Collision Damping</span>
+                          <span className="text-white font-semibold">{(particlesSet.collisionDamping ?? 0.85).toFixed(2)}</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0.1"
+                          max="1.0"
+                          step="0.05"
+                          value={particlesSet.collisionDamping ?? 0.85}
+                          onChange={(e) => setParticlesSet(prev => ({ ...prev, collisionDamping: parseFloat(e.target.value) }))}
+                          className="w-full accent-blue-600 cursor-pointer"
+                        />
+                        <span className="text-[9px] text-zinc-500 block font-sans leading-tight">
+                          Controls velocity retained on bounce (1.0 = perfectly elastic, lower = energy absorbed).
+                        </span>
+                      </div>
+                    )}
+
+                    {/* Particle Color Randomness Slider */}
+                    <div className="space-y-1 bg-zinc-950/40 p-2 rounded border border-zinc-900 mt-2">
+                      <div className="flex justify-between font-mono text-[9px] text-zinc-400">
+                        <span>Particle Color Randomness</span>
+                        <span className="text-white font-semibold">{particlesSet.particleColorRandomness ?? 0}</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="30"
+                        step="1"
+                        value={particlesSet.particleColorRandomness ?? 0}
+                        onChange={(e) => setParticlesSet(prev => ({ ...prev, particleColorRandomness: parseFloat(e.target.value) }))}
+                        className="w-full accent-blue-600 cursor-pointer"
+                      />
+                      <span className="text-[9px] text-zinc-500 block font-sans leading-tight">
+                        Randomize individual particle hues slightly based on active tint.
+                      </span>
+                    </div>
+
+                    <div className="flex items-center justify-between mt-4">
                       <span className="text-[10px] text-zinc-400 font-mono">Particle Glow Tint</span>
                       <div className="flex items-center space-x-2">
                         <button
@@ -6943,6 +7031,68 @@ export default function App() {
                         >
                           <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
                             particlesSet.cycleColors ? 'translate-x-3.5' : 'translate-x-0'
+                          }`} />
+                        </button>
+                      </div>
+                    </div>
+
+                    {/* NEW EFFECTS */}
+                    <div className="pt-4 border-t border-zinc-900 space-y-2">
+                      <label className="block text-[10px] font-semibold text-zinc-400 font-mono uppercase text-left mb-1">Advanced Effects</label>
+
+                      {/* 1. Starlight Twinkle */}
+                      <div className="flex items-center justify-between p-2 pb-2.5 bg-zinc-950/40 rounded-lg border border-zinc-900">
+                        <div className="max-w-[78%] text-left">
+                          <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Starlight Twinkle</span>
+                          <span className="text-[9.5px]/[13px] text-zinc-500 block font-sans mt-0.5">Random particles flash bright white, creating a glitter effect</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setParticlesSet(prev => ({ ...prev, particleTwinkle: !prev.particleTwinkle }))}
+                          className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                            particlesSet.particleTwinkle ? 'bg-blue-600' : 'bg-zinc-800'
+                          }`}
+                        >
+                          <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                            particlesSet.particleTwinkle ? 'translate-x-3.5' : 'translate-x-0'
+                          }`} />
+                        </button>
+                      </div>
+
+                      {/* 2. Orbital Sway */}
+                      <div className="flex items-center justify-between p-2 pb-2.5 bg-zinc-950/40 rounded-lg border border-zinc-900">
+                        <div className="max-w-[78%] text-left">
+                          <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Orbital Sway</span>
+                          <span className="text-[9.5px]/[13px] text-zinc-500 block font-sans mt-0.5">Apply rotational vortex force pulling particles around the center</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setParticlesSet(prev => ({ ...prev, orbitalSway: !prev.orbitalSway }))}
+                          className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                            particlesSet.orbitalSway ? 'bg-blue-600' : 'bg-zinc-800'
+                          }`}
+                        >
+                          <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                            particlesSet.orbitalSway ? 'translate-x-3.5' : 'translate-x-0'
+                          }`} />
+                        </button>
+                      </div>
+
+                      {/* 3. Particle Glitch */}
+                      <div className="flex items-center justify-between p-2 pb-2.5 bg-zinc-950/40 rounded-lg border border-zinc-900">
+                        <div className="max-w-[78%] text-left">
+                          <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Digital Glitch</span>
+                          <span className="text-[9.5px]/[13px] text-zinc-500 block font-sans mt-0.5">Particles randomly jump in coordinates for a digital interference aesthetic</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setParticlesSet(prev => ({ ...prev, particleGlitch: !prev.particleGlitch }))}
+                          className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                            particlesSet.particleGlitch ? 'bg-blue-600' : 'bg-zinc-800'
+                          }`}
+                        >
+                          <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                            particlesSet.particleGlitch ? 'translate-x-3.5' : 'translate-x-0'
                           }`} />
                         </button>
                       </div>

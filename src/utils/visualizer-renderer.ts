@@ -92,6 +92,27 @@ export function hexToRgb(hex: string): { r: number; g: number; b: number } | nul
     : null;
 }
 
+export function hexToHSL(hex: string): { h: number; s: number; l: number } {
+  const rgb = hexToRgb(hex);
+  if (!rgb) return { h: 0, s: 0, l: 0 };
+  let r = rgb.r / 255;
+  let g = rgb.g / 255;
+  let b = rgb.b / 255;
+  let max = Math.max(r, g, b), min = Math.min(r, g, b);
+  let h = 0, s = 0, l = (max + min) / 2;
+  if (max !== min) {
+    let d = max - min;
+    s = l > 0.5 ? d / (2 - max - min) : d / (max + min);
+    switch(max) {
+      case r: h = (g - b) / d + (g < b ? 6 : 0); break;
+      case g: h = (b - r) / d + 2; break;
+      case b: h = (r - g) / d + 4; break;
+    }
+    h /= 6;
+  }
+  return { h: h * 360, s: s * 100, l: l * 100 };
+}
+
 function hslToHex(h: number, s: number, l: number): string {
   h /= 360;
   s /= 100;
@@ -292,13 +313,23 @@ export function createParticle(
     ? Math.round(settings.lifetime * 60)
     : (50 + Math.random() * 100);
 
+  let targetBaseColor = settings.color || '#ff007f';
+  let pColor = targetBaseColor;
+
+  if (settings.particleColorRandomness && settings.particleColorRandomness > 0) {
+      let hsl = hexToHSL(targetBaseColor);
+      let subtleOffset = (Math.random() * 2 - 1) * settings.particleColorRandomness;
+      let finalHue = (hsl.h + subtleOffset + 360) % 360;
+      pColor = `hsl(${finalHue}, ${hsl.s}%, ${hsl.l}%)`;
+  }
+
   return {
     x,
     y,
     vx,
     vy,
     size,
-    color: settings.color,
+    color: pColor,
     alpha: 0.1 + Math.random() * 0.8,
     life: maxLife,
     maxLife,
@@ -333,6 +364,7 @@ export function updateParticles(
   const beatReactivePulseEnabled = !!settings.beatReactive;
   const audioReactiveParticleBurstEnabled = !!settings.beatBurst;
   const particlePhysicsCollisionEnabled = !!settings.enablePhysics;
+  const particleRadiusCollisionsEnabled = !!settings.enableParticleCollisions;
 
   const floor = settings.sensitivityFloor !== undefined ? settings.sensitivityFloor : 0.0;
   const dynamicVolume = floor + (1.0 - floor) * overallVolume;
@@ -532,27 +564,56 @@ export function updateParticles(
       p.x = width / 2 + Math.cos(p.angle) * p.radius;
       p.y = height / 2 + Math.sin(p.angle) * p.radius;
     } else {
-      p.x += p.vx * dynamicBaseSpeedMultiplier * burstSpeedMult;
-      p.y += p.vy * dynamicBaseSpeedMultiplier * burstSpeedMult;
+      if (settings.type === 'swerve-plexus') {
+        const frameCount = Date.now() / 16;
+        let verticalDrift = 0;
+        if (settings.emittingDirection === 'float-up') verticalDrift = -p.speed * 0.5;
+        if (settings.emittingDirection === 'fall-down') verticalDrift = p.speed * 0.5;
+        p.vx = Math.cos(p.angle + frameCount * 0.02) * p.speed;
+        p.vy = Math.sin(p.angle + frameCount * 0.015) * p.speed + verticalDrift;
+      }
+      
+      let finalVx = p.vx * dynamicBaseSpeedMultiplier * burstSpeedMult;
+      let finalVy = p.vy * dynamicBaseSpeedMultiplier * burstSpeedMult;
+      
+      if (settings.orbitalSway) {
+        const cx = width / 2;
+        const cy = height / 2;
+        const dx = p.x - cx;
+        const dy = p.y - cy;
+        const tAngle = Math.atan2(dy, dx) + Math.PI / 2;
+        const orbitForce = 1.5 * dynamicBaseSpeedMultiplier;
+        finalVx += Math.cos(tAngle) * orbitForce;
+        finalVy += Math.sin(tAngle) * orbitForce;
+      }
+      
+      p.x += finalVx;
+      p.y += finalVy;
+
+      if (settings.particleGlitch && Math.random() < 0.02) {
+        p.x += (Math.random() - 0.5) * 30;
+        p.y += (Math.random() - 0.5) * 30;
+      }
     }
     p.angle += p.spin;
 
     // Apply physics boundary bounces (bouncing off walls)
     if (particlePhysicsCollisionEnabled) {
-      const bMultiplier = 0.85; // coefficient of restitution with walls
-      if (p.x - p.size < 0) {
-        p.x = p.size;
+      const pr = p.radius !== undefined ? p.radius : (p.size || 1);
+      const bMultiplier = settings.collisionDamping !== undefined ? settings.collisionDamping : 0.85; // coefficient of restitution with walls
+      if (p.x - pr < 0) {
+        p.x = pr;
         p.vx = -p.vx * bMultiplier;
-      } else if (p.x + p.size > width) {
-        p.x = width - p.size;
+      } else if (p.x + pr > width) {
+        p.x = width - pr;
         p.vx = -p.vx * bMultiplier;
       }
 
-      if (p.y - p.size < 0) {
-        p.y = p.size;
+      if (p.y - pr < 0) {
+        p.y = pr;
         p.vy = -p.vy * bMultiplier;
-      } else if (p.y + p.size > height) {
-        p.y = height - p.size;
+      } else if (p.y + pr > height) {
+        p.y = height - pr;
         p.vy = -p.vy * bMultiplier;
       }
     }
@@ -572,66 +633,66 @@ export function updateParticles(
   }
 
   // Adjust count if settings changed
-  while (result.length < settings.count) {
+  let targetCount = settings.count;
+  if (settings.type === 'swerve-plexus') {
+    targetCount = Math.min(settings.count, 120);
+  }
+  while (result.length < targetCount) {
     result.push(createParticle(settings, width, height, true));
   }
-  if (result.length > settings.count) {
-    result.length = settings.count;
+  if (result.length > targetCount) {
+    result.length = targetCount;
   }
 
-  // If particle physics is enabled, resolve particle-to-particle collisions
-  if (particlePhysicsCollisionEnabled && result.length > 1) {
+  // If particle radius collisions is enabled, resolve particle-to-particle collisions
+  if (particleRadiusCollisionsEnabled && result.length > 1) {
+    const collisionDamping = settings.collisionDamping !== undefined ? settings.collisionDamping : 0.85;
     for (let i = 0; i < result.length; i++) {
+      let p1 = result[i];
       for (let j = i + 1; j < result.length; j++) {
-        const p1 = result[i];
-        const p2 = result[j];
+        let p2 = result[j];
 
-        const dx = p2.x - p1.x;
-        const dy = p2.y - p1.y;
-        const dist = Math.sqrt(dx * dx + dy * dy);
-        const minDist = p1.size + p2.size;
+        let dx = p2.x - p1.x;
+        let dy = p2.y - p1.y;
+        let dist = Math.sqrt(dx * dx + dy * dy);
+        let radius1 = p1.radius || p1.size || 4;
+        let radius2 = p2.radius || p2.size || 4;
+        let minDist = radius1 + radius2;
 
-        if (dist < minDist && dist > 0.05) {
-          // Resolve overlap (nudge)
-          const overlap = minDist - dist;
-          const nx = dx / dist;
-          const ny = dy / dist;
+        if (dist < minDist && dist > 0.0001) {
+          // 1. Instantly push apart to separate physical mesh overlap coordinates
+          let overlap = minDist - dist;
+          let nx = dx / dist;
+          let ny = dy / dist;
 
-          const m1 = p1.size || 1;
-          const m2 = p2.size || 1;
-          const totalMass = m1 + m2;
+          p1.x -= nx * overlap * 0.5;
+          p1.y -= ny * overlap * 0.5;
+          p2.x += nx * overlap * 0.5;
+          p2.y += ny * overlap * 0.5;
 
-          p1.x -= nx * overlap * (m2 / totalMass);
-          p1.y -= ny * overlap * (m2 / totalMass);
-          p2.x += nx * overlap * (m1 / totalMass);
-          p2.y += ny * overlap * (m1 / totalMass);
+          // 2. Perform definitive 2D elastic vector momentum updates
+          let kx = p1.vx - p2.vx;
+          let ky = p1.vy - p2.vy;
+          let p = (1 + collisionDamping) * (nx * kx + ny * ky) / 2; // Assuming unified mass state
 
-          // Calculate elastic velocities
-          const rvx = p2.vx - p1.vx;
-          const rvy = p2.vy - p1.vy;
-          const velAlongNormal = rvx * nx + rvy * ny;
-
-          // Only bounce if they are moving towards each other
-          if (velAlongNormal < 0) {
-            const restitution = 0.9; // highly elastic bouncy collisions
-            const impulse = -(1 + restitution) * velAlongNormal / (1 / m1 + 1 / m2);
-
-            p1.vx -= nx * (impulse / m1);
-            p1.vy -= ny * (impulse / m1);
-            p2.vx += nx * (impulse / m2);
-            p2.vy += ny * (impulse / m2);
-          }
+          p1.vx -= p * nx;
+          p1.vy -= p * ny;
+          p2.vx += p * nx;
+          p2.vy += p * ny;
         }
       }
     }
+  }
 
-    // Keep particles inside viewport borders after resolving collisions too
+  // Keep particles inside viewport borders after resolving collisions too
+  if (particlePhysicsCollisionEnabled) {
+    const collisionDamping = settings.collisionDamping !== undefined ? settings.collisionDamping : 0.85;
     for (let p of result) {
-      if (p.x - p.size < 0) { p.x = p.size; p.vx = -p.vx * 0.85; }
-      else if (p.x + p.size > width) { p.x = width - p.size; p.vx = -p.vx * 0.85; }
+      if (p.x - p.size < 0) { p.x = p.size; p.vx = -p.vx * collisionDamping; }
+      else if (p.x + p.size > width) { p.x = width - p.size; p.vx = -p.vx * collisionDamping; }
       
-      if (p.y - p.size < 0) { p.y = p.size; p.vy = -p.vy * 0.85; }
-      else if (p.y + p.size > height) { p.y = height - p.size; p.vy = -p.vy * 0.85; }
+      if (p.y - p.size < 0) { p.y = p.size; p.vy = -p.vy * collisionDamping; }
+      else if (p.y + p.size > height) { p.y = height - p.size; p.vy = -p.vy * collisionDamping; }
     }
   }
 
@@ -861,6 +922,13 @@ export function drawParticles(
     } else {
       ctx.shadowBlur = 0;
     }
+
+    if (settings.particleTwinkle && Math.random() < 0.05) {
+      finalColor = '#ffffff';
+      finalAlpha = 1.0;
+      ctx.shadowBlur = 20;
+      ctx.shadowColor = '#ffffff';
+    }
     
     // Base style representation
     if (settings.type === 'stars') {
@@ -1067,6 +1135,36 @@ export function drawParticles(
       ctx.fillStyle = finalColor;
       ctx.fillRect(p.x - w / 2 + xOffset, p.y - h / 2, w, h);
       ctx.restore();
+    } else if (settings.type === 'swerve-plexus') {
+      ctx.save();
+      ctx.fillStyle = finalColor;
+      if (!glowOnBurst) {
+        ctx.shadowBlur = isBeat ? 15 : 5;
+        ctx.shadowColor = finalColor;
+      }
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * 0.4, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Render plexus connections
+      for (const p2 of particles) {
+        if (p === p2) continue;
+        let dx = p.x - p2.x;
+        let dy = p.y - p2.y;
+        let distance = Math.sqrt(dx * dx + dy * dy);
+        
+        if (distance < 75) {
+          ctx.beginPath();
+          ctx.moveTo(p.x, p.y);
+          ctx.lineTo(p2.x, p2.y);
+          ctx.lineWidth = 0.5;
+          let opacity = (1.0 - (distance / 75)) * finalAlpha;
+          ctx.globalAlpha = opacity;
+          ctx.strokeStyle = finalColor;
+          ctx.stroke();
+        }
+      }
+      ctx.restore();
     }
   }
 
@@ -1109,7 +1207,12 @@ export function drawVisualizer(
   const ctx = visualizerWavesCanvas.getContext('2d')!;
   ctx.clearRect(0, 0, width, height);
 
-  let settings = incomingSettings;
+  let settings = { ...incomingSettings };
+  const contrast = settings.visualizerContrast !== undefined ? settings.visualizerContrast : 1.0;
+  if (contrast !== 1.0) {
+    settings.lineThickness = (settings.lineThickness !== undefined ? settings.lineThickness : 3) * contrast;
+    settings.glowStrength = (settings.glowStrength !== undefined ? settings.glowStrength : 12) * contrast;
+  }
   const isPortrait = height > width;
 
   // 1 & 2. Aspect Ratio Detection & Portrait Dynamic Resampling

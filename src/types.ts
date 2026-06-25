@@ -56,7 +56,8 @@ export type ParticleType =
   | 'cyber-triangles'
   | 'floating-bubbles'
   | 'music-notes'
-  | 'glitch-vectors';
+  | 'glitch-vectors'
+  | 'swerve-plexus';
 
 export interface VisualizerSettings {
   style: VisualizerStyle;
@@ -164,6 +165,7 @@ export interface VisualizerSettings {
   barFrequencyCount?: number;
   glowIntensity?: number;
   glitchFrequency?: number;
+  visualizerContrast?: number; // global visualizer contrast slider (0.1 to 2.0, default 1.0)
 }
 
 export interface ParticleSettings {
@@ -179,6 +181,8 @@ export interface ParticleSettings {
   beatReactive: boolean; // do they burst/react on beat?
   beatThreshold: number; // frequency index or amplitude required
   enablePhysics?: boolean; // simple canvas-based particle collisions (bouncing off each other)
+  enableParticleCollisions?: boolean; // particle-to-particle collision detection based on radius
+  collisionDamping?: number; // coefficient of restitution damping (0.1 to 1.0)
   emittingDirection?: 'float-up' | 'fall-down' | 'center-explosion' | 'spiral-vortex';
   enableApexAttractor?: boolean;
   movementSpeed?: number;
@@ -191,6 +195,10 @@ export interface ParticleSettings {
   colorBurstOnBeat?: boolean;
   beatReactiveColorShift?: boolean;
   cycleColors?: boolean;
+  particleColorRandomness?: number;
+  particleTwinkle?: boolean;
+  orbitalSway?: boolean;
+  particleGlitch?: boolean;
 }
 
 export interface TitleOverlaySettings {
