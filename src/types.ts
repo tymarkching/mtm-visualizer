@@ -78,7 +78,12 @@ export interface VisualizerSettings {
   placement?: 'bottom' | 'top' | 'center' | 'left' | 'right'; // baseline placement for rendering coordinates
   waveformOffsetX?: number; // manual fine-tuning horizontal offset (0-100%, default 50)
   waveformOffsetY?: number; // manual fine-tuning vertical offset (0-100%, default 50)
+  useCustomWaveformColor?: boolean;
+  waveformColor?: string;
+  waveformGlowSpread?: number;
   colorMode?: 'solid' | 'gradient' | 'rainbow'; // spectrum color mapping models
+  useCustomGradientDirection?: boolean;
+  gradientDirectionAngle?: number; // 0 to 360
   canvasRotation?: number; // global stage rotation in degrees
   flashOnBeat?: boolean; // flash glowColor/visualizer to white on every detected beat
   flashIntensity?: number; // flash intensity (0 to 1, default 1)
@@ -133,7 +138,17 @@ export interface VisualizerSettings {
   stickerSize?: number; // independent sticker size 10 to 200 (default 40)
   stickerX?: number; // independent sticker position X (0 to 100)
   stickerY?: number; // independent sticker position Y (0 to 100)
+  textAlign?: 'left' | 'center' | 'right';
+  textOpacity?: number; // 0 to 100
+  textBlendMode?: 'normal' | 'screen' | 'overlay' | 'multiply' | 'color-dodge';
+  textBeatScale?: boolean;
+  textBeatShake?: boolean;
   textRenderStyle?: 'standard' | 'neon' | 'shadow' | 'stroke' | 'retro'; // standard, neon, shadow, stroke, retro
+  textShadowPreset?: 'none' | 'soft-glow' | 'hard-block' | 'neon' | 'outline';
+  textGradient?: boolean;
+  textGradientAngle?: 'vertical' | 'horizontal' | 'diagonal-down' | 'diagonal-up'; // text gradient direction
+  textGradientStart?: string;
+  textGradientEnd?: string;
   customTextInvertBlend?: boolean;
   customTextMarquee?: boolean;
   customTextScrollSpeed?: number;
@@ -166,6 +181,11 @@ export interface VisualizerSettings {
   glowIntensity?: number;
   glitchFrequency?: number;
   visualizerContrast?: number; // global visualizer contrast slider (0.1 to 2.0, default 1.0)
+  kaleidoscope?: boolean;
+  kaleidoscopeSegments?: number;
+  chromaticAberration?: boolean;
+  earthquakeCameraShake?: boolean;
+  phosphorTrails?: number;
 }
 
 export interface ParticleSettings {
@@ -182,6 +202,7 @@ export interface ParticleSettings {
   beatThreshold: number; // frequency index or amplitude required
   enablePhysics?: boolean; // simple canvas-based particle collisions (bouncing off each other)
   enableParticleCollisions?: boolean; // particle-to-particle collision detection based on radius
+  particleLifeBehavior?: 'none' | 'bounce' | 'merge' | 'dissolve';
   collisionDamping?: number; // coefficient of restitution damping (0.1 to 1.0)
   emittingDirection?: 'float-up' | 'fall-down' | 'center-explosion' | 'spiral-vortex';
   enableApexAttractor?: boolean;

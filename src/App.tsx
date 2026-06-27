@@ -31,7 +31,13 @@ import {
   Columns,
   Rows,
   LayoutGrid,
+  Search,
+  ArrowDown,
+  ArrowRight,
+  ArrowDownRight,
+  ArrowUpRight
 } from 'lucide-react';
+import { guess } from 'web-audio-beat-detector';
 import {
   VisualizerStyle,
   ParticleType,
@@ -667,6 +673,8 @@ export default function App() {
   const [exportedVideoUrl, setExportedVideoUrl] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
 
+  const [isDetectingBpm, setIsDetectingBpm] = useState<boolean>(false);
+
   // Tap Tempo history state
   const [tapTimestamps, setTapTimestamps] = useState<number[]>([]);
 
@@ -802,9 +810,27 @@ export default function App() {
 
   // Serialize and download visualizer configuration as project JSON
   const handleSaveProject = () => {
+    let thumbnailDataUrl = '';
+    const canvas = canvasRef.current;
+    if (canvas) {
+      try {
+        const thumbCanvas = document.createElement('canvas');
+        thumbCanvas.width = 320;
+        thumbCanvas.height = 180;
+        const thumbCtx = thumbCanvas.getContext('2d');
+        if (thumbCtx) {
+          thumbCtx.drawImage(canvas, 0, 0, thumbCanvas.width, thumbCanvas.height);
+          thumbnailDataUrl = thumbCanvas.toDataURL('image/png', 0.8);
+        }
+      } catch (err) {
+        console.error('Failed to generate thumbnail', err);
+      }
+    }
+
     const projectData = {
       version: '1.0',
       timestamp: new Date().toISOString(),
+      thumbnail: thumbnailDataUrl,
       visuals,
       particlesSet,
       background: {
@@ -823,18 +849,30 @@ export default function App() {
       eqBands
     };
 
+    const safeTrackName = audioTrack.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const baseFilename = `viz-project-${safeTrackName || 'config'}`;
+
+    // 1. Download JSON configuration
     const jsonString = JSON.stringify(projectData, null, 2);
     const blob = new Blob([jsonString], { type: 'application/json' });
     const url = URL.createObjectURL(blob);
     const link = document.createElement('a');
     link.href = url;
-    
-    const safeTrackName = audioTrack.name.toLowerCase().replace(/[^a-z0-9]+/g, '-');
-    link.download = `viz-project-${safeTrackName || 'config'}.json`;
+    link.download = `${baseFilename}.json`;
     document.body.appendChild(link);
     link.click();
     document.body.removeChild(link);
     URL.revokeObjectURL(url);
+
+    // 2. Download static thumbnail image
+    if (thumbnailDataUrl) {
+      const imgLink = document.createElement('a');
+      imgLink.href = thumbnailDataUrl;
+      imgLink.download = `${baseFilename}-thumbnail.png`;
+      document.body.appendChild(imgLink);
+      imgLink.click();
+      document.body.removeChild(imgLink);
+    }
   };
 
   // Open / Trigger Project File Selector
@@ -2298,6 +2336,29 @@ export default function App() {
     });
   };
 
+  const handleAutoDetectTempo = async () => {
+    if (!audioTrack.file) return;
+    setIsDetectingBpm(true);
+    try {
+      const arrayBuffer = await audioTrack.file.arrayBuffer();
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      const ctx = new AudioContextClass();
+      const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+      const { bpm } = await guess(audioBuffer);
+      
+      setVisuals(prev => ({
+        ...prev,
+        beatLockBpm: Math.round(bpm),
+        beatLock: true
+      }));
+      await ctx.close();
+    } catch (err) {
+      console.error("Failed to detect BPM:", err);
+    } finally {
+      setIsDetectingBpm(false);
+    }
+  };
+
   // Performance tracking refs to prevent continuous teardown & recreation of the render loop
   const visualsRef = useRef(visuals);
   const particlesSetRef = useRef(particlesSet);
@@ -2566,7 +2627,10 @@ export default function App() {
 
       // Camera Beat Shake translation logic decays per frame or boosts on transient beats
       if (isBeat) {
-        const shakeMultiplier = visualsRef.current.cameraShake !== undefined ? visualsRef.current.cameraShake : 5;
+        let shakeMultiplier = visualsRef.current.cameraShake !== undefined ? visualsRef.current.cameraShake : 5;
+        if (visualsRef.current.earthquakeCameraShake && shakeMultiplier < 5) {
+          shakeMultiplier = 5; // ensure base shake for earthquake if slider is too low
+        }
         currentShakeAmt = beatIntensity * shakeMultiplier;
       } else {
         currentShakeAmt *= 0.88;
@@ -2578,10 +2642,17 @@ export default function App() {
       ctx.save();
 
       // Viewport screenshake translations synced directly to peak music beats
+      let finalShakeMagnitude = 0;
       if (visualsRef.current.cameraShake !== undefined && visualsRef.current.cameraShake > 0 && currentShakeAmt > 0) {
-        const shakeMagnitude = currentShakeAmt;
-        const shakeX = (Math.random() - 0.5) * shakeMagnitude * 2;
-        const shakeY = (Math.random() - 0.5) * shakeMagnitude * 2;
+        finalShakeMagnitude += currentShakeAmt;
+      }
+      if (visualsRef.current.earthquakeCameraShake && currentShakeAmt > 0) {
+        finalShakeMagnitude += currentShakeAmt * 3; // Massive impact for earthquake
+      }
+
+      if (finalShakeMagnitude > 0) {
+        const shakeX = (Math.random() - 0.5) * finalShakeMagnitude * 2;
+        const shakeY = (Math.random() - 0.5) * finalShakeMagnitude * 2;
         ctx.translate(shakeX, shakeY);
       }
 
@@ -3248,16 +3319,26 @@ export default function App() {
 
         if (hasText) {
           ctx.save();
-          // Apply inverse blend mode
-          if (visualsRef.current?.customTextInvertBlend) {
+          
+          if (visualsRef.current?.textOpacity !== undefined) {
+            ctx.globalAlpha = visualsRef.current.textOpacity / 100;
+          }
+          if (visualsRef.current?.textBlendMode && visualsRef.current.textBlendMode !== 'normal') {
+            ctx.globalCompositeOperation = visualsRef.current.textBlendMode as GlobalCompositeOperation;
+          } else if (visualsRef.current?.customTextInvertBlend) {
             ctx.globalCompositeOperation = 'difference';
           }
 
-          ctx.textAlign = 'center';
+          ctx.textAlign = visualsRef.current?.textAlign || 'center';
           ctx.textBaseline = 'middle';
           
           const selectedFont = fontObj[customTextFontFamilyRef.current] || 'Inter, sans-serif';
-          const fontSize = customTextFontSizeRef.current;
+          let fontSize = customTextFontSizeRef.current;
+          
+          // Beat Reactive Scale
+          if (visualsRef.current?.textBeatScale && isBeat) {
+            fontSize += fontSize * (beatIntensity * 0.3);
+          }
           
           const fontStyleName = customTextFontFamilyRef.current === 'Montserrat Extra Bold' ? '800' : '700';
           ctx.font = `${fontStyleName} ${fontSize}px ${selectedFont}`;
@@ -3278,61 +3359,151 @@ export default function App() {
 
           const style = visualsRef.current?.textRenderStyle || 'standard';
 
-          if (style === 'neon') {
-            // Neon Glow
-            ctx.shadowColor = customTextColorRef.current;
-            ctx.shadowBlur = (visualsRef.current?.reactiveTextGlow ? 15 + glowMultiplier * 25 : 20);
-            ctx.shadowOffsetX = 0;
-            ctx.shadowOffsetY = 0;
-            ctx.fillStyle = customTextColorRef.current;
-            ctx.fillText(customTextRef.current, marqueeX, finalY);
+          const lines = customTextRef.current.split('\n');
+          const lineHeight = fontSize * 1.2;
+          const startYOffset = -((lines.length - 1) * lineHeight) / 2;
 
-            // bright core draw
-            ctx.save();
-            ctx.globalAlpha = 0.85;
-            ctx.fillStyle = '#ffffff';
-            ctx.shadowBlur = 0;
-            ctx.fillText(customTextRef.current, marqueeX, finalY);
-            ctx.restore();
-          } else if (style === 'shadow') {
-            // Drop Shadow
-            ctx.save();
-            ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
-            ctx.font = `${fontStyleName} ${fontSize}px ${selectedFont}`;
-            ctx.fillText(customTextRef.current, marqueeX + 4, finalY + 4);
-            ctx.restore();
+          let renderX = marqueeX;
+          let renderY = finalY;
 
-            ctx.fillStyle = customTextColorRef.current;
-            ctx.fillText(customTextRef.current, marqueeX, finalY);
-          } else if (style === 'stroke') {
-            // Stroke / Hollow
-            ctx.strokeStyle = customTextColorRef.current;
-            ctx.lineWidth = Math.max(1.5, fontSize * 0.05);
-            ctx.strokeText(customTextRef.current, marqueeX, finalY);
-          } else if (style === 'retro') {
-            // Retro Chromatic
-            ctx.save();
-            const jitterX = 3 + glowMultiplier * 4;
-            const jitterY = 1 + glowMultiplier * 2;
-            
-            ctx.fillStyle = 'rgba(255, 0, 255, 0.9)';
-            ctx.fillText(customTextRef.current, marqueeX - jitterX, finalY - jitterY);
-            
-            ctx.fillStyle = 'rgba(0, 255, 255, 0.9)';
-            ctx.fillText(customTextRef.current, marqueeX + jitterX, finalY + jitterY);
-            ctx.restore();
-
-            ctx.fillStyle = customTextColorRef.current;
-            ctx.fillText(customTextRef.current, marqueeX, finalY);
-          } else {
-            // Standard Clean
-            ctx.fillStyle = customTextColorRef.current;
-            ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
-            ctx.shadowBlur = 6;
-            ctx.shadowOffsetX = 1.5;
-            ctx.shadowOffsetY = 1.5;
-            ctx.fillText(customTextRef.current, marqueeX, finalY);
+          // Beat Reactive Shake
+          if (visualsRef.current?.textBeatShake && beatIntensity > 0.3) {
+            renderX += (Math.random() - 0.5) * beatIntensity * 20;
+            renderY += (Math.random() - 0.5) * beatIntensity * 20;
           }
+
+          lines.forEach((line, index) => {
+            const currentY = renderY + startYOffset + (index * lineHeight);
+
+            let textFillStyle: string | CanvasGradient = customTextColorRef.current;
+            if (visualsRef.current?.textGradient) {
+              const gradientDir = visualsRef.current.textGradientAngle || 'vertical';
+              
+              const align = visualsRef.current.textAlign || 'center';
+              const textWidth = ctx.measureText(line).width;
+              let leftX = renderX;
+              if (align === 'center') {
+                leftX = renderX - textWidth / 2;
+              } else if (align === 'right') {
+                leftX = renderX - textWidth;
+              }
+              const rightX = leftX + textWidth;
+              const topY = currentY - fontSize * 0.6;
+              const bottomY = currentY + fontSize * 0.4;
+              
+              let gradStartX = 0; let gradStartY = topY;
+              let gradEndX = 0; let gradEndY = bottomY;
+              
+              if (gradientDir === 'horizontal') {
+                gradStartX = leftX; gradStartY = 0;
+                gradEndX = rightX; gradEndY = 0;
+              } else if (gradientDir === 'diagonal-down') {
+                gradStartX = leftX; gradStartY = topY;
+                gradEndX = rightX; gradEndY = bottomY;
+              } else if (gradientDir === 'diagonal-up') {
+                gradStartX = leftX; gradStartY = bottomY;
+                gradEndX = rightX; gradEndY = topY;
+              }
+
+              const gradient = ctx.createLinearGradient(gradStartX, gradStartY, gradEndX, gradEndY);
+              gradient.addColorStop(0, visualsRef.current.textGradientStart || '#00f3ff');
+              gradient.addColorStop(1, visualsRef.current.textGradientEnd || '#ff00ff');
+              textFillStyle = gradient;
+            }
+
+            const applyShadowPreset = (isMainFill: boolean = true) => {
+              const shadowPreset = visualsRef.current?.textShadowPreset || 'none';
+              if (shadowPreset === 'soft-glow') {
+                ctx.shadowColor = visualsRef.current?.textGradient ? (visualsRef.current.textGradientStart || '#00f3ff') : customTextColorRef.current;
+                ctx.shadowBlur = 15;
+                ctx.shadowOffsetX = 0;
+                ctx.shadowOffsetY = 0;
+              } else if (shadowPreset === 'hard-block') {
+                ctx.shadowColor = 'rgba(0, 0, 0, 1)';
+                ctx.shadowBlur = 0;
+                ctx.shadowOffsetX = Math.max(3, fontSize * 0.08);
+                ctx.shadowOffsetY = Math.max(3, fontSize * 0.08);
+              } else if (shadowPreset === 'neon') {
+                ctx.shadowColor = visualsRef.current?.textGradient ? (visualsRef.current.textGradientEnd || '#ff00ff') : customTextColorRef.current;
+                ctx.shadowBlur = 25;
+                ctx.shadowOffsetX = 0;
+                ctx.shadowOffsetY = 0;
+              } else if (shadowPreset === 'outline') {
+                ctx.shadowColor = 'rgba(0, 0, 0, 0.8)';
+                ctx.shadowBlur = 2;
+                ctx.shadowOffsetX = 0;
+                ctx.shadowOffsetY = 0;
+              } else if (style === 'standard') {
+                ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+                ctx.shadowBlur = 6;
+                ctx.shadowOffsetX = 1.5;
+                ctx.shadowOffsetY = 1.5;
+              } else {
+                ctx.shadowColor = 'transparent';
+              }
+            };
+
+            if (style === 'neon') {
+              // Neon Glow (Overrides custom shadows)
+              ctx.shadowColor = customTextColorRef.current;
+              ctx.shadowBlur = (visualsRef.current?.reactiveTextGlow ? 15 + glowMultiplier * 25 : 20);
+              ctx.shadowOffsetX = 0;
+              ctx.shadowOffsetY = 0;
+              ctx.fillStyle = textFillStyle;
+              ctx.fillText(line, renderX, currentY);
+
+              // bright core draw
+              ctx.save();
+              ctx.globalAlpha = 0.85 * (visualsRef.current?.textOpacity !== undefined ? visualsRef.current.textOpacity / 100 : 1);
+              ctx.fillStyle = '#ffffff';
+              ctx.shadowBlur = 0;
+              ctx.fillText(line, renderX, currentY);
+              ctx.restore();
+            } else if (style === 'shadow') {
+              // Drop Shadow
+              ctx.save();
+              ctx.fillStyle = 'rgba(0, 0, 0, 0.85)';
+              ctx.font = `${fontStyleName} ${fontSize}px ${selectedFont}`;
+              ctx.fillText(line, renderX + 4, currentY + 4);
+              ctx.restore();
+
+              ctx.fillStyle = textFillStyle;
+              ctx.fillText(line, renderX, currentY);
+            } else if (style === 'stroke') {
+              // Stroke / Hollow
+              applyShadowPreset();
+              ctx.strokeStyle = textFillStyle;
+              ctx.lineWidth = Math.max(1.5, fontSize * 0.05);
+              ctx.strokeText(line, renderX, currentY);
+            } else if (style === 'retro') {
+              // Retro Chromatic
+              ctx.save();
+              const jitterX = 3 + glowMultiplier * 4;
+              const jitterY = 1 + glowMultiplier * 2;
+              
+              ctx.fillStyle = 'rgba(255, 0, 255, 0.9)';
+              ctx.fillText(line, renderX - jitterX, currentY - jitterY);
+              
+              ctx.fillStyle = 'rgba(0, 255, 255, 0.9)';
+              ctx.fillText(line, renderX + jitterX, currentY + jitterY);
+              ctx.restore();
+
+              ctx.fillStyle = textFillStyle;
+              ctx.fillText(line, renderX, currentY);
+            } else {
+              // Standard Clean (With shadow presets)
+              applyShadowPreset();
+              
+              if (visualsRef.current?.textShadowPreset === 'outline') {
+                 ctx.lineWidth = Math.max(2, fontSize * 0.08);
+                 ctx.strokeStyle = '#000000';
+                 ctx.strokeText(line, renderX, currentY);
+              }
+              
+              ctx.fillStyle = textFillStyle;
+              ctx.fillText(line, renderX, currentY);
+            }
+          });
 
           ctx.restore();
         }
@@ -5610,6 +5781,106 @@ export default function App() {
                         Frequency Map active: bass signals map to Red/Orange, mid tones to Green/Yellow, and high pitch lines map to Blue/Purple.
                       </p>
                     )}
+
+                    {/* Gradient Direction Slider */}
+                    {((visuals.colorMode || 'gradient') === 'gradient' || (visuals.colorMode || 'gradient') === 'rainbow') && (
+                      <div className="space-y-1 bg-zinc-950/40 p-2 rounded border border-zinc-900 mt-2">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Gradient Direction</span>
+                            <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Override gradient angle for waveforms</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setVisuals(prev => ({ ...prev, useCustomGradientDirection: !prev.useCustomGradientDirection }))}
+                            className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                              visuals.useCustomGradientDirection ? 'bg-blue-600' : 'bg-zinc-800'
+                            }`}
+                          >
+                            <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                              visuals.useCustomGradientDirection ? 'translate-x-3.5' : 'translate-x-0'
+                            }`} />
+                          </button>
+                        </div>
+                        
+                        {visuals.useCustomGradientDirection && (
+                          <div className="pt-2 space-y-1">
+                            <div className="flex justify-between items-center mb-1">
+                              <label className="block text-[9px] text-zinc-500 font-mono">Angle (Degrees)</label>
+                              <span className="text-[10px] text-zinc-400 font-mono">
+                                {visuals.gradientDirectionAngle !== undefined ? visuals.gradientDirectionAngle : 0}°
+                              </span>
+                            </div>
+                            <input
+                              type="range"
+                              min="0"
+                              max="360"
+                              step="1"
+                              value={visuals.gradientDirectionAngle !== undefined ? visuals.gradientDirectionAngle : 0}
+                              onChange={(e) => setVisuals(prev => ({ ...prev, gradientDirectionAngle: parseInt(e.target.value) }))}
+                              className="w-full accent-blue-600 h-1.5 rounded-full cursor-pointer bg-zinc-900 appearance-none"
+                            />
+                          </div>
+                        )}
+                      </div>
+                    )}
+
+                    {/* CUSTOM WAVEFORM COLOR SELECTOR */}
+                    <div className="space-y-1 bg-zinc-950/40 p-2 rounded border border-zinc-900 mt-2">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Separate Waveform Color</span>
+                          <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Override visual style color for the waveform line exclusively</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setVisuals(prev => ({ ...prev, useCustomWaveformColor: !prev.useCustomWaveformColor }))}
+                          className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                            visuals.useCustomWaveformColor ? 'bg-blue-600' : 'bg-zinc-800'
+                          }`}
+                        >
+                          <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                            visuals.useCustomWaveformColor ? 'translate-x-3.5' : 'translate-x-0'
+                          }`} />
+                        </button>
+                      </div>
+                      
+                      {visuals.useCustomWaveformColor && (
+                        <div className="pt-2 space-y-3">
+                          <div>
+                            <label className="block text-[9px] text-zinc-500 font-mono mb-1">Waveform Line Color</label>
+                            <div className="flex items-center space-x-1 bg-[#050508] border border-zinc-800 rounded p-1 w-[120px]">
+                              <input
+                                type="color"
+                                value={visuals.waveformColor || '#ffffff'}
+                                onChange={(e) => setVisuals(prev => ({ ...prev, waveformColor: e.target.value }))}
+                                className="w-6 h-6 rounded cursor-pointer border-0 bg-transparent animate-none"
+                              />
+                              <span className="font-mono text-[9px] text-zinc-400">{(visuals.waveformColor || '#ffffff').substring(1)}</span>
+                            </div>
+                          </div>
+                          
+                          <div className="space-y-1">
+                            <div className="flex justify-between items-center mb-1">
+                              <label className="block text-[9px] text-zinc-500 font-mono">Waveform Glow Spread</label>
+                              <span className="text-[10px] text-zinc-400 font-mono">
+                                {visuals.waveformGlowSpread !== undefined ? visuals.waveformGlowSpread : visuals.glowStrength}px
+                              </span>
+                            </div>
+                            <input
+                              type="range"
+                              min="0"
+                              max="40"
+                              step="1"
+                              value={visuals.waveformGlowSpread !== undefined ? visuals.waveformGlowSpread : visuals.glowStrength}
+                              onChange={(e) => setVisuals(prev => ({ ...prev, waveformGlowSpread: parseInt(e.target.value) }))}
+                              className="w-full accent-blue-600 h-1.5 rounded-full cursor-pointer bg-zinc-900 appearance-none"
+                            />
+                            <span className="text-[9px] text-zinc-500 font-sans block leading-tight">Adjusts the shadowBlur for the waveform line, making the neon aura wider or sharper.</span>
+                          </div>
+                        </div>
+                      )}
+                    </div>
                   </div>
 
                   {/* Spectrum Dimension & Sensitivity Controls */}
@@ -5683,8 +5954,8 @@ export default function App() {
                         </button>
                       </div>
 
-                      <div className="grid grid-cols-5 gap-2 items-center pt-1">
-                        <div className="col-span-3 space-y-1">
+                      <div className="space-y-3 pt-1">
+                        <div className="space-y-1">
                           <div className="flex justify-between font-mono text-[9px] text-zinc-400 font-bold">
                             <span>TEMPO (BPM)</span>
                             <span className="text-white font-semibold">{visuals.beatLockBpm || 120}</span>
@@ -5699,13 +5970,37 @@ export default function App() {
                             className="w-full accent-blue-600 cursor-pointer"
                           />
                         </div>
-                        <div className="col-span-2 pt-3">
+                        <div className="grid grid-cols-2 gap-2">
                           <button
                             type="button"
                             onClick={handleTapTempo}
                             className="w-full py-2 px-2.5 bg-blue-950/20 text-blue-400 border border-blue-900/50 hover:bg-blue-900/35 hover:text-white rounded text-[10px] font-bold font-mono tracking-wider transition-all duration-150 active:scale-95 shadow-sm uppercase cursor-pointer"
                           >
                             Tap Tempo
+                          </button>
+                          <button
+                            type="button"
+                            onClick={handleAutoDetectTempo}
+                            disabled={!audioTrack.file || isDetectingBpm}
+                            className={`w-full py-2 px-2.5 flex items-center justify-center space-x-1 border rounded text-[10px] font-bold font-mono tracking-wider transition-all duration-150 uppercase shadow-sm ${
+                              !audioTrack.file 
+                                ? 'bg-zinc-900/50 text-zinc-600 border-zinc-800/50 cursor-not-allowed' 
+                                : isDetectingBpm
+                                  ? 'bg-blue-900/50 text-blue-300 border-blue-800/50 cursor-wait'
+                                  : 'bg-indigo-950/20 text-indigo-400 border-indigo-900/50 hover:bg-indigo-900/35 hover:text-white cursor-pointer active:scale-95'
+                            }`}
+                          >
+                            {isDetectingBpm ? (
+                              <>
+                                <RefreshCw className="w-3 h-3 animate-spin" />
+                                <span>Detecting...</span>
+                              </>
+                            ) : (
+                              <>
+                                <Wand2 className="w-3 h-3" />
+                                <span>Auto-detect</span>
+                              </>
+                            )}
                           </button>
                         </div>
                       </div>
@@ -6324,6 +6619,111 @@ export default function App() {
                         </div>
                       </div>
 
+                      {/* NEW ADVANCED VISUAL EFFECTS */}
+                      <div className="border-t border-zinc-800/60 pt-4 mt-4 space-y-3 font-sans">
+                        <div>
+                          <h4 className="text-xs font-semibold text-zinc-300 font-mono uppercase tracking-wider text-left">Advanced Visual Effects</h4>
+                          <p className="text-[10px] text-zinc-500 mt-0.5 text-left">Cinematic and geometry modifications</p>
+                        </div>
+
+                        {/* 1. Kaleidoscope / Mandala Symmetry */}
+                        <div className="flex items-center justify-between p-2.5 bg-[#07070a]/80 rounded border border-zinc-950/60">
+                          <div className="text-left max-w-[78%]">
+                            <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Kaleidoscope / Mandala Symmetry</span>
+                            <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Reflect visualizer across radial axes for sacred geometry</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setVisuals(prev => ({ ...prev, kaleidoscope: !prev.kaleidoscope }))}
+                            className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                              visuals.kaleidoscope ? 'bg-blue-600' : 'bg-zinc-800'
+                            }`}
+                          >
+                            <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                              visuals.kaleidoscope ? 'translate-x-3.5' : 'translate-x-0'
+                            }`} />
+                          </button>
+                        </div>
+                        {visuals.kaleidoscope && (
+                          <div className="space-y-1 p-2.5 bg-[#07070a]/40 rounded border border-zinc-950/40 mt-1 animate-in fade-in duration-200">
+                            <div className="flex justify-between font-mono text-[9px] text-zinc-400 font-bold">
+                              <span>SEGMENTS (AXES)</span>
+                              <span className="text-white font-semibold">{visuals.kaleidoscopeSegments || 6}</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="4"
+                              max="12"
+                              step="2"
+                              value={visuals.kaleidoscopeSegments || 6}
+                              onChange={(e) => setVisuals(prev => ({ ...prev, kaleidoscopeSegments: parseInt(e.target.value) }))}
+                              className="w-full accent-blue-600 cursor-pointer"
+                            />
+                          </div>
+                        )}
+
+                        {/* 2. Chromatic Aberration */}
+                        <div className="flex items-center justify-between p-2.5 bg-[#07070a]/80 rounded border border-zinc-950/60">
+                          <div className="text-left max-w-[78%]">
+                            <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Chromatic Aberration (RGB Split)</span>
+                            <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Split into distinct RGB ghosted outlines on heavy bass drops</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setVisuals(prev => ({ ...prev, chromaticAberration: !prev.chromaticAberration }))}
+                            className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                              visuals.chromaticAberration ? 'bg-blue-600' : 'bg-zinc-800'
+                            }`}
+                          >
+                            <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                              visuals.chromaticAberration ? 'translate-x-3.5' : 'translate-x-0'
+                            }`} />
+                          </button>
+                        </div>
+
+                        {/* 3. Cinematic Camera Shake */}
+                        <div className="flex items-center justify-between p-2.5 bg-[#07070a]/80 rounded border border-zinc-950/60">
+                          <div className="text-left max-w-[78%]">
+                            <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Cinematic Camera Shake / Earthquake</span>
+                            <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Entire canvas shakes violently on the X/Y axis during bass peaks</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setVisuals(prev => ({ ...prev, earthquakeCameraShake: !prev.earthquakeCameraShake }))}
+                            className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                              visuals.earthquakeCameraShake ? 'bg-blue-600' : 'bg-zinc-800'
+                            }`}
+                          >
+                            <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                              visuals.earthquakeCameraShake ? 'translate-x-3.5' : 'translate-x-0'
+                            }`} />
+                          </button>
+                        </div>
+
+                        {/* 4. Phosphor Motion Trails */}
+                        <div className="flex items-center justify-between p-2.5 bg-[#07070a]/80 rounded border border-zinc-950/60">
+                          <div className="text-left max-w-[78%]">
+                            <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Phosphor Motion Trails</span>
+                            <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Slow-fading motion blur trails behind moving elements</span>
+                          </div>
+                        </div>
+                        <div className="space-y-1 p-2.5 bg-[#07070a]/40 rounded border border-zinc-950/40 mt-1">
+                          <div className="flex justify-between font-mono text-[9px] text-zinc-400 font-bold">
+                            <span>TRAIL LENGTH (ACCUMULATION)</span>
+                            <span className="text-white font-semibold">{((visuals.phosphorTrails || 0) * 100).toFixed(0)}%</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0"
+                            max="0.98"
+                            step="0.02"
+                            value={visuals.phosphorTrails || 0}
+                            onChange={(e) => setVisuals(prev => ({ ...prev, phosphorTrails: parseFloat(e.target.value) }))}
+                            className="w-full accent-blue-600 cursor-pointer"
+                          />
+                        </div>
+                      </div>
+
                       {/* Video Asset Overlays Section */}
                       <div id="video-asset-overlays-section" className="border-t border-zinc-800/60 pt-4 mt-4 space-y-3 font-sans">
                         <div>
@@ -6880,6 +7280,26 @@ export default function App() {
                         }`} />
                       </button>
                     </div>
+
+                    {/* Particle Life Behavior Dropdown */}
+                    {(particlesSet.enableParticleCollisions) && (
+                      <div className="space-y-1 bg-zinc-950/40 p-2 rounded border border-zinc-900 mt-2">
+                        <label className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-wide">Particle Life (Collision Action)</label>
+                        <select
+                          value={particlesSet.particleLifeBehavior || 'bounce'}
+                          onChange={(e) => setParticlesSet(prev => ({ ...prev, particleLifeBehavior: e.target.value as any }))}
+                          className="w-full bg-[#050508] border border-zinc-800 rounded p-2 text-xs text-white outline-none cursor-pointer transition-all"
+                        >
+                          <option value="none">None (Ignore each other)</option>
+                          <option value="bounce">Bounce Off (Elastic)</option>
+                          <option value="merge">Merge Together</option>
+                          <option value="dissolve">Dissolve (Vanish)</option>
+                        </select>
+                        <span className="text-[9px] text-zinc-500 block font-sans leading-tight pt-1">
+                          Defines how particles physically interact when they collide.
+                        </span>
+                      </div>
+                    )}
 
                     {/* Collision Damping Slider */}
                     {(particlesSet.enablePhysics || particlesSet.enableParticleCollisions) && (
@@ -8047,13 +8467,30 @@ export default function App() {
                   {/* Custom Text Field */}
                   <div className="bg-zinc-900/40 border border-zinc-900 rounded-lg p-4 space-y-3.5">
                     <div className="space-y-1.5 text-left">
-                      <label className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-wide">Custom Text String</label>
-                      <input
-                        type="text"
+                      <div className="flex items-center justify-between">
+                        <label className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-wide">Custom Text String</label>
+                        <div className="flex bg-zinc-950 border border-zinc-800 rounded p-0.5 space-x-0.5">
+                          {['left', 'center', 'right'].map((align) => (
+                            <button
+                              key={align}
+                              onClick={() => setVisuals(prev => ({ ...prev, textAlign: align as any }))}
+                              className={`p-1 rounded flex items-center justify-center transition-all ${
+                                (visuals.textAlign || 'center') === align 
+                                  ? 'bg-cyan-500/20 text-cyan-400' 
+                                  : 'text-zinc-500 hover:text-zinc-300'
+                              }`}
+                            >
+                              <LayoutGrid className="w-3 h-3" />
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                      <textarea
                         value={customText}
                         onChange={(e) => setCustomText(e.target.value)}
-                        placeholder="Enter overlay text..."
-                        className="w-full bg-[#050508] border border-zinc-800 focus:border-cyan-500/50 rounded p-2 text-xs text-white placeholder-zinc-700 outline-none transition-all font-sans"
+                        placeholder="Enter overlay text... (multi-line supported)"
+                        rows={2}
+                        className="w-full bg-[#050508] border border-zinc-800 focus:border-cyan-500/50 rounded p-2 text-xs text-white placeholder-zinc-700 outline-none transition-all font-sans resize-none"
                       />
                     </div>
 
@@ -8114,24 +8551,101 @@ export default function App() {
                         </select>
                       </div>
 
-                      {/* Text Color Picker */}
-                      <div className="space-y-1.5 text-left">
-                        <label className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-wide">Text Color</label>
-                        <div className="flex items-center space-x-2">
-                          <input
-                            type="color"
-                            value={customTextColor}
-                            onChange={(e) => setCustomTextColor(e.target.value)}
-                            className="bg-transparent border border-zinc-800 rounded w-8 h-8 cursor-pointer shrink-0"
-                          />
-                          <input
-                            type="text"
-                            value={customTextColor.toUpperCase()}
-                            onChange={(e) => setCustomTextColor(e.target.value)}
-                            maxLength={7}
-                            className="w-full bg-[#050508] border border-zinc-800 focus:border-cyan-500/50 rounded p-2 text-xs text-white placeholder-zinc-700 outline-none transition-all font-mono"
-                          />
+                      {/* Text Color Options */}
+                      <div className="space-y-3 pt-2">
+                        <div className="flex items-center justify-between">
+                          <label className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-wide">Text Fill Style</label>
+                          <div className="flex bg-zinc-950 border border-zinc-800 rounded p-0.5 space-x-0.5">
+                            <button
+                              type="button"
+                              onClick={() => setVisuals(prev => ({ ...prev, textGradient: false }))}
+                              className={`px-2 py-1 rounded text-[9px] font-mono uppercase transition-all ${
+                                !visuals.textGradient
+                                  ? 'bg-cyan-500/20 text-cyan-400'
+                                  : 'text-zinc-500 hover:text-zinc-300'
+                              }`}
+                            >
+                              Solid
+                            </button>
+                            <button
+                              type="button"
+                              onClick={() => setVisuals(prev => ({ ...prev, textGradient: true }))}
+                              className={`px-2 py-1 rounded text-[9px] font-mono uppercase transition-all ${
+                                visuals.textGradient
+                                  ? 'bg-cyan-500/20 text-cyan-400'
+                                  : 'text-zinc-500 hover:text-zinc-300'
+                              }`}
+                            >
+                              Gradient
+                            </button>
+                          </div>
                         </div>
+
+                        {!visuals.textGradient ? (
+                          <div className="flex items-center space-x-2">
+                            <input
+                              type="color"
+                              value={customTextColor}
+                              onChange={(e) => setCustomTextColor(e.target.value)}
+                              className="bg-transparent border border-zinc-800 rounded w-8 h-8 cursor-pointer shrink-0"
+                            />
+                            <input
+                              type="text"
+                              value={customTextColor.toUpperCase()}
+                              onChange={(e) => setCustomTextColor(e.target.value)}
+                              maxLength={7}
+                              className="w-full bg-[#050508] border border-zinc-800 focus:border-cyan-500/50 rounded p-2 text-xs text-white placeholder-zinc-700 outline-none transition-all font-mono"
+                            />
+                          </div>
+                        ) : (
+                          <div className="space-y-2">
+                            <div className="grid grid-cols-2 gap-2">
+                              <div className="flex items-center space-x-2 bg-[#050508] border border-zinc-800 rounded p-1.5">
+                                <input
+                                  type="color"
+                                  value={visuals.textGradientStart || '#00f3ff'}
+                                  onChange={(e) => setVisuals(prev => ({ ...prev, textGradientStart: e.target.value }))}
+                                  className="bg-transparent border-none rounded w-5 h-5 cursor-pointer shrink-0 p-0"
+                                />
+                                <span className="text-[10px] text-zinc-400 font-mono font-bold">START</span>
+                              </div>
+                              <div className="flex items-center space-x-2 bg-[#050508] border border-zinc-800 rounded p-1.5">
+                                <input
+                                  type="color"
+                                  value={visuals.textGradientEnd || '#ff00ff'}
+                                  onChange={(e) => setVisuals(prev => ({ ...prev, textGradientEnd: e.target.value }))}
+                                  className="bg-transparent border-none rounded w-5 h-5 cursor-pointer shrink-0 p-0"
+                                />
+                                <span className="text-[10px] text-zinc-400 font-mono font-bold">END</span>
+                              </div>
+                            </div>
+                            
+                            <div className="flex flex-col space-y-1">
+                              <span className="text-[9px] text-zinc-500 font-mono">GRADIENT DIRECTION</span>
+                              <div className="flex bg-zinc-950 border border-zinc-800 rounded p-0.5 space-x-0.5">
+                                {[
+                                  { value: 'vertical', icon: ArrowDown, label: 'Ver' },
+                                  { value: 'horizontal', icon: ArrowRight, label: 'Hor' },
+                                  { value: 'diagonal-down', icon: ArrowDownRight, label: 'Dwn' },
+                                  { value: 'diagonal-up', icon: ArrowUpRight, label: 'Up' }
+                                ].map((opt) => (
+                                  <button
+                                    key={opt.value}
+                                    onClick={() => setVisuals(prev => ({ ...prev, textGradientAngle: opt.value as any }))}
+                                    className={`flex-1 py-1 px-0 text-[9px] rounded flex items-center justify-center transition-all ${
+                                      (visuals.textGradientAngle || 'vertical') === opt.value
+                                        ? 'bg-cyan-500/20 text-cyan-400 font-semibold'
+                                        : 'text-zinc-500 hover:text-zinc-300'
+                                    }`}
+                                  >
+                                    <opt.icon className="w-3 h-3 mr-1" />
+                                    {opt.label}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -8165,6 +8679,22 @@ export default function App() {
                         <option value="shadow">Drop Shadow</option>
                         <option value="stroke">Stroke / Hollow</option>
                         <option value="retro">Retro Chromatic (Glitch)</option>
+                      </select>
+                    </div>
+
+                    {/* Text Shadow Preset Dropdown */}
+                    <div className="space-y-1.5 text-left pt-1.5">
+                      <label className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-wide">Text Shadow Preset</label>
+                      <select
+                        value={visuals.textShadowPreset || 'none'}
+                        onChange={(e) => setVisuals(prev => ({ ...prev, textShadowPreset: e.target.value as any }))}
+                        className="w-full bg-[#050508] border border-zinc-800 rounded p-2 text-xs text-white outline-none cursor-pointer transition-all"
+                      >
+                        <option value="none">None</option>
+                        <option value="soft-glow">Soft Glow</option>
+                        <option value="hard-block">Hard Block</option>
+                        <option value="neon">Neon Ambient</option>
+                        <option value="outline">Sharp Outline</option>
                       </select>
                     </div>
                   </div>
@@ -8205,6 +8735,77 @@ export default function App() {
                         onChange={(e) => setCustomTextY(parseInt(e.target.value))}
                         className="w-full h-1 bg-zinc-950 rounded-lg appearance-none cursor-pointer accent-cyan-500"
                       />
+                    </div>
+                  </div>
+
+                  {/* Advanced Typography FX */}
+                  <div className="bg-zinc-900/40 border border-zinc-900 rounded-lg p-4 space-y-4">
+                    <h4 className="text-[10px] font-bold text-zinc-400 uppercase tracking-wide font-mono text-left border-b border-zinc-805/40 pb-1.5">Advanced Typography FX</h4>
+                    
+                    {/* Opacity */}
+                    <div className="space-y-1.5 text-left">
+                      <div className="flex justify-between items-center text-[10px] font-mono">
+                        <span className="text-zinc-400 font-medium">Text Opacity</span>
+                        <span className="text-cyan-500">{visuals.textOpacity !== undefined ? visuals.textOpacity : 100}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="100"
+                        step="1"
+                        value={visuals.textOpacity !== undefined ? visuals.textOpacity : 100}
+                        onChange={(e) => setVisuals(prev => ({ ...prev, textOpacity: parseInt(e.target.value) }))}
+                        className="w-full h-1 bg-zinc-950 rounded-lg appearance-none cursor-pointer accent-cyan-500"
+                      />
+                    </div>
+
+                    {/* Blend Mode */}
+                    <div className="space-y-1.5 text-left pt-1">
+                      <label className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-wide">Blend Mode</label>
+                      <select
+                        value={visuals.textBlendMode || 'normal'}
+                        onChange={(e) => setVisuals(prev => ({ ...prev, textBlendMode: e.target.value as any }))}
+                        className="w-full bg-[#050508] border border-zinc-800 rounded p-2 text-xs text-white outline-none cursor-pointer transition-all"
+                      >
+                        <option value="normal">Normal</option>
+                        <option value="screen">Screen (Glow)</option>
+                        <option value="overlay">Overlay (Cinematic)</option>
+                        <option value="multiply">Multiply (Darken)</option>
+                        <option value="color-dodge">Color Dodge (Intense)</option>
+                      </select>
+                    </div>
+
+                    {/* Beat Reactive Options */}
+                    <div className="grid grid-cols-2 gap-3 pt-2">
+                      <div className="flex items-center justify-between p-2 bg-[#050508] rounded border border-zinc-800/60">
+                        <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-wide">Beat Scale</span>
+                        <button
+                          type="button"
+                          onClick={() => setVisuals(prev => ({ ...prev, textBeatScale: !prev.textBeatScale }))}
+                          className={`relative w-7 h-4 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                            visuals.textBeatScale ? 'bg-cyan-500' : 'bg-zinc-800'
+                          }`}
+                        >
+                          <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3 w-3 transition-all ${
+                            visuals.textBeatScale ? 'translate-x-3' : 'translate-x-0'
+                          }`} />
+                        </button>
+                      </div>
+
+                      <div className="flex items-center justify-between p-2 bg-[#050508] rounded border border-zinc-800/60">
+                        <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-wide">Beat Shake</span>
+                        <button
+                          type="button"
+                          onClick={() => setVisuals(prev => ({ ...prev, textBeatShake: !prev.textBeatShake }))}
+                          className={`relative w-7 h-4 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                            visuals.textBeatShake ? 'bg-cyan-500' : 'bg-zinc-800'
+                          }`}
+                        >
+                          <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3 w-3 transition-all ${
+                            visuals.textBeatShake ? 'translate-x-3' : 'translate-x-0'
+                          }`} />
+                        </button>
+                      </div>
                     </div>
                   </div>
 

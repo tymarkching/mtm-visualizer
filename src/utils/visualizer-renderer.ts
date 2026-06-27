@@ -31,6 +31,7 @@ let mirrorInvertedOffscreenCtxY: CanvasRenderingContext2D | null = null;
 
 // Dedicated offscreen canvas for isolating visualizer drawing from main canvas background/videos/text
 let visualizerWavesCanvas: HTMLCanvasElement | null = null;
+let globalActiveStyleColor: string | CanvasGradient | null = null;
 
 interface Shockwave {
   x: number;
@@ -647,38 +648,62 @@ export function updateParticles(
   // If particle radius collisions is enabled, resolve particle-to-particle collisions
   if (particleRadiusCollisionsEnabled && result.length > 1) {
     const collisionDamping = settings.collisionDamping !== undefined ? settings.collisionDamping : 0.85;
-    for (let i = 0; i < result.length; i++) {
-      let p1 = result[i];
-      for (let j = i + 1; j < result.length; j++) {
-        let p2 = result[j];
+    const lifeBehavior = settings.particleLifeBehavior || 'bounce';
+    
+    if (lifeBehavior !== 'none') {
+      for (let i = 0; i < result.length; i++) {
+        let p1 = result[i];
+        if (p1.life <= 0) continue; // Skip already dead particles
+        
+        for (let j = i + 1; j < result.length; j++) {
+          let p2 = result[j];
+          if (p2.life <= 0) continue;
+          
+          let dx = p2.x - p1.x;
+          let dy = p2.y - p1.y;
+          let dist = Math.sqrt(dx * dx + dy * dy);
+          let radius1 = p1.radius || p1.size || 4;
+          let radius2 = p2.radius || p2.size || 4;
+          let minDist = radius1 + radius2;
 
-        let dx = p2.x - p1.x;
-        let dy = p2.y - p1.y;
-        let dist = Math.sqrt(dx * dx + dy * dy);
-        let radius1 = p1.radius || p1.size || 4;
-        let radius2 = p2.radius || p2.size || 4;
-        let minDist = radius1 + radius2;
+          if (dist < minDist && dist > 0.0001) {
+            if (lifeBehavior === 'bounce') {
+              // 1. Instantly push apart to separate physical mesh overlap coordinates
+              let overlap = minDist - dist;
+              let nx = dx / dist;
+              let ny = dy / dist;
 
-        if (dist < minDist && dist > 0.0001) {
-          // 1. Instantly push apart to separate physical mesh overlap coordinates
-          let overlap = minDist - dist;
-          let nx = dx / dist;
-          let ny = dy / dist;
+              p1.x -= nx * overlap * 0.5;
+              p1.y -= ny * overlap * 0.5;
+              p2.x += nx * overlap * 0.5;
+              p2.y += ny * overlap * 0.5;
 
-          p1.x -= nx * overlap * 0.5;
-          p1.y -= ny * overlap * 0.5;
-          p2.x += nx * overlap * 0.5;
-          p2.y += ny * overlap * 0.5;
+              // 2. Perform definitive 2D elastic vector momentum updates
+              let kx = p1.vx - p2.vx;
+              let ky = p1.vy - p2.vy;
+              let p = (1 + collisionDamping) * (nx * kx + ny * ky) / 2; // Assuming unified mass state
 
-          // 2. Perform definitive 2D elastic vector momentum updates
-          let kx = p1.vx - p2.vx;
-          let ky = p1.vy - p2.vy;
-          let p = (1 + collisionDamping) * (nx * kx + ny * ky) / 2; // Assuming unified mass state
-
-          p1.vx -= p * nx;
-          p1.vy -= p * ny;
-          p2.vx += p * nx;
-          p2.vy += p * ny;
+              p1.vx -= p * nx;
+              p1.vy -= p * ny;
+              p2.vx += p * nx;
+              p2.vy += p * ny;
+            } else if (lifeBehavior === 'merge') {
+              // Combine p1 and p2 into p1, and destroy p2
+              const newSize = Math.min(p1.size + p2.size * 0.5, settings.maxSize * 2.5);
+              p1.size = newSize;
+              p1.radius = newSize;
+              // Average velocity
+              p1.vx = (p1.vx + p2.vx) * 0.5;
+              p1.vy = (p1.vy + p2.vy) * 0.5;
+              // Mark p2 for death
+              p2.life = 0;
+            } else if (lifeBehavior === 'dissolve') {
+              // Both particles vanish on contact
+              p1.life = 0;
+              p2.life = 0;
+              break; // p1 is dead, stop checking collisions for it
+            }
+          }
         }
       }
     }
@@ -1205,9 +1230,30 @@ export function drawVisualizer(
     visualizerWavesCanvas.height = height;
   }
   const ctx = visualizerWavesCanvas.getContext('2d')!;
-  ctx.clearRect(0, 0, width, height);
+  
+  const trails = incomingSettings.phosphorTrails || 0;
+  if (trails > 0) {
+    ctx.globalCompositeOperation = 'destination-out';
+    // The alpha here represents how much we erase. 1 means erase completely. (1 - trails) means erase partially.
+    ctx.fillStyle = `rgba(255, 255, 255, ${1 - trails})`;
+    ctx.fillRect(0, 0, width, height);
+    ctx.globalCompositeOperation = 'source-over';
+  } else {
+    ctx.clearRect(0, 0, width, height);
+  }
 
   let settings = { ...incomingSettings };
+  
+  if (settings.useCustomWaveformColor && settings.waveformColor) {
+    settings.primaryColor = settings.waveformColor;
+    settings.secondaryColor = settings.waveformColor;
+    settings.colorMode = 'solid';
+  }
+
+  if (settings.useCustomWaveformColor && settings.waveformGlowSpread !== undefined) {
+    settings.glowStrength = settings.waveformGlowSpread;
+  }
+  
   const contrast = settings.visualizerContrast !== undefined ? settings.visualizerContrast : 1.0;
   if (contrast !== 1.0) {
     settings.lineThickness = (settings.lineThickness !== undefined ? settings.lineThickness : 3) * contrast;
@@ -1404,10 +1450,26 @@ export function drawVisualizer(
   const mode = settings.colorMode || 'gradient';
   let activeStyleColor: string | CanvasGradient;
 
+  let gradStartX = 0;
+  let gradStartY = 0;
+  let gradEndX = width;
+  let gradEndY = 0;
+
+  if (settings.useCustomGradientDirection && settings.gradientDirectionAngle !== undefined) {
+    const angleRad = (settings.gradientDirectionAngle * Math.PI) / 180;
+    const cx = width / 2;
+    const cy = height / 2;
+    const length = Math.abs(width * Math.cos(angleRad)) + Math.abs(height * Math.sin(angleRad));
+    gradStartX = cx - Math.cos(angleRad) * (length / 2);
+    gradStartY = cy - Math.sin(angleRad) * (length / 2);
+    gradEndX = cx + Math.cos(angleRad) * (length / 2);
+    gradEndY = cy + Math.sin(angleRad) * (length / 2);
+  }
+
   if (mode === 'solid') {
     activeStyleColor = settings.primaryColor;
   } else if (mode === 'rainbow') {
-    const rainbowGrad = ctx.createLinearGradient(0, 0, width, 0);
+    const rainbowGrad = ctx.createLinearGradient(gradStartX, gradStartY, gradEndX, gradEndY);
     rainbowGrad.addColorStop(0, 'hsl(0, 100%, 55%)');
     rainbowGrad.addColorStop(0.2, 'hsl(35, 100%, 55%)');
     rainbowGrad.addColorStop(0.4, 'hsl(60, 100%, 55%)');
@@ -1416,12 +1478,14 @@ export function drawVisualizer(
     rainbowGrad.addColorStop(1.0, 'hsl(280, 100%, 55%)');
     activeStyleColor = rainbowGrad;
   } else {
-    const gradient = ctx.createLinearGradient(0, 0, width, 0);
+    const gradient = ctx.createLinearGradient(gradStartX, gradStartY, gradEndX, gradEndY);
     gradient.addColorStop(0, settings.primaryColor);
     gradient.addColorStop(0.5, settings.secondaryColor);
     gradient.addColorStop(1, settings.primaryColor);
     activeStyleColor = gradient;
   }
+
+  globalActiveStyleColor = activeStyleColor;
 
   ctx.strokeStyle = activeStyleColor;
   ctx.fillStyle = activeStyleColor;
@@ -1798,7 +1862,7 @@ export function drawVisualizer(
       ctx.save();
       if (glowStrength > 0) {
         ctx.shadowBlur = glowStrength;
-        ctx.shadowColor = settings.glowColor || barColor;
+        ctx.shadowColor = settings.glowColor || (typeof barColor === 'string' ? barColor : settings.primaryColor);
       }
       ctx.globalAlpha = 0.4 + (val / 255) * 0.6;
       ctx.fillStyle = barColor;
@@ -1822,7 +1886,7 @@ export function drawVisualizer(
       ctx.save();
       if (glowStrength > 0) {
         ctx.shadowBlur = Math.floor(glowStrength * 0.5); // softer shadow for reflections
-        ctx.shadowColor = settings.glowColor || barColor;
+        ctx.shadowColor = settings.glowColor || (typeof barColor === 'string' ? barColor : settings.primaryColor);
       }
       ctx.globalAlpha = (val / 255) * 0.3;
       ctx.fillStyle = barColor;
@@ -2901,7 +2965,7 @@ export function drawVisualizer(
 
           if (ampRatio < 0.02) continue; // skip near-silent pixels to save CPU cycles
 
-          let cellColor = '';
+          let cellColor: string | CanvasGradient = '';
           const opacity = ampRatio * ageFade;
 
           if (settings.colorMode === 'solid') {
@@ -2967,7 +3031,7 @@ export function drawVisualizer(
       ctx.lineWidth = strokeW;
       const laserColor = getDynamicColor(settings.primaryColor, settings.secondaryColor, laserRatio);
       ctx.strokeStyle = colorToRgba(laserColor, alpha);
-      ctx.shadowColor = laserColor;
+      ctx.shadowColor = typeof laserColor === 'string' ? laserColor : settings.primaryColor;
 
       ctx.beginPath();
       ctx.moveTo(centerX - width * 0.45, currentY);
@@ -3003,7 +3067,7 @@ export function drawVisualizer(
       const ringRatio = r / numRings;
       const ringColor = getDynamicColor(settings.primaryColor, settings.secondaryColor, ringRatio);
       ctx.strokeStyle = ringColor;
-      ctx.shadowColor = ringColor;
+      ctx.shadowColor = typeof ringColor === 'string' ? ringColor : settings.primaryColor;
 
       const baseRadius = maxRadius * ringRatio;
       const dynamicRadius = baseRadius + subBassFactor * 45;
@@ -3071,7 +3135,7 @@ export function drawVisualizer(
 
         if (isActive) {
           const blockRatio = b / (numBlocks - 1);
-          let blockColor = '';
+          let blockColor: string | CanvasGradient = '';
           if (settings.colorMode === 'solid') {
             blockColor = settings.primaryColor;
           } else if (settings.colorMode === 'gradient') {
@@ -3085,7 +3149,7 @@ export function drawVisualizer(
           }
 
           ctx.fillStyle = blockColor;
-          ctx.shadowColor = blockColor;
+          ctx.shadowColor = typeof blockColor === 'string' ? blockColor : settings.primaryColor;
           ctx.globalAlpha = 1.0;
         } else {
           ctx.fillStyle = '#ffffff';
@@ -3146,7 +3210,7 @@ export function drawVisualizer(
           ctx.stroke();
         } else {
           ctx.strokeStyle = baseColor;
-          ctx.shadowColor = baseColor;
+          ctx.shadowColor = typeof baseColor === 'string' ? baseColor : settings.primaryColor;
           ctx.beginPath();
           ctx.moveTo(anchorX, anchorY);
           ctx.lineTo(targetX, targetY);
@@ -3672,7 +3736,7 @@ export function drawVisualizer(
       ctx.strokeStyle = pinColor;
       ctx.lineWidth = Math.max(1.0, computedBarWidth);
       ctx.shadowBlur = settings.glowStrength || 4;
-      ctx.shadowColor = pinColor;
+      ctx.shadowColor = typeof pinColor === 'string' ? pinColor : settings.primaryColor;
       ctx.stroke();
       
       // Bottom pins (mirrored downward)
@@ -3849,14 +3913,14 @@ export function drawVisualizer(
       const circleColor = getDynamicColor(settings.primaryColor, settings.secondaryColor, i / totalCircles);
       const x = startX + i * step;
 
-      const drawCircle = (cX: number, cY: number, r: number, alpha: number, col: string) => {
+      const drawCircle = (cX: number, cY: number, r: number, alpha: number, col: string | CanvasGradient) => {
         if (alpha <= 0) return;
         ctx.beginPath();
         ctx.arc(cX, cY, r, 0, Math.PI * 2);
         ctx.fillStyle = col;
         ctx.save();
         ctx.globalAlpha = alpha;
-        ctx.shadowColor = settings.glowColor || col;
+        ctx.shadowColor = settings.glowColor || (typeof col === 'string' ? col : settings.primaryColor);
         ctx.shadowBlur = settings.glowStrength !== undefined ? settings.glowStrength * 3 : 15;
         ctx.fill();
         ctx.restore();
@@ -4081,7 +4145,72 @@ export function drawVisualizer(
     mainCtx.translate(-width / 2, 0);
   }
 
-  mainCtx.drawImage(visualizerWavesCanvas, 0, 0);
+  const drawChromaticAberration = (ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, beatInt: number) => {
+    if (settings.chromaticAberration && beatInt > 0.4) {
+      const splitOffset = beatInt * 25; // max 25px
+      ctx.save();
+      ctx.globalCompositeOperation = 'screen';
+      
+      // RED channel (Left)
+      ctx.save();
+      ctx.shadowColor = 'rgba(255, 0, 0, 0.8)';
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetX = width * 2 - splitOffset;
+      ctx.drawImage(canvas, -width * 2, 0);
+      ctx.restore();
+
+      // BLUE channel (Right)
+      ctx.save();
+      ctx.shadowColor = 'rgba(0, 50, 255, 0.8)';
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetX = width * 2 + splitOffset;
+      ctx.drawImage(canvas, -width * 2, 0);
+      ctx.restore();
+      
+      // GREEN channel (Center/solid)
+      ctx.save();
+      ctx.shadowColor = 'rgba(0, 255, 50, 0.8)';
+      ctx.shadowBlur = 0;
+      ctx.shadowOffsetX = width * 2;
+      ctx.drawImage(canvas, -width * 2, 0);
+      ctx.restore();
+      
+      ctx.restore();
+    } else {
+      ctx.drawImage(canvas, 0, 0);
+    }
+  };
+
+  if (settings.kaleidoscope) {
+    const segments = settings.kaleidoscopeSegments || 6;
+    const angle = (Math.PI * 2) / segments;
+    const cx = width / 2;
+    const cy = height / 2;
+    // We sample one slice and repeat it. To do that, we draw the canvas rotated, clipped to each pie slice.
+    // For a mirror maze, alternate slices are flipped.
+    for (let i = 0; i < segments; i++) {
+      mainCtx.save();
+      mainCtx.translate(cx, cy);
+      mainCtx.rotate(i * angle);
+      
+      mainCtx.beginPath();
+      mainCtx.moveTo(0, 0);
+      mainCtx.arc(0, 0, Math.max(width, height), -angle / 2, angle / 2);
+      mainCtx.lineTo(0, 0);
+      mainCtx.clip();
+
+      if (i % 2 !== 0) {
+        mainCtx.scale(1, -1);
+      }
+      mainCtx.translate(-cx, -cy);
+      
+      drawChromaticAberration(mainCtx, visualizerWavesCanvas, beatIntensity);
+      mainCtx.restore();
+    }
+  } else {
+    drawChromaticAberration(mainCtx, visualizerWavesCanvas, beatIntensity);
+  }
+
   mainCtx.restore();
 }
 
@@ -4207,8 +4336,13 @@ export function drawTitleOverlay(
 }
 
 // Blend colors based on linear ratio and advanced color modes
-function getDynamicColor(color1: string, color2: string, ratio: number): string {
+function getDynamicColor(color1: string, color2: string, ratio: number): string | CanvasGradient {
   const mode = activeSettings?.colorMode || 'gradient';
+  
+  if (activeSettings?.useCustomGradientDirection && mode !== 'solid' && globalActiveStyleColor) {
+    return globalActiveStyleColor;
+  }
+  
   if (mode === 'solid') {
     return color1;
   } else if (mode === 'rainbow') {
@@ -4228,7 +4362,10 @@ function getDynamicColor(color1: string, color2: string, ratio: number): string 
 }
 
 // Convert any hex, rgb, or hsl color to its translucent rgba version
-function colorToRgba(colorStr: string, alpha: number): string {
+function colorToRgba(colorStr: string | CanvasGradient, alpha: number): string | CanvasGradient {
+  if (typeof colorStr !== 'string') {
+    return colorStr; // Cannot change alpha of CanvasGradient easily this way, so return as is
+  }
   if (colorStr.startsWith('#')) {
     const rgb = hexToRgb(colorStr) || { r: 0, g: 255, b: 200 };
     return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
