@@ -4214,12 +4214,23 @@ export default function App() {
       {/* HEADER BAR */}
       <header id="main-header" className="border-b border-zinc-900 bg-zinc-950/90 px-6 py-4 flex items-center justify-between sticky top-0 z-40 backdrop-blur-sm">
         <div className="flex items-center space-x-3">
-          <div className="w-9 h-9 rounded-lg bg-zinc-900 border border-zinc-800 text-blue-500 flex items-center justify-center shadow-sm">
-            <Disc className="w-5 h-5 text-blue-500 animate-spin-slow" />
+          <div className="w-10 h-10 rounded-md bg-zinc-900 border border-zinc-800 text-blue-500 flex items-center justify-center shadow-sm overflow-hidden shrink-0">
+            <img 
+              src="https://i.postimg.cc/P5tTmZdt/logo.png" 
+              alt="CFS Logo" 
+              className="w-10 h-10 object-contain rounded-md border border-zinc-800" 
+              onError={(e) => {
+                e.currentTarget.style.display = 'none';
+                if (e.currentTarget.nextElementSibling) {
+                  (e.currentTarget.nextElementSibling as HTMLElement).style.display = 'block';
+                }
+              }}
+            />
+            <Disc className="w-6 h-6 text-blue-500 animate-spin-slow" style={{ display: 'none' }} />
           </div>
-          <div>
-            <h1 className="text-base font-bold tracking-wide text-zinc-100 leading-none">AUDIO VISUALIZER</h1>
-            <span className="text-[9px] font-mono tracking-wider text-zinc-400 uppercase">Music Video Maker</span>
+          <div className="flex flex-col justify-center mt-0.5">
+            <h1 className="text-sm font-bold tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-[#a3e635] to-[#ccff00] leading-none drop-shadow-[0_0_8px_rgba(204,255,0,0.3)]">CHAOTIC FART STUDIO VISUALIZER</h1>
+            <span className="text-[9px] font-mono tracking-wider text-lime-500/80 uppercase mt-1">Audio-Reactive Motion Suite • tymark</span>
           </div>
         </div>
 
