@@ -572,6 +572,28 @@ export function updateParticles(
         if (settings.emittingDirection === 'fall-down') verticalDrift = p.speed * 0.5;
         p.vx = Math.cos(p.angle + frameCount * 0.02) * p.speed;
         p.vy = Math.sin(p.angle + frameCount * 0.015) * p.speed + verticalDrift;
+      } else if (settings.type === 'electro-storm') {
+        if (Math.random() > 0.8) {
+          p.vx += (Math.random() - 0.5) * 5;
+          p.vy += (Math.random() - 0.5) * 5;
+        }
+      } else if (settings.type === 'liquid-gold') {
+        p.vx = Math.sin(p.y / 20 + p.hue) * 2;
+      } else if (settings.type === 'dnb-neuro') {
+        const cx = width / 2;
+        const cy = height / 2;
+        p.vx += (cx - p.x) * 0.001;
+        p.vy += (cy - p.y) * 0.001;
+      } else if (settings.type === 'speedcore-glitch') {
+        if (Math.random() > 0.9) {
+          p.vx = (Math.random() - 0.5) * 20;
+          p.vy = (Math.random() - 0.5) * 2;
+        }
+      } else if (settings.type === 'frenchcore-spark') {
+        if (isBeat) {
+           p.vx *= 1.2;
+           p.vy *= 1.2;
+        }
       }
       
       let finalVx = p.vx * dynamicBaseSpeedMultiplier * burstSpeedMult;
@@ -1189,6 +1211,127 @@ export function drawParticles(
           ctx.stroke();
         }
       }
+      ctx.restore();
+    } else if (settings.type === 'electro-storm') {
+      ctx.save();
+      ctx.strokeStyle = finalColor;
+      ctx.lineWidth = Math.max(1, p.size * 0.2);
+      if (!glowOnBurst) {
+        ctx.shadowBlur = isBeat ? 20 : 8;
+        ctx.shadowColor = finalColor;
+      }
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.angle || 0);
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.lineTo(p.size, p.size * 1.5);
+      ctx.lineTo(p.size * 0.5, p.size * 1.8);
+      ctx.lineTo(p.size * 1.5, p.size * 3.5);
+      ctx.stroke();
+      ctx.restore();
+    } else if (settings.type === 'liquid-gold') {
+      ctx.save();
+      ctx.fillStyle = finalColor;
+      if (!glowOnBurst) {
+        ctx.shadowBlur = 10;
+        ctx.shadowColor = finalColor;
+      }
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size * (1 + 0.3 * Math.sin(Date.now() / 200 + p.hue)), 0, Math.PI * 2);
+      ctx.fill();
+      ctx.beginPath();
+      ctx.arc(p.x, p.y - p.size, p.size * 0.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    } else if (settings.type === 'quantum-snow') {
+      ctx.save();
+      ctx.fillStyle = finalColor;
+      if (!glowOnBurst) {
+        ctx.shadowBlur = isBeat ? 15 : 5;
+        ctx.shadowColor = finalColor;
+      }
+      // Randomly blink/shift
+      if (Math.random() > 0.8) {
+        ctx.globalAlpha = finalAlpha * 0.2;
+      }
+      ctx.beginPath();
+      ctx.arc(p.x + (Math.random() - 0.5) * p.size * 2, p.y + (Math.random() - 0.5) * p.size * 2, p.size * 0.5, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    } else if (settings.type === 'hardstyle-laser') {
+      ctx.save();
+      ctx.strokeStyle = finalColor;
+      ctx.lineWidth = p.size;
+      if (!glowOnBurst) {
+        ctx.shadowBlur = isBeat ? 30 : 10;
+        ctx.shadowColor = finalColor;
+      }
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(p.x - p.vx * 15, p.y - p.vy * 15);
+      ctx.stroke();
+      ctx.restore();
+    } else if (settings.type === 'dnb-neuro') {
+      ctx.save();
+      ctx.fillStyle = finalColor;
+      ctx.strokeStyle = finalColor;
+      ctx.lineWidth = 1;
+      if (!glowOnBurst) {
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = finalColor;
+      }
+      ctx.translate(p.x, p.y);
+      const wobble = Math.sin(Date.now() / 50 + p.hue) * p.size;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, p.size + wobble, p.size - wobble * 0.5, p.angle, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.stroke();
+      ctx.restore();
+    } else if (settings.type === 'speedcore-glitch') {
+      ctx.save();
+      ctx.fillStyle = finalColor;
+      const stretch = isBeat ? 20 : 5;
+      if (!glowOnBurst) {
+        ctx.shadowBlur = 0; // blocky glitch usually lacks blur
+      }
+      ctx.fillRect(p.x - p.size * stretch / 2, p.y - p.size / 2, p.size * stretch, p.size);
+      if (Math.random() > 0.9) {
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(p.x - p.size * stretch, p.y - p.size / 4, p.size * stretch * 2, p.size / 2);
+      }
+      ctx.restore();
+    } else if (settings.type === 'hardcore-pulse') {
+      ctx.save();
+      ctx.strokeStyle = finalColor;
+      ctx.lineWidth = 2;
+      if (!glowOnBurst) {
+        ctx.shadowBlur = 15;
+        ctx.shadowColor = finalColor;
+      }
+      const ringSize = p.size * (1 + (p.burstFlash || 0) * 3);
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, ringSize, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, ringSize * 0.5, 0, Math.PI * 2);
+      ctx.stroke();
+      ctx.restore();
+    } else if (settings.type === 'frenchcore-spark') {
+      ctx.save();
+      ctx.strokeStyle = finalColor;
+      ctx.lineWidth = p.size * 0.3;
+      if (!glowOnBurst) {
+        ctx.shadowBlur = isBeat ? 25 : 10;
+        ctx.shadowColor = finalColor;
+      }
+      ctx.translate(p.x, p.y);
+      ctx.rotate(p.angle);
+      ctx.beginPath();
+      ctx.moveTo(-p.size * 2, 0);
+      ctx.lineTo(p.size * 2, 0);
+      ctx.moveTo(0, -p.size * 2);
+      ctx.lineTo(0, p.size * 2);
+      ctx.stroke();
       ctx.restore();
     }
   }

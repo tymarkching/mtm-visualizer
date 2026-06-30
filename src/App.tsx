@@ -35,15 +35,24 @@ import {
   ArrowDown,
   ArrowRight,
   ArrowDownRight,
-  ArrowUpRight
+  ArrowUpRight,
+  Share2
 } from 'lucide-react';
+import localforage from 'localforage';
 import { guess } from 'web-audio-beat-detector';
+import GIF from 'gif.js';
+// @ts-ignore
+import gifWorkerStr from 'gif.js/dist/gif.worker.js?raw';
+const gifWorker = URL.createObjectURL(new Blob([gifWorkerStr], { type: 'application/javascript' }));
 import {
   VisualizerStyle,
   ParticleType,
   VisualizerSettings,
   ParticleSettings,
   TitleOverlaySettings,
+  SubtitleSettings,
+  SubtitleEffect,
+  LyricLine,
   BackgroundSettings,
   AudioTrack,
   ExportSettings,
@@ -406,6 +415,78 @@ function createPitchShifter(ctx: AudioContext) {
   };
 }
 
+const parseSubtitles = (text: string): LyricLine[] => {
+  if (text.includes('-->')) {
+    const lines = text.split('\n');
+    const lyrics: LyricLine[] = [];
+    let currentText = '';
+    let currentTime = -1;
+    let endTime = -1;
+
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim();
+      if (/^\d+$/.test(line)) {
+        continue;
+      } else if (line.includes('-->')) {
+        const parts = line.split('-->');
+        if (parts.length === 2) {
+          const parseTime = (timeStr: string) => {
+            const hms = timeStr.trim().split(':');
+            if (hms.length < 2) return -1;
+            const h = hms.length === 3 ? parseInt(hms[0], 10) : 0;
+            const mStr = hms.length === 3 ? hms[1] : hms[0];
+            const sStr = hms.length === 3 ? hms[2] : hms[1];
+            const m = parseInt(mStr, 10) || 0;
+            const sMilli = sStr.split(/[,.]/);
+            const s = parseInt(sMilli[0], 10) || 0;
+            const ms = parseInt(sMilli[1], 10) || 0;
+            return h * 3600 + m * 60 + s + ms / 1000;
+          };
+          currentTime = parseTime(parts[0]);
+          endTime = parseTime(parts[1]);
+        }
+      } else if (line === '') {
+        if (currentTime !== -1) {
+          lyrics.push({ time: currentTime, text: currentText.trim() });
+          if (endTime !== -1) {
+             lyrics.push({ time: endTime, text: '' }); // Clear subtitle
+          }
+          currentText = '';
+          currentTime = -1;
+          endTime = -1;
+        }
+      } else {
+        currentText += (currentText ? '\n' : '') + line;
+      }
+    }
+    if (currentTime !== -1) {
+      lyrics.push({ time: currentTime, text: currentText.trim() });
+      if (endTime !== -1) {
+         lyrics.push({ time: endTime, text: '' });
+      }
+    }
+    return lyrics.sort((a, b) => a.time - b.time);
+  }
+
+  const lines = text.split('\n');
+  const lyrics: LyricLine[] = [];
+  const timeRegex = /\[(\d{2}):(\d{2})\.(\d{2,3})\]/;
+  for (const line of lines) {
+    const match = timeRegex.exec(line);
+    if (match) {
+      const min = parseInt(match[1], 10);
+      const sec = parseInt(match[2], 10);
+      let msStr = match[3];
+      if (msStr.length === 2) msStr += '0';
+      const ms = parseInt(msStr, 10);
+      const time = min * 60 + sec + ms / 1000;
+      const parsedText = line.replace(timeRegex, '').trim();
+      lyrics.push({ time, parsedText } as any);
+    }
+  }
+  return lyrics.map(l => ({time: l.time, text: (l as any).parsedText})).sort((a, b) => a.time - b.time);
+};
+
 export default function App() {
   // Navigation Tabs state
   const [activeTab, setActiveTab] = useState<'track' | 'background' | 'visuals' | 'particles' | 'overlay' | 'text' | 'export' | 'sfx'>('track');
@@ -418,6 +499,28 @@ export default function App() {
   }));
   const [background, setBackground] = useState<BackgroundSettings>(PRESETS[0].background);
   const [titleOverlay, setTitleOverlay] = useState<TitleOverlaySettings>(PRESETS[0].title);
+
+  const [subtitles, setSubtitles] = useState<SubtitleSettings>({
+    enabled: false,
+    lyrics: [],
+    lrcString: '',
+    fontSize: 32,
+    color: '#ffffff',
+    glowColor: '#ff007f',
+    glowIntensity: 15,
+    fontFamily: 'Inter',
+    effect: 'static',
+    yOffset: 85,
+    backgroundOpacity: 0,
+    shadowOffset: 0,
+    transition: 'none',
+    outlineEnabled: false,
+    outlineColor: '#000000',
+    outlineThickness: 2,
+    align: 'center',
+    karaokeFillColor: '#ffff00',
+  });
+  const subtitlesRef = useRef(subtitles);
 
   // Dedicated Text & Emojis layer state
   const [customText, setCustomText] = useState<string>('');
@@ -640,6 +743,42 @@ export default function App() {
     coverUrl: null,
   });
 
+  const [playlist, setPlaylist] = useState<File[]>([]);
+  const [currentTrackIndex, setCurrentTrackIndex] = useState<number>(0);
+  const [draggedTrackIndex, setDraggedTrackIndex] = useState<number | null>(null);
+
+  // Persistence for playlist
+  useEffect(() => {
+    const saveToStorage = async () => {
+      try {
+        if (playlist.length === 0) {
+          await localforage.removeItem('app_playlist');
+          return;
+        }
+        // LocalForage supports File objects natively using IndexedDB
+        await localforage.setItem('app_playlist', playlist);
+      } catch (err) {
+        console.warn("Could not save playlist to localforage", err);
+      }
+    };
+    saveToStorage();
+  }, [playlist]);
+
+  useEffect(() => {
+    const loadFromStorage = async () => {
+      try {
+        const saved = await localforage.getItem<File[]>('app_playlist');
+        if (saved && Array.isArray(saved) && saved.length > 0) {
+          setPlaylist(saved);
+          setCurrentTrackIndex(0);
+        }
+      } catch (err) {
+        console.warn("Could not load playlist from localforage", err);
+      }
+    };
+    loadFromStorage();
+  }, []);
+
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
   const [volume, setVolume] = useState<number>(0.8);
   const [isMuted, setIsMuted] = useState<boolean>(false);
@@ -659,6 +798,8 @@ export default function App() {
 
   // Drag-and-drop state
   const [isDraggingOver, setIsDraggingOver] = useState<boolean>(false);
+  const [isShareModalOpen, setIsShareModalOpen] = useState<boolean>(false);
+  const [shareThumbnail, setShareThumbnail] = useState<string | null>(null);
 
   // Export State
   const [exportSettings, setExportSettings] = useState<ExportSettings>({
@@ -832,6 +973,7 @@ export default function App() {
       timestamp: new Date().toISOString(),
       thumbnail: thumbnailDataUrl,
       visuals,
+      subtitles,
       particlesSet,
       background: {
         ...background,
@@ -900,6 +1042,13 @@ export default function App() {
           }));
         }
         
+        if (project.subtitles) {
+          setSubtitles(prev => ({
+            ...prev,
+            ...project.subtitles
+          }));
+        }
+
         if (project.particlesSet) {
           setParticlesSet(prev => ({
             ...prev,
@@ -1489,8 +1638,14 @@ export default function App() {
     };
 
     const onEnded = () => {
-      setIsPlaying(false);
-      setCurrentTime(0);
+      if (playlist.length > 0 && currentTrackIndex < playlist.length - 1) {
+        const nextIndex = currentTrackIndex + 1;
+        setCurrentTrackIndex(nextIndex);
+        loadAudioFile(playlist[nextIndex]);
+      } else {
+        setIsPlaying(false);
+        setCurrentTime(0);
+      }
     };
 
     el.addEventListener('timeupdate', onTimeUpdate);
@@ -1502,7 +1657,7 @@ export default function App() {
       el.removeEventListener('loadedmetadata', onLoadedMetadata);
       el.removeEventListener('ended', onEnded);
     };
-  }, [audioTrack.objectUrl]);
+  }, [audioTrack.objectUrl, playlist, currentTrackIndex]);
 
   // Simulated timer loop for playback if there is no audio file loaded but visualizer is playing
   useEffect(() => {
@@ -1526,6 +1681,13 @@ export default function App() {
   }, [isPlaying, audioTrack.file, audioTrack.duration]);
 
   // Handle Drag & Drop uploading processes
+  const handleShareClick = () => {
+    if (canvasRef.current) {
+      setShareThumbnail(canvasRef.current.toDataURL('image/jpeg', 0.5));
+    }
+    setIsShareModalOpen(true);
+  };
+
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
     setIsDraggingOver(true);
@@ -1571,7 +1733,33 @@ export default function App() {
     setTimeout(() => {
       if (audioRef.current) {
         audioRef.current.play()
-          .then(() => setIsPlaying(true))
+          .then(() => {
+            setIsPlaying(true);
+            
+            // Auto fade-in/out logic for continuous playback
+            if (gainNodeRef.current && audioContextRef.current) {
+              const ctx = audioContextRef.current;
+              const now = ctx.currentTime;
+              const fadeIn = visuals.fadeInDuration !== undefined ? visuals.fadeInDuration : 0;
+              const fadeOut = visuals.fadeOutDuration !== undefined ? visuals.fadeOutDuration : 0;
+              const duration = audioRef.current ? audioRef.current.duration : 30;
+
+              gainNodeRef.current.gain.cancelScheduledValues(now);
+
+              if (fadeIn > 0) {
+                gainNodeRef.current.gain.setValueAtTime(0, now);
+                gainNodeRef.current.gain.linearRampToValueAtTime(1.0, now + fadeIn);
+              } else {
+                gainNodeRef.current.gain.setValueAtTime(1.0, now);
+              }
+
+              if (fadeOut > 0 && duration > fadeOut && !isNaN(duration)) {
+                const fadeOutStartTime = now + duration - fadeOut;
+                gainNodeRef.current.gain.setValueAtTime(1.0, fadeOutStartTime);
+                gainNodeRef.current.gain.linearRampToValueAtTime(0, now + duration);
+              }
+            }
+          })
           .catch(e => console.log('Auto-play blocked, waiting for interaction'));
       }
     }, 150);
@@ -2239,17 +2427,26 @@ export default function App() {
     setIsDraggingOver(false);
     
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
-      const file = e.dataTransfer.files[0];
-      const type = file.type;
-
-      if (type.startsWith('audio/')) {
-        loadAudioFile(file);
-      } else if (type.startsWith('image/')) {
-        loadBackgroundImgFile(file);
-      } else if (type.startsWith('video/') || type === 'video/quicktime' || file.name.toLowerCase().endsWith('.mov')) {
-        loadBackgroundVidFile(file);
+      const filesArray = Array.from(e.dataTransfer.files) as File[];
+      
+      // If multiple files are dropped, filter for audio files
+      const audioFiles = filesArray.filter(file => file.type.startsWith('audio/'));
+      
+      if (audioFiles.length > 0) {
+        setPlaylist(audioFiles);
+        setCurrentTrackIndex(0);
+        loadAudioFile(audioFiles[0]);
       } else {
-        alert("Unsupported file format! Please drop an audio, image, or video file.");
+        const file = filesArray[0];
+        const type = file.type;
+
+        if (type.startsWith('image/')) {
+          loadBackgroundImgFile(file);
+        } else if (type.startsWith('video/') || type === 'video/quicktime' || file.name.toLowerCase().endsWith('.mov')) {
+          loadBackgroundVidFile(file);
+        } else {
+          alert("Unsupported file format! Please drop an audio, image, or video file.");
+        }
       }
     }
   };
@@ -2257,7 +2454,10 @@ export default function App() {
   // Traditional manual file picker triggers
   const handleManualAudioUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
-      loadAudioFile(e.target.files[0]);
+      const filesArray = Array.from(e.target.files) as File[];
+      setPlaylist(filesArray);
+      setCurrentTrackIndex(0);
+      loadAudioFile(filesArray[0]);
     }
   };
 
@@ -2394,6 +2594,7 @@ export default function App() {
   useEffect(() => { particlesSetRef.current = particlesSet; }, [particlesSet]);
   useEffect(() => { backgroundRef.current = background; }, [background]);
   useEffect(() => { titleOverlayRef.current = titleOverlay; }, [titleOverlay]);
+  useEffect(() => { subtitlesRef.current = subtitles; }, [subtitles]);
   useEffect(() => { currentTimeRef.current = currentTime; }, [currentTime]);
   useEffect(() => { durationRef.current = audioTrack.duration; }, [audioTrack.duration]);
   useEffect(() => { isExportingRef.current = isExporting; }, [isExporting]);
@@ -3541,6 +3742,261 @@ export default function App() {
         }
       }
 
+      if (subtitlesRef.current?.enabled && subtitlesRef.current.lyrics.length > 0) {
+        const subs = subtitlesRef.current;
+        const currentT = currentFrameOverrideRef.current 
+            ? ((currentFrameOverrideRef.current as any).currentTime || 0) 
+            : (audioRef.current?.currentTime || currentTimeRef.current || 0);
+            
+        let currentLine = '';
+        let currentLineIndex = -1;
+        for (let i = 0; i < subs.lyrics.length; i++) {
+          if (subs.lyrics[i].time <= currentT) {
+            currentLine = subs.lyrics[i].text;
+            currentLineIndex = i;
+          } else {
+            break;
+          }
+        }
+
+        if (currentLine && currentLine.trim() !== '') {
+          ctx.save();
+          ctx.textAlign = subs.align || 'center';
+          ctx.textBaseline = 'middle';
+          const fontSize = subs.fontSize || 42;
+          ctx.font = `800 ${fontSize}px ${subs.fontFamily}`;
+          
+          let renderX = canvas.width / 2;
+          if (subs.align === 'left') renderX = canvas.width * 0.1;
+          if (subs.align === 'right') renderX = canvas.width * 0.9;
+          
+          let renderY = (subs.yOffset / 100) * canvas.height;
+          
+          let alpha = 1.0;
+          let scaleX = 1.0;
+          let scaleY = 1.0;
+          let rotation = 0;
+          
+          const effect = subs.effect;
+          const transition = subs.transition || 'none';
+          const timeSinceStart = currentT - subs.lyrics[currentLineIndex].time;
+          const timeUntilNext = (currentLineIndex < subs.lyrics.length - 1) ? subs.lyrics[currentLineIndex+1].time - currentT : 999;
+          const lineDuration = (currentLineIndex < subs.lyrics.length - 1) ? subs.lyrics[currentLineIndex+1].time - subs.lyrics[currentLineIndex].time : 2.0;
+          const progress = Math.max(0, Math.min(1.0, timeSinceStart / (lineDuration || 2.0)));
+          
+          // Apply Transitions
+          if (transition === 'slide-in-from-left') {
+             if (timeSinceStart < 0.4) renderX -= (0.4 - timeSinceStart) * 500;
+          } else if (transition === 'slide-in-from-right') {
+             if (timeSinceStart < 0.4) renderX += (0.4 - timeSinceStart) * 500;
+          } else if (transition === 'blur-reveal') {
+             if (timeSinceStart < 0.4) ctx.filter = `blur(${(0.4 - timeSinceStart) * 20}px)`;
+          } else if (transition === 'scale-pop') {
+             if (timeSinceStart < 0.4) {
+               scaleX = scaleY = 0.5 + (timeSinceStart / 0.4) * 0.5;
+             }
+          }
+          
+          // Apply Visual Effects (at least 20 options handled)
+          if (effect === 'fade') {
+             if (timeSinceStart < 0.4) alpha = timeSinceStart / 0.4;
+             if (timeUntilNext < 0.4) alpha = timeUntilNext / 0.4;
+          } else if (effect === 'slide-up') {
+             if (timeSinceStart < 0.4) renderY += (0.4 - timeSinceStart) * 150;
+          } else if (effect === 'slide-down') {
+             if (timeSinceStart < 0.4) renderY -= (0.4 - timeSinceStart) * 150;
+          } else if (effect === 'slide-left') {
+             if (timeSinceStart < 0.4) renderX += (0.4 - timeSinceStart) * 300;
+          } else if (effect === 'slide-right') {
+             if (timeSinceStart < 0.4) renderX -= (0.4 - timeSinceStart) * 300;
+          } else if (effect === 'zoom-in') {
+             if (timeSinceStart < 0.4) {
+               scaleX = scaleY = 0.5 + (timeSinceStart / 0.4) * 0.5;
+               alpha = timeSinceStart / 0.4;
+             }
+          } else if (effect === 'zoom-out') {
+             if (timeSinceStart < 0.4) {
+               scaleX = scaleY = 1.5 - (timeSinceStart / 0.4) * 0.5;
+               alpha = timeSinceStart / 0.4;
+             }
+          } else if (effect === 'pop') {
+             if (timeSinceStart < 0.3) {
+               scaleX = scaleY = 1.0 + Math.sin(timeSinceStart * Math.PI / 0.3) * 0.3;
+             }
+          } else if (effect === 'bounce') {
+             if (timeSinceStart < 0.6) {
+                renderY += Math.sin(timeSinceStart * Math.PI * 3) * (0.6 - timeSinceStart) * 100;
+             }
+          } else if (effect === 'shake') {
+             renderX += (Math.random() - 0.5) * (isBeat ? 15 : 2);
+             renderY += (Math.random() - 0.5) * (isBeat ? 15 : 2);
+          } else if (effect === 'wave') {
+             renderY += Math.sin(currentT * 5) * 15;
+          } else if (effect === 'flip-x') {
+             if (timeSinceStart < 0.5) {
+               scaleX = Math.cos(timeSinceStart * Math.PI * 2);
+             }
+          } else if (effect === 'flip-y') {
+             if (timeSinceStart < 0.5) {
+               scaleY = Math.cos(timeSinceStart * Math.PI * 2);
+             }
+          } else if (effect === 'rotate-in') {
+             if (timeSinceStart < 0.5) {
+               rotation = (0.5 - timeSinceStart) * Math.PI;
+               scaleX = scaleY = timeSinceStart / 0.5;
+               alpha = timeSinceStart / 0.5;
+             }
+          } else if (effect === 'blur-in') {
+             if (timeSinceStart < 0.5) {
+               ctx.filter = `blur(${(0.5 - timeSinceStart) * 20}px)`;
+               alpha = timeSinceStart / 0.5;
+             }
+          } else if (effect === 'glitch') {
+             if (Math.random() < 0.1 || isBeat) {
+                renderX += (Math.random() - 0.5) * 20;
+                ctx.fillStyle = Math.random() > 0.5 ? 'red' : 'cyan';
+             }
+          } else if (effect === 'neon-pulse') {
+             alpha = 0.5 + Math.abs(Math.sin(currentT * 4)) * 0.5;
+          } else if (effect === 'liquid') {
+             renderX += Math.sin(currentT * 3) * 10;
+             scaleY = 1.0 + Math.cos(currentT * 5) * 0.1;
+          } else if (effect === 'typewriter') {
+             const charCount = Math.floor(timeSinceStart * 15);
+             if (charCount < currentLine.length) {
+               currentLine = currentLine.substring(0, charCount);
+             }
+          } else if (effect === 'color-shift') {
+             const hue = (currentT * 50) % 360;
+             ctx.fillStyle = `hsl(${hue}, 100%, 70%)`;
+          } else if (effect === '3d-flip') {
+             if (timeSinceStart < 0.6) {
+               scaleY = Math.abs(Math.cos(timeSinceStart * Math.PI / 0.6));
+             }
+          } else if (effect === 'pixelate') {
+             if (timeSinceStart < 0.3) {
+               ctx.filter = `blur(${(0.3 - timeSinceStart) * 10}px)`;
+             }
+          } else if (effect === 'shatter') {
+             if (timeUntilNext < 0.3) {
+               renderY += (0.3 - timeUntilNext) * 50;
+               alpha = timeUntilNext / 0.3;
+             }
+          } else if (effect === 'fire') {
+             ctx.shadowColor = '#ff4500';
+             ctx.shadowBlur = 20 + Math.random() * 15;
+             renderY -= Math.random() * 5;
+          }
+          // (Other effects fallback to static/default rendering)
+          
+          ctx.globalAlpha = Math.max(0, Math.min(1, alpha));
+          ctx.translate(renderX, renderY);
+          ctx.scale(scaleX, scaleY);
+          ctx.rotate(rotation);
+
+          // Draw Background Box if Opacity > 0
+          if (subs.backgroundOpacity > 0) {
+             const textMetrics = ctx.measureText(currentLine);
+             const tw = textMetrics.width;
+             const th = fontSize;
+             ctx.save();
+             ctx.fillStyle = `rgba(0, 0, 0, ${subs.backgroundOpacity / 100})`;
+             let boxX = 0;
+             if (subs.align === 'center') boxX = -tw/2;
+             else if (subs.align === 'right') boxX = -tw;
+             ctx.fillRect(boxX - 20, -th/2 - 10, tw + 40, th + 20);
+             ctx.restore();
+          }
+
+          const glowIntensity = subs.glowIntensity !== undefined ? subs.glowIntensity : 15;
+          ctx.shadowColor = subs.glowColor;
+          ctx.shadowBlur = glowIntensity;
+          ctx.shadowOffsetX = subs.shadowOffset || 0;
+          ctx.shadowOffsetY = subs.shadowOffset || 0;
+          
+          if (effect.startsWith('highlight')) {
+             // Base inactive text
+             ctx.fillStyle = 'rgba(128, 128, 128, 0.4)';
+             ctx.fillText(currentLine, 0, 0);
+             
+             if (subs.outlineEnabled) {
+                 ctx.strokeStyle = subs.outlineColor || '#000000';
+                 ctx.lineWidth = subs.outlineThickness || 2;
+                 ctx.strokeText(currentLine, 0, 0);
+             }
+
+             const textMetrics = ctx.measureText(currentLine);
+             const textWidth = textMetrics.width;
+             
+             let startX = 0;
+             if (subs.align === 'center') startX = -textWidth / 2;
+             else if (subs.align === 'right') startX = -textWidth;
+             
+             let clipWidth = textWidth * progress;
+             
+             if (effect === 'highlight-bounce') {
+                 const bounceScale = 1.0 + Math.sin(progress * Math.PI * 8) * 0.05;
+                 ctx.scale(bounceScale, bounceScale);
+             } else if (effect === 'highlight-word-pop') {
+                 const words = currentLine.split(' ').length;
+                 const wordStep = 1.0 / words;
+                 const currentWord = Math.floor(progress / wordStep);
+                 clipWidth = textWidth * (currentWord * wordStep + wordStep); 
+             } else if (effect === 'highlight-glow-sweep') {
+                 ctx.shadowBlur = glowIntensity * (1.0 + Math.sin(progress * Math.PI) * 2);
+             } else if (effect === 'highlight-fill') {
+                 // sharp clip
+             } else if (effect === 'highlight-karaoke') {
+                 // smooth clip
+             }
+
+             ctx.save();
+             ctx.beginPath();
+             ctx.rect(startX - 20, -100, clipWidth + 20, 200);
+             ctx.clip();
+             
+             if (subs.outlineEnabled) {
+                 ctx.strokeStyle = subs.outlineColor || '#000000';
+                 ctx.lineWidth = subs.outlineThickness || 2;
+                 ctx.strokeText(currentLine, 0, 0);
+             }
+             
+             ctx.fillStyle = (effect === 'highlight-karaoke' && subs.karaokeFillColor) ? subs.karaokeFillColor : subs.color;
+             ctx.fillText(currentLine, 0, 0);
+             
+             ctx.shadowBlur = 0;
+             ctx.shadowOffsetX = 0;
+             ctx.shadowOffsetY = 0;
+             ctx.fillText(currentLine, 0, 0);
+             
+             ctx.restore();
+          } else {
+             // Draw Glow
+             ctx.fillStyle = ctx.fillStyle === '#000000' ? subs.color : ctx.fillStyle;
+             if (effect !== 'glitch' && effect !== 'color-shift') ctx.fillStyle = subs.color;
+             
+             ctx.fillText(currentLine, 0, 0);
+             
+             if (subs.outlineEnabled) {
+                 ctx.strokeStyle = subs.outlineColor || '#000000';
+                 ctx.lineWidth = subs.outlineThickness || 2;
+                 ctx.strokeText(currentLine, 0, 0);
+             }
+             
+             // Inner core
+             ctx.shadowBlur = 0;
+             ctx.shadowOffsetX = 0;
+             ctx.shadowOffsetY = 0;
+             if (effect !== 'glitch' && effect !== 'color-shift') ctx.fillStyle = subs.color;
+             ctx.globalAlpha = ctx.globalAlpha * 1.0;
+             ctx.fillText(currentLine, 0, 0);
+          }
+          
+          ctx.filter = 'none'; // reset filter
+          ctx.restore();
+        }
+      }
+
       // 5. Dynamic Progress Bar Line overlay
       drawProgressBar(
         ctx,
@@ -3886,6 +4342,121 @@ export default function App() {
 
       setExportTimeRemaining("Initializing browser-native video encoder tracks...");
 
+      if (exportSettings.format === 'gif') {
+        totalDuration = Math.min(totalDuration, 5); // Short snippet
+        setExportTimeRemaining("Initializing GIF renderer...");
+        
+        const gif = new GIF({
+          workers: 2,
+          quality: 10,
+          workerScript: gifWorker,
+          width: canvas.width,
+          height: canvas.height,
+        });
+
+        // Reset playables currentTime
+        if (audioRef.current) {
+          audioRef.current.currentTime = 0;
+          audioRef.current.playbackRate = 1.0;
+        }
+        if (overlayVideoRef.current) {
+          overlayVideoRef.current.currentTime = 0;
+          overlayVideoRef.current.playbackRate = 1.0;
+        }
+
+        // Schedule smooth Audio Fade In / Out during export
+        if (gainNodeRef.current && audioContextRef.current) {
+          const ctx = audioContextRef.current;
+          const now = ctx.currentTime;
+          const fadeIn = visuals.fadeInDuration !== undefined ? visuals.fadeInDuration : 0;
+          const fadeOut = visuals.fadeOutDuration !== undefined ? visuals.fadeOutDuration : 0;
+
+          gainNodeRef.current.gain.cancelScheduledValues(now);
+
+          // Apply Fade In
+          if (fadeIn > 0) {
+            gainNodeRef.current.gain.setValueAtTime(0, now);
+            gainNodeRef.current.gain.linearRampToValueAtTime(1.0, now + fadeIn);
+          } else {
+            gainNodeRef.current.gain.setValueAtTime(1.0, now);
+          }
+
+          // Apply Fade Out
+          if (fadeOut > 0 && totalDuration > fadeOut) {
+            const fadeOutStartTime = now + totalDuration - fadeOut;
+            gainNodeRef.current.gain.setValueAtTime(1.0, fadeOutStartTime);
+            gainNodeRef.current.gain.linearRampToValueAtTime(0, now + totalDuration);
+          }
+        }
+
+        // Triggers physical play of background audio files at 1x speed during export
+        if (audioRef.current) {
+          audioRef.current.muted = false;
+          if (audioTrack.file) {
+            await audioRef.current.play();
+          }
+          setIsPlaying(true);
+        }
+
+        const startTime = Date.now();
+        const recordingPromise = new Promise<void>((resolve, reject) => {
+          let lastCaptureTime = 0;
+          const checkProgress = () => {
+            if (isExportingCancelledRef.current) {
+              reject(new Error("Export cancelled"));
+              return;
+            }
+
+            const now = Date.now();
+            const elapsed = (now - startTime) / 1000;
+            const progress = (elapsed / totalDuration) * 100;
+            setExportProgress(Math.min(99, progress));
+            
+            // Capture around 15fps for GIF to save memory and size
+            if (now - lastCaptureTime >= 1000/15) {
+               gif.addFrame(canvas, { copy: true, delay: Math.max(10, now - lastCaptureTime) });
+               lastCaptureTime = now;
+            }
+
+            if (elapsed >= totalDuration) {
+              resolve();
+            } else {
+              requestAnimationFrame(checkProgress);
+            }
+          }
+          requestAnimationFrame(checkProgress);
+        });
+        
+        await recordingPromise;
+        
+        handleStopPlayback();
+        
+        setExportTimeRemaining("Rendering GIF (this might take a while)...");
+        
+        const gifBlob = await new Promise<Blob>((resolve) => {
+          gif.on('finished', (blob) => resolve(blob));
+          gif.render();
+        });
+        
+        const videoUrl = URL.createObjectURL(gifBlob);
+        setExportedVideoUrl(videoUrl);
+        setIsExporting(false);
+        isExportingRef.current = false;
+        setExportProgress(100);
+        setExportTimeRemaining("Completed");
+        
+        const a = document.createElement("a");
+        a.href = videoUrl;
+        
+        const originalSongTitle = audioTrack.file 
+          ? audioTrack.file.name.replace(/\.[^/.]+$/, "") 
+          : audioTrack.name;
+        a.download = `${originalSongTitle} - Snippet.gif`;
+        a.click();
+        
+        return;
+      }
+
       // 1. Setup standard browser canvas capture stream with explicit frame rate of 60 FPS
       const canvasStream = canvas.captureStream(60);
       const combinedStream = new MediaStream();
@@ -4153,6 +4724,91 @@ export default function App() {
       bgVideoRef.current.pause();
     }
     bgVideoRef.current = null;
+  };
+
+  const handleExportPlaylistJSON = () => {
+    if (playlist.length === 0) return;
+    const playlistMetadata = playlist.map(file => ({
+      name: file.name,
+      size: file.size,
+      type: file.type,
+      lastModified: file.lastModified
+    }));
+    
+    const blob = new Blob([JSON.stringify(playlistMetadata, null, 2)], { type: 'application/json' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = `playlist_${Date.now()}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+  };
+
+  const handleShufflePlaylist = () => {
+    if (playlist.length <= 1) return;
+    const shuffled = [...playlist];
+    // Fisher-Yates shuffle
+    for (let i = shuffled.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    setPlaylist(shuffled);
+    setCurrentTrackIndex(0);
+    loadAudioFile(shuffled[0]);
+  };
+
+  const handleDragStartTrack = (index: number) => {
+    setDraggedTrackIndex(index);
+  };
+
+  const handleDragOverTrack = (e: React.DragEvent, index: number) => {
+    e.preventDefault();
+  };
+
+  const handleDropTrack = (e: React.DragEvent, dropIndex: number) => {
+    e.preventDefault();
+    if (draggedTrackIndex === null || draggedTrackIndex === dropIndex) return;
+
+    const newPlaylist = [...playlist];
+    const [draggedItem] = newPlaylist.splice(draggedTrackIndex, 1);
+    newPlaylist.splice(dropIndex, 0, draggedItem);
+    
+    setPlaylist(newPlaylist);
+    
+    if (currentTrackIndex === draggedTrackIndex) {
+      setCurrentTrackIndex(dropIndex);
+    } else if (draggedTrackIndex < currentTrackIndex && dropIndex >= currentTrackIndex) {
+      setCurrentTrackIndex(currentTrackIndex - 1);
+    } else if (draggedTrackIndex > currentTrackIndex && dropIndex <= currentTrackIndex) {
+      setCurrentTrackIndex(currentTrackIndex + 1);
+    }
+
+    setDraggedTrackIndex(null);
+  };
+
+  const handleRemoveTrack = (e: React.MouseEvent, index: number) => {
+    e.stopPropagation();
+    const newPlaylist = playlist.filter((_, i) => i !== index);
+    setPlaylist(newPlaylist);
+    
+    if (newPlaylist.length === 0) {
+      clearAudioTrack();
+      setCurrentTrackIndex(0);
+    } else {
+      if (index === currentTrackIndex) {
+        const nextIndex = index >= newPlaylist.length ? newPlaylist.length - 1 : index;
+        setCurrentTrackIndex(nextIndex);
+        loadAudioFile(newPlaylist[nextIndex]);
+      } else if (index < currentTrackIndex) {
+        setCurrentTrackIndex(currentTrackIndex - 1);
+      }
+    }
+  };
+
+  const handleClearPlaylist = () => {
+    clearAudioTrack();
+    setPlaylist([]);
+    setCurrentTrackIndex(0);
   };
 
   const clearAudioTrack = () => {
@@ -4640,6 +5296,7 @@ export default function App() {
                 <div className="bg-zinc-900/40 border border-dashed border-zinc-800 rounded-lg p-5 text-center relative group">
                   <input
                     type="file"
+                    multiple
                     accept="audio/*,video/*,.mp3,.wav,.flac,.ogg,.mp4,.m4a"
                     id="audio-selector"
                     onChange={handleManualAudioUpload}
@@ -4650,30 +5307,90 @@ export default function App() {
                       <Music className="w-4 h-4 text-blue-500" />
                     </div>
                     <div>
-                      <p className="text-xs text-zinc-300 font-medium font-sans">Click or Drag & Drop audio or video file</p>
+                      <p className="text-xs text-zinc-300 font-medium font-sans">Click or Drag & Drop multiple music tracks (Playlist Support)</p>
                       <p className="text-[10px] text-zinc-500 font-mono mt-0.5">Supports MP3, WAV, FLAC, OGG, M4A, MP4</p>
                     </div>
                   </div>
                 </div>
 
-                {audioTrack.file && (
-                  <div className="bg-zinc-900 border border-zinc-800 rounded-lg p-3.5 flex items-center justify-between">
-                    <div className="flex items-center space-x-3 overflow-hidden">
-                      <div className="w-9 h-9 rounded bg-blue-500/10 border border-blue-500/20 flex items-center justify-center shrink-0">
-                        <Music className="w-4 h-4 text-blue-500 animate-pulse" />
-                      </div>
-                      <div className="overflow-hidden">
-                        <p className="text-xs text-zinc-100 font-medium truncate">{audioTrack.name}</p>
-                        <p className="text-[10px] text-zinc-500 font-mono truncate mt-0.5">Custom file loaded • Sync ready</p>
+                {playlist.length > 0 && (
+                  <div className="flex flex-col space-y-2 pt-2">
+                    <div className="flex items-center justify-between px-1 mb-1">
+                      <span className="text-[10px] font-mono text-zinc-500 uppercase tracking-wider">Playlist Queue ({playlist.length})</span>
+                      <div className="flex items-center space-x-2">
+                        <button 
+                          onClick={handleExportPlaylistJSON} 
+                          className="text-zinc-500 hover:text-blue-400 p-1 rounded transition-colors text-[10px] font-mono flex items-center space-x-1" 
+                          title="Export Playlist Configuration"
+                        >
+                           <Save className="w-3 h-3" /> <span>Export JSON</span>
+                        </button>
+                        <button 
+                          onClick={handleShufflePlaylist} 
+                          className="text-zinc-500 hover:text-lime-400 p-1 rounded transition-colors text-[10px] font-mono flex items-center space-x-1" 
+                          title="Shuffle Playlist"
+                        >
+                           <Shuffle className="w-3 h-3" /> <span>Shuffle</span>
+                        </button>
+                        <button 
+                          onClick={handleClearPlaylist} 
+                          className="text-zinc-500 hover:text-red-400 p-1 rounded transition-colors text-[10px] font-mono flex items-center space-x-1" 
+                          title="Clear All"
+                        >
+                           <Trash2 className="w-3 h-3" /> <span>Clear All</span>
+                        </button>
                       </div>
                     </div>
-                    <button
-                      onClick={clearAudioTrack}
-                      className="text-zinc-500 hover:text-red-400 p-1.5 rounded hover:bg-red-500/15 transition-all cursor-pointer"
-                      title="Clear Custom File"
-                    >
-                      <Trash2 className="w-4 h-4" />
-                    </button>
+                    <div className="max-h-48 overflow-y-auto space-y-2 pr-1 custom-scrollbar">
+                      <AnimatePresence>
+                        {playlist.map((track, index) => {
+                          const isActive = index === currentTrackIndex;
+                          return (
+                            <motion.div
+                              layout
+                              initial={{ opacity: 0, y: -10 }}
+                              animate={{ opacity: 1, y: 0 }}
+                              exit={{ opacity: 0, scale: 0.9, transition: { duration: 0.2 } }}
+                              key={`${track.name}-${track.size}-${index}`}
+                              draggable
+                              onDragStart={() => handleDragStartTrack(index)}
+                              onDragOver={(e) => handleDragOverTrack(e, index)}
+                              onDrop={(e) => handleDropTrack(e, index)}
+                              onClick={() => {
+                                setCurrentTrackIndex(index);
+                                loadAudioFile(playlist[index]);
+                              }}
+                              className={`flex items-center justify-between rounded-lg p-3.5 cursor-pointer transition-all border ${
+                                isActive
+                                  ? 'bg-lime-950/40 border-lime-500/50 text-lime-400'
+                                  : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:bg-zinc-800/80 hover:text-zinc-300'
+                              } ${draggedTrackIndex === index ? 'opacity-50' : 'opacity-100'}`}
+                            >
+                              <div className="flex items-center space-x-3 overflow-hidden">
+                                <div className={`w-9 h-9 rounded flex items-center justify-center shrink-0 ${isActive ? 'bg-lime-500/10 border border-lime-500/20 text-lime-400' : 'bg-zinc-800/50 text-zinc-500'}`}>
+                                  {isActive ? <Activity className="w-4 h-4 animate-pulse" /> : <span className="text-[10px] font-mono font-bold">{index + 1}</span>}
+                                </div>
+                                <div className="overflow-hidden text-left">
+                                  <p className={`text-xs font-medium truncate ${isActive ? 'text-lime-300' : 'text-zinc-300'}`}>{track.name}</p>
+                                  {isActive ? (
+                                    <p className="text-[10px] text-lime-500/80 font-mono truncate mt-0.5 uppercase">Now Playing</p>
+                                  ) : (
+                                    <p className="text-[10px] text-zinc-500 font-mono truncate mt-0.5">Queued</p>
+                                  )}
+                                </div>
+                              </div>
+                              <button
+                                onClick={(e) => handleRemoveTrack(e, index)}
+                                className={`${isActive ? 'text-lime-500/50 hover:text-red-400' : 'text-zinc-600 hover:text-red-400'} p-1.5 rounded hover:bg-red-500/15 transition-all shrink-0`}
+                                title="Remove Track"
+                              >
+                                <Trash2 className="w-4 h-4" />
+                              </button>
+                            </motion.div>
+                          );
+                        })}
+                      </AnimatePresence>
+                    </div>
                   </div>
                 )}
 
@@ -6978,7 +7695,15 @@ export default function App() {
                         { id: 'floating-bubbles', name: 'Floating Bubbles' },
                         { id: 'music-notes', name: 'Music Notes' },
                         { id: 'glitch-vectors', name: 'Glitch Vectors' },
-                        { id: 'swerve-plexus', name: 'Swerve Plexus' }
+                        { id: 'swerve-plexus', name: 'Swerve Plexus' },
+                        { id: 'electro-storm', name: 'Electro-Storm' },
+                        { id: 'liquid-gold', name: 'Liquid Gold' },
+                        { id: 'quantum-snow', name: 'Quantum Snow' },
+                        { id: 'hardstyle-laser', name: 'Hardstyle Laser' },
+                        { id: 'dnb-neuro', name: 'DnB Neuro' },
+                        { id: 'speedcore-glitch', name: 'Speedcore Glitch' },
+                        { id: 'hardcore-pulse', name: 'Hardcore Pulse' },
+                        { id: 'frenchcore-spark', name: 'Frenchcore Spark' }
                       ].map((item) => (
                         <button
                           key={item.id}
@@ -9272,6 +9997,307 @@ export default function App() {
                       )}
                     </div>
                   </div>
+
+                  {/* Lyrics / Subtitles Component */}
+                  <div className="bg-zinc-900 border border-zinc-805 rounded-xl p-4 space-y-4 shadow-sm shadow-black/20">
+                    <div className="flex items-center justify-between border-b border-zinc-800/80 pb-3">
+                      <div className="flex items-center space-x-2">
+                        <Type className="w-4 h-4 text-purple-400" />
+                        <div>
+                          <h4 className="text-[11px] font-bold text-zinc-300 font-mono tracking-wide uppercase">Auto-Sync Subtitles (SRT / LRC)</h4>
+                          <p className="text-[9px] text-zinc-500 font-sans mt-0.5">Upload a .srt file or paste LRC text for synced subtitles.</p>
+                        </div>
+                      </div>
+                      <div className="flex items-center">
+                        <input
+                          type="checkbox"
+                          id="enable-subtitles"
+                          checked={subtitles.enabled}
+                          onChange={(e) => setSubtitles(prev => ({ ...prev, enabled: e.target.checked }))}
+                          className="w-3.5 h-3.5 rounded border border-zinc-850 bg-zinc-950 text-purple-500 focus:ring-purple-500 cursor-pointer accent-purple-500"
+                        />
+                        <label htmlFor="enable-subtitles" className="ml-1.5 text-[9.5px] font-mono text-zinc-300 cursor-pointer select-none">
+                          ENABLE
+                        </label>
+                      </div>
+                    </div>
+
+                    {subtitles.enabled && (
+                      <div className="space-y-4">
+                        <div className="space-y-1.5">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-wide flex items-center space-x-2">
+                              <span>Subtitle Text (SRT / LRC)</span>
+                              {subtitles.lyrics.length > 0 && (
+                                <span className="text-purple-400">Parsed: {subtitles.lyrics.length} lines</span>
+                              )}
+                            </label>
+                            <div>
+                              <input
+                                type="file"
+                                id="srt-upload"
+                                accept=".srt,.txt,.lrc"
+                                className="hidden"
+                                onChange={(e) => {
+                                  const file = e.target.files?.[0];
+                                  if (file) {
+                                    const reader = new FileReader();
+                                    reader.onload = (evt) => {
+                                      const val = evt.target?.result as string;
+                                      setSubtitles(prev => ({
+                                        ...prev,
+                                        lrcString: val,
+                                        lyrics: parseSubtitles(val)
+                                      }));
+                                    };
+                                    reader.readAsText(file);
+                                  }
+                                }}
+                              />
+                              <label
+                                htmlFor="srt-upload"
+                                className="bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[9px] font-mono px-2 py-1 rounded cursor-pointer transition-colors border border-zinc-700"
+                              >
+                                Upload .SRT
+                              </label>
+                            </div>
+                          </div>
+                          <textarea
+                            className="w-full bg-zinc-950 border border-zinc-805 rounded p-2 text-[10px] font-mono text-zinc-300 h-28 focus:outline-none focus:border-purple-500 resize-y placeholder:text-zinc-700"
+                            placeholder="[00:00.00] Paste LRC lyrics here...\nOr upload an .srt file above..."
+                            value={subtitles.lrcString}
+                            onChange={(e) => {
+                              const val = e.target.value;
+                              setSubtitles(prev => ({
+                                ...prev,
+                                lrcString: val,
+                                lyrics: parseSubtitles(val)
+                              }));
+                            }}
+                          />
+                        </div>
+                        
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-wide">Animation Effect</label>
+                            <select
+                              className="w-full bg-zinc-950 border border-zinc-805 rounded p-1.5 text-[10px] font-mono text-zinc-300 focus:outline-none focus:border-purple-500 cursor-pointer"
+                              value={subtitles.effect}
+                              onChange={(e) => setSubtitles(prev => ({ ...prev, effect: e.target.value as any }))}
+                            >
+                              {[
+                                'static', 'fade', 'typewriter', 'pop', 'slide-up', 'slide-down', 'slide-left', 'slide-right', 'zoom-in', 'zoom-out',
+                                'glow', 'blur-in', 'flip-x', 'flip-y', 'bounce', 'shake', 'glitch', 'wave', 'color-shift', 'rotate-in',
+                                '3d-flip', 'neon-pulse', 'pixelate', 'shatter', 'liquid', 'fire',
+                                'highlight-fill', 'highlight-bounce', 'highlight-word-pop', 'highlight-karaoke', 'highlight-glow-sweep'
+                              ].map(eff => (
+                                <option key={eff} value={eff}>{eff.toUpperCase()}</option>
+                              ))}
+                            </select>
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-wide">Font Style</label>
+                            <select
+                              className="w-full bg-zinc-950 border border-zinc-805 rounded p-1.5 text-[10px] font-mono text-zinc-300 focus:outline-none focus:border-purple-500 cursor-pointer"
+                              value={subtitles.fontFamily}
+                              onChange={(e) => setSubtitles(prev => ({ ...prev, fontFamily: e.target.value as any }))}
+                            >
+                              <option value="Inter">Inter (Sans)</option>
+                              <option value="Space Grotesk">Space Grotesk (Tech)</option>
+                              <option value="JetBrains Mono">JetBrains Mono (Code)</option>
+                              <option value="Outfit">Outfit (Geometric)</option>
+                              <option value="Playfair Display">Playfair (Serif)</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3">
+                          <div className="space-y-1.5 text-left">
+                            <div className="flex justify-between font-mono text-[9px] text-zinc-400">
+                              <span>Font Size</span>
+                              <span className="text-white font-semibold">{subtitles.fontSize}px</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="12"
+                              max="120"
+                              value={subtitles.fontSize}
+                              onChange={(e) => setSubtitles(prev => ({ ...prev, fontSize: parseInt(e.target.value) }))}
+                              className="w-full h-1 bg-zinc-950 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                            />
+                          </div>
+                          
+                          <div className="space-y-1.5 text-left">
+                            <div className="flex justify-between font-mono text-[9px] text-zinc-400">
+                              <span>Vertical Pos (Y)</span>
+                              <span className="text-white font-semibold">{subtitles.yOffset}%</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="0"
+                              max="100"
+                              value={subtitles.yOffset}
+                              onChange={(e) => setSubtitles(prev => ({ ...prev, yOffset: parseInt(e.target.value) }))}
+                              className="w-full h-1 bg-zinc-950 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="flex items-center space-x-3 pt-1 border-t border-zinc-800/50">
+                          <div className="flex-1 space-y-1.5">
+                            <label className="text-[9px] font-mono text-zinc-450 uppercase">Text Color</label>
+                            <div className="flex items-center space-x-2">
+                              <input
+                                type="color"
+                                value={subtitles.color}
+                                onChange={(e) => setSubtitles(prev => ({ ...prev, color: e.target.value }))}
+                                className="w-5 h-5 rounded cursor-pointer border-0 p-0 bg-transparent"
+                              />
+                              <span className="text-[10px] font-mono text-zinc-400">{subtitles.color}</span>
+                            </div>
+                          </div>
+                          <div className="flex-1 space-y-1.5">
+                            <div className="flex justify-between items-center">
+                              <label className="text-[9px] font-mono text-zinc-450 uppercase">Glow Intensity ({subtitles.glowIntensity})</label>
+                              <input
+                                type="color"
+                                value={subtitles.glowColor}
+                                onChange={(e) => setSubtitles(prev => ({ ...prev, glowColor: e.target.value }))}
+                                className="w-4 h-4 rounded cursor-pointer border-0 p-0 bg-transparent"
+                              />
+                            </div>
+                            <input
+                              type="range"
+                              min="0"
+                              max="100"
+                              value={subtitles.glowIntensity}
+                              onChange={(e) => setSubtitles(prev => ({ ...prev, glowIntensity: parseInt(e.target.value) }))}
+                              className="w-full h-1 bg-zinc-950 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3 pt-3 border-t border-zinc-800/50">
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-wide">Transition</label>
+                            <select
+                              className="w-full bg-zinc-950 border border-zinc-805 rounded p-1.5 text-[10px] font-mono text-zinc-300 focus:outline-none focus:border-purple-500 cursor-pointer"
+                              value={subtitles.transition}
+                              onChange={(e) => setSubtitles(prev => ({ ...prev, transition: e.target.value as any }))}
+                            >
+                              <option value="none">None</option>
+                              <option value="slide-in-from-left">Slide from Left</option>
+                              <option value="slide-in-from-right">Slide from Right</option>
+                              <option value="blur-reveal">Blur Reveal</option>
+                              <option value="scale-pop">Scale Pop</option>
+                            </select>
+                          </div>
+                          <div className="space-y-1.5">
+                            <label className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-wide">Alignment</label>
+                            <select
+                              className="w-full bg-zinc-950 border border-zinc-805 rounded p-1.5 text-[10px] font-mono text-zinc-300 focus:outline-none focus:border-purple-500 cursor-pointer"
+                              value={subtitles.align}
+                              onChange={(e) => setSubtitles(prev => ({ ...prev, align: e.target.value as any }))}
+                            >
+                              <option value="left">Left</option>
+                              <option value="center">Center</option>
+                              <option value="right">Right</option>
+                            </select>
+                          </div>
+                        </div>
+
+                        <div className="grid grid-cols-2 gap-3 pt-3 border-t border-zinc-800/50">
+                          <div className="space-y-1.5 text-left">
+                            <div className="flex justify-between font-mono text-[9px] text-zinc-400">
+                              <span>Bg Opacity</span>
+                              <span className="text-white font-semibold">{subtitles.backgroundOpacity}%</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="0"
+                              max="100"
+                              value={subtitles.backgroundOpacity}
+                              onChange={(e) => setSubtitles(prev => ({ ...prev, backgroundOpacity: parseInt(e.target.value) }))}
+                              className="w-full h-1 bg-zinc-950 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                            />
+                          </div>
+                          
+                          <div className="space-y-1.5 text-left">
+                            <div className="flex justify-between font-mono text-[9px] text-zinc-400">
+                              <span>Shadow Offset</span>
+                              <span className="text-white font-semibold">{subtitles.shadowOffset}px</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="0"
+                              max="50"
+                              value={subtitles.shadowOffset}
+                              onChange={(e) => setSubtitles(prev => ({ ...prev, shadowOffset: parseInt(e.target.value) }))}
+                              className="w-full h-1 bg-zinc-950 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                            />
+                          </div>
+                        </div>
+
+                        <div className="space-y-3 pt-3 border-t border-zinc-800/50">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-wide">Text Outline</label>
+                            <input
+                              type="checkbox"
+                              checked={subtitles.outlineEnabled}
+                              onChange={(e) => setSubtitles(prev => ({ ...prev, outlineEnabled: e.target.checked }))}
+                              className="w-3.5 h-3.5 rounded border border-zinc-850 bg-zinc-950 text-purple-500 focus:ring-purple-500 cursor-pointer accent-purple-500"
+                            />
+                          </div>
+                          {subtitles.outlineEnabled && (
+                            <div className="flex items-center space-x-3">
+                              <div className="flex-1 space-y-1.5">
+                                <label className="text-[9px] font-mono text-zinc-450 uppercase">Outline Color</label>
+                                <div className="flex items-center space-x-2">
+                                  <input
+                                    type="color"
+                                    value={subtitles.outlineColor}
+                                    onChange={(e) => setSubtitles(prev => ({ ...prev, outlineColor: e.target.value }))}
+                                    className="w-5 h-5 rounded cursor-pointer border-0 p-0 bg-transparent"
+                                  />
+                                </div>
+                              </div>
+                              <div className="flex-1 space-y-1.5 text-left">
+                                <div className="flex justify-between font-mono text-[9px] text-zinc-400">
+                                  <span>Thickness</span>
+                                  <span className="text-white font-semibold">{subtitles.outlineThickness}px</span>
+                                </div>
+                                <input
+                                  type="range"
+                                  min="1"
+                                  max="10"
+                                  value={subtitles.outlineThickness}
+                                  onChange={(e) => setSubtitles(prev => ({ ...prev, outlineThickness: parseInt(e.target.value) }))}
+                                  className="w-full h-1 bg-zinc-950 rounded-lg appearance-none cursor-pointer accent-purple-500"
+                                />
+                              </div>
+                            </div>
+                          )}
+                        </div>
+                        
+                        {subtitles.effect === 'highlight-karaoke' && (
+                          <div className="flex items-center space-x-3 pt-3 border-t border-zinc-800/50">
+                            <div className="flex-1 space-y-1.5">
+                              <label className="text-[9px] font-mono text-zinc-450 uppercase">Karaoke Fill Color</label>
+                              <div className="flex items-center space-x-2">
+                                <input
+                                  type="color"
+                                  value={subtitles.karaokeFillColor}
+                                  onChange={(e) => setSubtitles(prev => ({ ...prev, karaokeFillColor: e.target.value }))}
+                                  className="w-5 h-5 rounded cursor-pointer border-0 p-0 bg-transparent"
+                                />
+                                <span className="text-[10px] font-mono text-zinc-400">{subtitles.karaokeFillColor}</span>
+                              </div>
+                            </div>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
               </div>
             )}
@@ -9575,11 +10601,12 @@ export default function App() {
                   {/* Selector Export Format */}
                   <div className="bg-zinc-900 border border-zinc-805 p-3.5 rounded-lg space-y-3">
                     <label className="block text-[10px] font-semibold text-zinc-400 font-mono uppercase">Output Container Suffix</label>
-                    <div className="grid grid-cols-3 gap-2">
+                    <div className="grid grid-cols-4 gap-2">
                       {[
                         { id: 'mp4', name: '.MP4', desc: 'Universal' },
                         { id: 'mov', name: '.MOV', desc: 'Apple format' },
                         { id: 'webm', name: '.WebM', desc: 'HTML5 raw' },
+                        { id: 'gif', name: '.GIF', desc: '5s snippet' },
                       ].map((item) => (
                         <button
                           key={item.id}
@@ -9720,6 +10747,84 @@ export default function App() {
         <p>Drop audio, image, or video directly into the interface window to customize.</p>
         <p>© 2026 Studio Waveform Builder • Client-Side Muxing Render</p>
       </footer>
+
+      {/* SHARE MODAL */}
+      <AnimatePresence>
+        {isShareModalOpen && (
+          <motion.div
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-6"
+            onClick={() => setIsShareModalOpen(false)}
+          >
+            <motion.div
+              initial={{ scale: 0.95, opacity: 0, y: 20 }}
+              animate={{ scale: 1, opacity: 1, y: 0 }}
+              exit={{ scale: 0.95, opacity: 0, y: 20 }}
+              className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl shadow-2xl max-w-md w-full"
+              onClick={(e) => e.stopPropagation()}
+            >
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="text-lg font-semibold text-white font-sans flex items-center space-x-2">
+                  <Share2 className="w-5 h-5 text-green-400" />
+                  <span>Share Project</span>
+                </h3>
+                <button
+                  onClick={() => setIsShareModalOpen(false)}
+                  className="text-zinc-500 hover:text-white"
+                >
+                  <Trash2 className="w-4 h-4 opacity-0 pointer-events-none" /> {/* Placeholder for spacing if X is needed */}
+                  <span className="text-xl leading-none">&times;</span>
+                </button>
+              </div>
+
+              {shareThumbnail && (
+                <div className="mb-4 rounded-lg overflow-hidden border border-zinc-800 shadow-lg relative bg-black aspect-video flex items-center justify-center">
+                  <img src={shareThumbnail} alt="Project Thumbnail" className="w-full h-full object-contain" />
+                </div>
+              )}
+
+              <p className="text-xs text-zinc-400 mb-4">
+                Share this project configuration and visual preview.
+              </p>
+
+              <div className="flex bg-zinc-950 border border-zinc-800 rounded-lg p-2 mb-6 items-center">
+                <input
+                  type="text"
+                  readOnly
+                  value={window.location.href}
+                  className="bg-transparent flex-1 text-[11px] text-zinc-300 font-mono outline-none px-2"
+                />
+                <button
+                  onClick={() => {
+                    navigator.clipboard.writeText(window.location.href);
+                    alert("Link copied to clipboard!");
+                  }}
+                  className="bg-zinc-800 hover:bg-zinc-700 text-white px-3 py-1.5 rounded text-xs font-medium transition-colors"
+                >
+                  Copy
+                </button>
+              </div>
+
+              <div className="grid grid-cols-2 gap-3">
+                <button
+                  onClick={() => window.open(`https://twitter.com/intent/tweet?text=Check%20out%20my%20Audio%20Reactive%20Visualizer!&url=${encodeURIComponent(window.location.href)}`, '_blank')}
+                  className="flex items-center justify-center space-x-2 bg-[#1DA1F2]/10 text-[#1DA1F2] border border-[#1DA1F2]/20 hover:bg-[#1DA1F2]/20 py-2 rounded-lg text-xs font-semibold transition-colors"
+                >
+                  <span>Twitter</span>
+                </button>
+                <button
+                  onClick={() => window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(window.location.href)}`, '_blank')}
+                  className="flex items-center justify-center space-x-2 bg-[#4267B2]/10 text-[#4267B2] border border-[#4267B2]/20 hover:bg-[#4267B2]/20 py-2 rounded-lg text-xs font-semibold transition-colors"
+                >
+                  <span>Facebook</span>
+                </button>
+              </div>
+            </motion.div>
+          </motion.div>
+        )}
+      </AnimatePresence>
     </div>
   );
 }

@@ -57,7 +57,15 @@ export type ParticleType =
   | 'floating-bubbles'
   | 'music-notes'
   | 'glitch-vectors'
-  | 'swerve-plexus';
+  | 'swerve-plexus'
+  | 'electro-storm'
+  | 'liquid-gold'
+  | 'quantum-snow'
+  | 'hardstyle-laser'
+  | 'dnb-neuro'
+  | 'speedcore-glitch'
+  | 'hardcore-pulse'
+  | 'frenchcore-spark';
 
 export interface VisualizerSettings {
   style: VisualizerStyle;
@@ -297,8 +305,40 @@ export interface FireworkRocket {
   alpha: number;
 }
 
+export type SubtitleEffect =
+  | 'static' | 'fade' | 'typewriter' | 'pop' | 'slide-up' | 'slide-down' | 'slide-left' | 'slide-right' | 'zoom-in' | 'zoom-out'
+  | 'glow' | 'blur-in' | 'flip-x' | 'flip-y' | 'bounce' | 'shake' | 'glitch' | 'wave' | 'color-shift' | 'rotate-in'
+  | '3d-flip' | 'neon-pulse' | 'pixelate' | 'shatter' | 'liquid' | 'fire'
+  | 'highlight-fill' | 'highlight-bounce' | 'highlight-word-pop' | 'highlight-karaoke' | 'highlight-glow-sweep';
+
+export interface LyricLine {
+  time: number; // in seconds
+  text: string;
+}
+
+export interface SubtitleSettings {
+  enabled: boolean;
+  lyrics: LyricLine[];
+  lrcString: string; // The raw LRC text for user editing
+  fontSize: number;
+  color: string;
+  glowColor: string;
+  glowIntensity: number;
+  fontFamily: 'Inter' | 'Space Grotesk' | 'JetBrains Mono' | 'Outfit' | 'Playfair Display';
+  effect: SubtitleEffect;
+  yOffset: number; // 0 to 100 for vertical placement
+  backgroundOpacity: number;
+  shadowOffset: number;
+  transition: 'none' | 'slide-in-from-left' | 'slide-in-from-right' | 'blur-reveal' | 'scale-pop';
+  outlineEnabled: boolean;
+  outlineColor: string;
+  outlineThickness: number;
+  align: 'left' | 'center' | 'right';
+  karaokeFillColor: string;
+}
+
 export interface ExportSettings {
-  format: 'mp4' | 'mov' | 'webm';
+  format: 'mp4' | 'mov' | 'webm' | 'gif';
   aspectRatio: '16:9' | '9:16' | '1:1';
   resolution: '2160p' | '1080p' | '720p';
   fps: 30 | 60;
