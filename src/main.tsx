@@ -6,7 +6,12 @@ import App from './App.tsx';
 import './index.css';
 
 // Register PWA service worker for offline functionality
-registerSW({ immediate: true });
+registerSW({ 
+  immediate: true,
+  onNeedRefresh() {
+    window.dispatchEvent(new Event('pwa-update'));
+  }
+});
 
 createRoot(document.getElementById('root')!).render(
   <StrictMode>

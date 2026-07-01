@@ -194,6 +194,11 @@ export interface VisualizerSettings {
   chromaticAberration?: boolean;
   earthquakeCameraShake?: boolean;
   phosphorTrails?: number;
+  clippingThreshold?: number;
+  bassMapping?: 'none' | 'lineThickness' | 'glowStrength' | 'sensitivity' | 'horizontalScale';
+  midMapping?: 'none' | 'lineThickness' | 'glowStrength' | 'sensitivity' | 'horizontalScale';
+  trebleMapping?: 'none' | 'lineThickness' | 'glowStrength' | 'sensitivity' | 'horizontalScale';
+  oscillationMultiplier?: number;
 }
 
 export interface ParticleSettings {
@@ -207,6 +212,7 @@ export interface ParticleSettings {
   gravity: number; // speed pulling down
   wind: number; // speed drift horizontally
   beatReactive: boolean; // do they burst/react on beat?
+  isAngularBurstActive?: boolean; // jagged angular pattern on beat burst
   beatThreshold: number; // frequency index or amplitude required
   enablePhysics?: boolean; // simple canvas-based particle collisions (bouncing off each other)
   enableParticleCollisions?: boolean; // particle-to-particle collision detection based on radius

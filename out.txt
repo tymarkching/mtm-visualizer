@@ -1,0 +1,390 @@
+538-  // Synchronizers of sticker images for the render loop ref cache
+539-  const overlayImagesRef = useRef<OverlayImage[]>([]);
+540-  const selectedOverlayImageIdRef = useRef<string | null>(null);
+541-  const overlayImageElementsRef = useRef<{ [key: string]: HTMLImageElement }>({});
+542-
+543:  useEffect(() => {
+544-    overlayImagesRef.current = overlayImages;
+545-  }, [overlayImages]);
+546-
+547:  useEffect(() => {
+548-    selectedOverlayImageIdRef.current = selectedOverlayImageId;
+549-  }, [selectedOverlayImageId]);
+550-
+551:  useEffect(() => {
+552-    overlayImages.forEach(img => {
+553-      if (!overlayImageElementsRef.current[img.id]) {
+554-        const realImg = new Image();
+555-        realImg.src = img.url;
+556-        overlayImageElementsRef.current[img.id] = realImg;
+--
+598-  const dspVocalWetGainRef = useRef<GainNode | null>(null);
+599-  const dspPitchShifterSetRef = useRef<((s: number) => void) | null>(null);
+600-
+601-  const sfxAutoPanRef = useRef(sfxAutoPan);
+602-  const sfxPanRef = useRef(sfxPan);
+603:  useEffect(() => { sfxAutoPanRef.current = sfxAutoPan; }, [sfxAutoPan]);
+604:  useEffect(() => { sfxPanRef.current = sfxPan; }, [sfxPan]);
+605-
+606:  useEffect(() => {
+607-    if (delayNodeRef.current && audioContextRef.current) {
+608-      try {
+609-        delayNodeRef.current.delayTime.setTargetAtTime(sfxDelayTime, audioContextRef.current.currentTime, 0.01);
+610-      } catch (err) {}
+611-    }
+612-  }, [sfxDelayTime]);
+613-
+614:  useEffect(() => {
+615-    if (feedbackGainNodeRef.current && audioContextRef.current) {
+616-      try {
+617-        feedbackGainNodeRef.current.gain.setTargetAtTime(sfxFeedback, audioContextRef.current.currentTime, 0.01);
+618-      } catch (err) {}
+619-    }
+620-  }, [sfxFeedback]);
+621-
+622:  useEffect(() => {
+623-    if (echoWetGainNodeRef.current && audioContextRef.current) {
+624-      try {
+625-        echoWetGainNodeRef.current.gain.setTargetAtTime(sfxEcho ? 0.5 : 0.0, audioContextRef.current.currentTime, 0.01);
+626-      } catch (err) {}
+627-    }
+628-  }, [sfxEcho]);
+629-
+630:  useEffect(() => {
+631-    if (convolverNodeRef.current && audioContextRef.current) {
+632-      try {
+633-        const ctx = audioContextRef.current;
+634-        if (sfxReverbSpace !== 'none') {
+635-          const dur = sfxReverbSpace === 'room' ? 0.8 : sfxReverbSpace === 'hall' ? 2.0 : 4.5;
+--
+645-        reverbWetGainNodeRef.current.gain.setTargetAtTime(sfxReverbSpace !== 'none' ? sfxReverbMix : 0.0, audioContextRef.current.currentTime, 0.01);
+646-      } catch (err) {}
+647-    }
+648-  }, [sfxReverbSpace, sfxReverbMix]);
+649-
+650:  useEffect(() => {
+651-    if (stereoPannerNodeRef.current && audioContextRef.current && !sfxAutoPan) {
+652-      try {
+653-        stereoPannerNodeRef.current.pan.setTargetAtTime(sfxPan, audioContextRef.current.currentTime, 0.01);
+654-      } catch (err) {}
+655-    }
+656-  }, [sfxPan, sfxAutoPan]);
+657-
+658:  useEffect(() => {
+659-    if (audioRef.current) {
+660-      try {
+661-        audioRef.current.playbackRate = sfxPlaybackRate;
+662-      } catch (err) {}
+663-    }
+664-  }, [sfxPlaybackRate]);
+665-
+666-  // DSP parameters to AudioNode synchronization
+667:  useEffect(() => {
+668-    if (audioRef.current) {
+669-      try {
+670-        audioRef.current.playbackRate = dspPlaybackSpeed;
+671-      } catch (err) {}
+672-    }
+673-  }, [dspPlaybackSpeed]);
+674-
+675:  useEffect(() => {
+676-    if (dspPitchShifterSetRef.current) {
+677-      try {
+678-        dspPitchShifterSetRef.current(dspPitchShift);
+679-      } catch (err) {}
+680-    }
+681-  }, [dspPitchShift]);
+682-
+683:  useEffect(() => {
+684-    if (dspDelayNodeRef.current && audioContextRef.current) {
+685-      try {
+686-        dspDelayNodeRef.current.delayTime.setValueAtTime(dspDelayTime, audioContextRef.current.currentTime);
+687-      } catch (err) {}
+688-    }
+--
+691-        dspDelayWetGainRef.current.gain.setValueAtTime(dspDelayTime > 0 ? 0.45 : 0.0, audioContextRef.current.currentTime);
+692-      } catch (err) {}
+693-    }
+694-  }, [dspDelayTime]);
+695-
+696:  useEffect(() => {
+697-    if (dspDelayFeedbackRef.current && audioContextRef.current) {
+698-      try {
+699-        dspDelayFeedbackRef.current.gain.setValueAtTime(dspDelayFeedback / 100, audioContextRef.current.currentTime);
+700-      } catch (err) {}
+701-    }
+702-  }, [dspDelayFeedback]);
+703-
+704:  useEffect(() => {
+705-    if (dspCompressorNodeRef.current && audioContextRef.current) {
+706-      try {
+707-        dspCompressorNodeRef.current.threshold.setValueAtTime(dspCompressorThreshold, audioContextRef.current.currentTime);
+708-      } catch (err) {}
+709-    }
+710-  }, [dspCompressorThreshold]);
+711-
+712:  useEffect(() => {
+713-    if (dspBassRef.current && audioContextRef.current) {
+714-      try {
+715-        dspBassRef.current.gain.setValueAtTime(dspSubBassSaturation, audioContextRef.current.currentTime);
+716-      } catch (err) {}
+717-    }
+718-  }, [dspSubBassSaturation]);
+719-
+720:  useEffect(() => {
+721-    if (dspPannerNodeRef.current && audioContextRef.current) {
+722-      try {
+723-        dspPannerNodeRef.current.pan.setValueAtTime(dspStereoBalance, audioContextRef.current.currentTime);
+724-      } catch (err) {}
+725-    }
+726-  }, [dspStereoBalance]);
+727-
+728:  useEffect(() => {
+729-    if (dspVocalDryGainRef.current && dspVocalWetGainRef.current && audioContextRef.current) {
+730-      try {
+731-        dspVocalDryGainRef.current.gain.setValueAtTime(dspVocalAttenuator ? 0.0 : 1.0, audioContextRef.current.currentTime);
+732-        dspVocalWetGainRef.current.gain.setValueAtTime(dspVocalAttenuator ? 1.0 : 0.0, audioContextRef.current.currentTime);
+733-      } catch (err) {}
+--
+747-  const [currentTrackIndex, setCurrentTrackIndex] = useState<number>(0);
+748-  const [draggedTrackIndex, setDraggedTrackIndex] = useState<number | null>(null);
+749-  const [pwaUpdateAvailable, setPwaUpdateAvailable] = useState<boolean>(false);
+750-
+751-  // Persistence for playlist
+752:  useEffect(() => {
+753-    const saveToStorage = async () => {
+754-      try {
+755-        if (playlist.length === 0) {
+756-          await localforage.removeItem('app_playlist');
+757-          return;
+--
+763-      }
+764-    };
+765-    saveToStorage();
+766-  }, [playlist]);
+767-
+768:  useEffect(() => {
+769-    const loadFromStorage = async () => {
+770-      try {
+771-        const saved = await localforage.getItem<File[]>('app_playlist');
+772-        if (saved && Array.isArray(saved) && saved.length > 0) {
+773-          setPlaylist(saved);
+--
+852-  const isMutedRef = useRef<boolean>(isMuted);
+853-  const volumeRef = useRef<number>(volume);
+854-  const monitorIsMutedRef = useRef<boolean>(monitorIsMuted);
+855-  const monitorVolumeRef = useRef<number>(monitorVolume);
+856-
+857:  useEffect(() => {
+858-    isPlayingRef.current = isPlaying;
+859-  }, [isPlaying]);
+860-
+861:  useEffect(() => {
+862-    isMutedRef.current = isMuted;
+863-  }, [isMuted]);
+864-
+865:  useEffect(() => {
+866-    volumeRef.current = volume;
+867-  }, [volume]);
+868-
+869:  useEffect(() => {
+870-    monitorIsMutedRef.current = monitorIsMuted;
+871-  }, [monitorIsMuted]);
+872-
+873:  useEffect(() => {
+874-    monitorVolumeRef.current = monitorVolume;
+875-  }, [monitorVolume]);
+876-
+877-  // Interactive Particle Pool ref
+878-  const particlesPoolRef = useRef<RenderParticle[]>([]);
+--
+1445-      console.warn("Could not bootstrap Web Audio Context due to browser constraints:", err);
+1446-    }
+1447-  };
+1448-
+1449-  // Keep Analyser fftSize in sync
+1450:  useEffect(() => {
+1451-    if (analyserRef.current) {
+1452-      analyserRef.current.fftSize = visuals.fftSize;
+1453-    }
+1454-  }, [visuals.fftSize]);
+1455-
+1456-  // Keep Analyser smoothingTimeConstant in sync
+1457:  useEffect(() => {
+1458-    if (analyserRef.current) {
+1459-      analyserRef.current.smoothingTimeConstant = typeof visuals.smoothing === 'number' ? visuals.smoothing : 0.8;
+1460-    }
+1461-  }, [visuals.smoothing]);
+1462-
+1463-  // Synchronize eqBass, eqMid, eqTreble with eqBands for compatibility (saving, projects, legacy)
+1464:  useEffect(() => {
+1465-    if (eqBands.length === 10) {
+1466-      setEqBass(eqBands[2]); // 125Hz
+1467-      setEqMid(eqBands[5]);  // 1kHz
+1468-      setEqTreble(eqBands[8]); // 8kHz
+1469-    }
+1470-  }, [eqBands]);
+1471-
+1472-  // Keep 10 EQ Filter levels aligned with nodes dynamically
+1473:  useEffect(() => {
+1474-    if (eqFiltersRef.current.length === 10 && audioContextRef.current) {
+1475-      eqBands.forEach((gain, index) => {
+1476-        const filter = eqFiltersRef.current[index];
+1477-        if (filter) {
+1478-          filter.gain.setValueAtTime(gain, audioContextRef.current.currentTime);
+--
+1480-      });
+1481-    }
+1482-  }, [eqBands]);
+1483-
+1484-  // Keep track volume & mute aligned with trackGainNode
+1485:  useEffect(() => {
+1486-    if (trackGainNodeRef.current && audioContextRef.current) {
+1487-      trackGainNodeRef.current.gain.setValueAtTime(
+1488-        isMuted ? 0 : volume,
+1489-        audioContextRef.current.currentTime
+1490-      );
+1491-    }
+1492-  }, [volume, isMuted]);
+1493-
+1494-  // Keep monitor volume & mute aligned with monitorGainNode
+1495:  useEffect(() => {
+1496-    if (monitorGainNodeRef.current && audioContextRef.current) {
+1497-      monitorGainNodeRef.current.gain.setValueAtTime(
+1498-        monitorIsMuted ? 0 : monitorVolume,
+1499-        audioContextRef.current.currentTime
+1500-      );
+--
+1623-      } catch (e) {}
+1624-    }
+1625-  };
+1626-
+1627-  // HTML audio progress triggers updating times
+1628:  useEffect(() => {
+1629-    const el = audioRef.current;
+1630-    if (!el) return;
+1631-
+1632-    const onTimeUpdate = () => {
+1633-      setCurrentTime(el.currentTime);
+--
+1659-      el.removeEventListener('ended', onEnded);
+1660-    };
+1661-  }, [audioTrack.objectUrl, playlist, currentTrackIndex]);
+1662-
+1663-  // Simulated timer loop for playback if there is no audio file loaded but visualizer is playing
+1664:  useEffect(() => {
+1665-    let dummyInterval: any = null;
+1666-    if (isPlaying && !audioTrack.file) {
+1667-      dummyInterval = setInterval(() => {
+1668-        setCurrentTime(prev => {
+1669-          const limit = audioTrack.duration || 30;
+--
+2589-  } | null>(null);
+2590-  const lastBeatTimeSecondsRef = useRef<number>(0);
+2591-  const exportTimerWorkerRef = useRef<Worker | null>(null);
+2592-  const ffmpegRef = useRef<any>(null);
+2593-
+2594:  useEffect(() => { visualsRef.current = visuals; }, [visuals]);
+2595:  useEffect(() => { particlesSetRef.current = particlesSet; }, [particlesSet]);
+2596:  useEffect(() => { backgroundRef.current = background; }, [background]);
+2597:  useEffect(() => { titleOverlayRef.current = titleOverlay; }, [titleOverlay]);
+2598:  useEffect(() => { subtitlesRef.current = subtitles; }, [subtitles]);
+2599:  useEffect(() => { currentTimeRef.current = currentTime; }, [currentTime]);
+2600:  useEffect(() => { durationRef.current = audioTrack.duration; }, [audioTrack.duration]);
+2601:  useEffect(() => { isExportingRef.current = isExporting; }, [isExporting]);
+2602:  useEffect(() => { exportFpsRef.current = exportSettings.fps; }, [exportSettings.fps]);
+2603:  useEffect(() => { activeTabRef.current = activeTab; }, [activeTab]);
+2604-
+2605:  useEffect(() => { customTextRef.current = customText; }, [customText]);
+2606:  useEffect(() => { customTextColorRef.current = customTextColor; }, [customTextColor]);
+2607:  useEffect(() => { customTextFontSizeRef.current = customTextFontSize; }, [customTextFontSize]);
+2608:  useEffect(() => { customTextFontFamilyRef.current = customTextFontFamily; }, [customTextFontFamily]);
+2609:  useEffect(() => { customTextXRef.current = customTextX; }, [customTextX]);
+2610:  useEffect(() => { customTextYRef.current = customTextY; }, [customTextY]);
+2611:  useEffect(() => { activeStickersRef.current = activeStickers; }, [activeStickers]);
+2612-
+2613-  // Listen for visualizer beat events to animate the symmetry multiplier slider thumb
+2614:  useEffect(() => {
+2615-    const handleBeat = () => {
+2616-      const slider = document.getElementById('symmetry-mirror-multiplier-slider');
+2617-      if (slider) {
+2618-        slider.classList.remove('beat-pulse');
+2619-        // Trigger reflow to restart css animation
+--
+2627-      window.removeEventListener('audio-visualizer-beat', handleBeat);
+2628-    };
+2629-  }, []);
+2630-
+2631-  // Initialize persistent overlay video element on mount
+2632:  useEffect(() => {
+2633-    const vid = document.createElement('video');
+2634-    vid.loop = true;
+2635-    vid.crossOrigin = 'anonymous';
+2636-    vid.playsInline = true;
+2637-    vid.muted = false; // We control output volume strictly via Web Audio GainNode!
+--
+2643-      overlayVideoRef.current = null;
+2644-    };
+2645-  }, []);
+2646-
+2647-  // Sync foreground video playing state with track isPlaying state
+2648:  useEffect(() => {
+2649-    const shouldPlay = isPlaying;
+2650-    if (overlayVideoRef.current && visuals.overlayVideoUrl) {
+2651-      if (shouldPlay) {
+2652-        overlayVideoRef.current.play().catch(e => {
+2653-          console.warn("Overlay video play failed or blocked:", e);
+--
+2657-      }
+2658-    }
+2659-  }, [isPlaying, visuals.overlayVideoUrl]);
+2660-
+2661-  // Keep overlay volume & mute aligned with overlayGainNode
+2662:  useEffect(() => {
+2663-    if (overlayGainNodeRef.current && audioContextRef.current) {
+2664-      const vol = visuals.overlayVolume !== undefined ? visuals.overlayVolume / 100 : 1.0;
+2665-      const muted = !!visuals.overlayMuted;
+2666-      overlayGainNodeRef.current.gain.setValueAtTime(
+2667-        muted ? 0 : vol,
+2668-        audioContextRef.current.currentTime
+2669-      );
+2670-    }
+2671-  }, [visuals.overlayVolume, visuals.overlayMuted]);
+2672-
+2673:  useEffect(() => {
+2674-    if (visuals.watermarkUrl) {
+2675-      const imgObj = new Image();
+2676-      imgObj.src = visuals.watermarkUrl;
+2677-      watermarkImageRef.current = imgObj;
+2678-    } else {
+2679-      watermarkImageRef.current = null;
+2680-    }
+2681-  }, [visuals.watermarkUrl]);
+2682-
+2683-  // Clean trigger to rebuild particles pool when settings change structure
+2684:  useEffect(() => {
+2685-    const canvas = canvasRef.current;
+2686-    if (canvas) {
+2687-      particlesPoolRef.current = initParticles(particlesSet, canvas.width, canvas.height);
+2688-    }
+2689-  }, [particlesSet]);
+2690-
+2691-  // Canvas Drawing & Animation Core Engine
+2692:  useEffect(() => {
+2693-    const canvas = canvasRef.current;
+2694-    if (!canvas) return;
+2695-
+2696-    const ctx = canvas.getContext('2d');
+2697-    if (!ctx) return;
+--
+4155-      }
+4156-    };
+4157-  }, []);
+4158-
+4159-  // Adjust canvas dimensions dynamically matching layout choice
+4160:  useEffect(() => {
+4161-    const canvas = canvasRef.current;
+4162-    if (!canvas) return;
+4163-
+4164-    let baseWidth = 1920;
+4165-    let baseHeight = 1080;

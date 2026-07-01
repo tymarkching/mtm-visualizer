@@ -441,18 +441,42 @@ export function updateParticles(
     // apply a pronounced, immediate velocity burst and radius expansion factor to the particles.
     // The pulse must feel sharp and instantaneous, decaying smoothly back down using linear interpolation (lerp).
     // 3. Toggle Off Behavior: If either toggle is turned off, ensure the particle behavior instantly falls back to a clean, smooth, un-reactive state.
-    if (beatReactivePulseEnabled) {
+    if (beatReactivePulseEnabled || settings.isAngularBurstActive) {
       if (isBeat) {
         // Immediate, sharp velocity burst and expansion
         const intensityScale = Math.max(0.5, bassIntensity); // make it pronounced
-        p.vx = baseVx * (1.6 + intensityScale * 1.8);
-        p.vy = baseVy * (1.6 + intensityScale * 1.8);
-        p.size = Math.min(settings.maxSize * 2.8, baseSize * (1.4 + intensityScale * 0.4));
+        
+        if (settings.isAngularBurstActive) {
+          // Angular/Zig-Zag Pattern: Alternate direction vector by 45 degrees every 6 frames
+          const framesPerDirection = 6;
+          const alternate = Math.floor(p.life / framesPerDirection) % 2 === 0 ? 1 : -1;
+          const angleOffset = alternate * (Math.PI / 4); // 45 degrees
+          
+          const currentVAngle = Math.atan2(baseVy, baseVx);
+          const baseVMag = Math.sqrt(baseVx * baseVx + baseVy * baseVy);
+          const boostedMag = baseVMag * (1.6 + intensityScale * 1.8);
+          
+          p.vx = Math.cos(currentVAngle + angleOffset) * boostedMag;
+          p.vy = Math.sin(currentVAngle + angleOffset) * boostedMag;
+        } else {
+          p.vx = baseVx * (1.6 + intensityScale * 1.8);
+          p.vy = baseVy * (1.6 + intensityScale * 1.8);
+        }
+        
+        if (beatReactivePulseEnabled) {
+          p.size = Math.min(settings.maxSize * 2.8, baseSize * (1.4 + intensityScale * 0.4));
+        } else {
+          p.size = baseSize;
+        }
       } else {
         // Smoothly decay back to standard baseline using linear interpolation (lerp) with 0.08 dampening factor
         p.vx = p.vx + (baseVx - p.vx) * 0.08;
         p.vy = p.vy + (baseVy - p.vy) * 0.08;
-        p.size = p.size + (baseSize - p.size) * 0.08;
+        if (beatReactivePulseEnabled) {
+          p.size = p.size + (baseSize - p.size) * 0.08;
+        } else {
+          p.size = baseSize;
+        }
       }
     } else {
       // Toggle off: instantly fall back to a clean, smooth, un-reactive state
@@ -1447,9 +1471,65 @@ export function drawVisualizer(
     };
   }
 
-  analyserData = activeAnalyserData;
-  waveformData = activeWaveformData;
-  const dataLen = analyserData.length;
+  let localAnalyserData = new Uint8Array(activeAnalyserData);
+  let localWaveformData = new Uint8Array(activeWaveformData);
+  const dataLen = localAnalyserData.length;
+
+  // Calculate frequency band averages
+  let bass = 0, mid = 0, treble = 0;
+  const bassEnd = Math.floor(dataLen * 0.1) || 1;
+  const midEnd = Math.floor(dataLen * 0.5) || 2;
+  
+  for (let i = 0; i < dataLen; i++) {
+    const val = localAnalyserData[i] / 255;
+    if (i < bassEnd) bass += val;
+    else if (i < midEnd) mid += val;
+    else treble += val;
+  }
+  
+  bass /= bassEnd;
+  mid /= (midEnd - bassEnd) || 1;
+  treble /= (dataLen - midEnd) || 1;
+
+  // Apply frequency mappings
+  const applyMapping = (mapping: string | undefined, val: number) => {
+    if (mapping === 'lineThickness') {
+      settings.lineThickness = (settings.lineThickness || 3) * (1 + val * 3);
+    } else if (mapping === 'glowStrength') {
+      settings.glowStrength = (settings.glowStrength || 12) * (1 + val * 4);
+    } else if (mapping === 'sensitivity') {
+      settings.sensitivity = (settings.sensitivity || 1.2) * (1 + val * 2);
+    } else if (mapping === 'horizontalScale') {
+      settings.horizontalScale = (settings.horizontalScale || 1.0) * (1 + val * 2);
+    }
+  };
+
+  applyMapping(settings.bassMapping, bass);
+  applyMapping(settings.midMapping, mid);
+  applyMapping(settings.trebleMapping, treble);
+
+  // Apply clipping threshold
+  const clip = settings.clippingThreshold !== undefined ? settings.clippingThreshold : 1.0;
+  if (clip < 1.0) {
+    const analyserThreshold = 255 * clip;
+    const waveCenter = 128;
+    const waveThreshold = 127 * clip;
+    
+    for (let i = 0; i < dataLen; i++) {
+      if (localAnalyserData[i] > analyserThreshold) {
+        localAnalyserData[i] = analyserThreshold;
+      }
+      const waveAmplitude = Math.abs(localWaveformData[i] - waveCenter);
+      if (waveAmplitude > waveThreshold) {
+        localWaveformData[i] = localWaveformData[i] > waveCenter 
+          ? waveCenter + waveThreshold 
+          : waveCenter - waveThreshold;
+      }
+    }
+  }
+
+  analyserData = localAnalyserData;
+  waveformData = localWaveformData;
   const isWebm = true;
 
   // Manage spectrogram history

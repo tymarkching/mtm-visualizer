@@ -746,8 +746,15 @@ export default function App() {
   const [playlist, setPlaylist] = useState<File[]>([]);
   const [currentTrackIndex, setCurrentTrackIndex] = useState<number>(0);
   const [draggedTrackIndex, setDraggedTrackIndex] = useState<number | null>(null);
+  const [pwaUpdateAvailable, setPwaUpdateAvailable] = useState<boolean>(false);
 
   // Persistence for playlist
+  useEffect(() => {
+    const handler = () => setPwaUpdateAvailable(true);
+    window.addEventListener('pwa-update', handler);
+    return () => window.removeEventListener('pwa-update', handler);
+  }, []);
+
   useEffect(() => {
     const saveToStorage = async () => {
       try {
@@ -5313,6 +5320,12 @@ export default function App() {
                   </div>
                 </div>
 
+                <div className="bg-blue-900/10 border border-blue-500/20 rounded-md p-3 text-left">
+                  <p className="text-[10px] text-blue-400 font-sans leading-relaxed">
+                    ℹ️ <strong className="font-semibold text-blue-300">Note:</strong> Due to local system security parameters, raw audio file assets cannot be hard-serialized into the project save file. Loading a saved project will recover all structural wave/particle values, but you will need to re-drag your music file to reactivate audio playback.
+                  </p>
+                </div>
+
                 {playlist.length > 0 && (
                   <div className="flex flex-col space-y-2 pt-2">
                     <div className="flex items-center justify-between px-1 mb-1">
@@ -7251,6 +7264,78 @@ export default function App() {
                     </div>
 
                     <div className="border-t border-zinc-800/60 pt-3.5 space-y-4">
+                      {/* Clipping Threshold */}
+                      <div className="space-y-1">
+                        <div className="flex justify-between font-mono text-[9px] text-zinc-400 font-bold">
+                          <span>CLIPPING THRESHOLD (OVERDRIVE)</span>
+                          <span className="text-white font-semibold">
+                            {visuals.clippingThreshold !== undefined ? (visuals.clippingThreshold * 100).toFixed(0) : '100'}%
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0.1"
+                          max="1.0"
+                          step="0.05"
+                          value={visuals.clippingThreshold !== undefined ? visuals.clippingThreshold : 1.0}
+                          onChange={(e) => setVisuals(prev => ({ ...prev, clippingThreshold: parseFloat(e.target.value) }))}
+                          className="w-full accent-blue-600 cursor-pointer"
+                        />
+                      </div>
+
+                      {/* Frequency Mappings */}
+                      <div className="space-y-2">
+                        <label className="block text-[11px] font-semibold text-zinc-300 font-mono uppercase">
+                          Frequency Mapping
+                        </label>
+                        <div className="grid grid-cols-1 gap-2">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] text-zinc-400 w-16">BASS</span>
+                            <select
+                              value={visuals.bassMapping || 'none'}
+                              onChange={(e) => setVisuals(prev => ({ ...prev, bassMapping: e.target.value as any }))}
+                              className="flex-1 bg-zinc-950 border border-zinc-850 rounded p-1 text-zinc-300 text-[10px] focus:outline-none focus:border-blue-500"
+                            >
+                              <option value="none">None</option>
+                              <option value="lineThickness">Line Thickness</option>
+                              <option value="glowStrength">Glow Strength</option>
+                              <option value="sensitivity">Sensitivity</option>
+                              <option value="horizontalScale">Horizontal Scale</option>
+                            </select>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] text-zinc-400 w-16">MID</span>
+                            <select
+                              value={visuals.midMapping || 'none'}
+                              onChange={(e) => setVisuals(prev => ({ ...prev, midMapping: e.target.value as any }))}
+                              className="flex-1 bg-zinc-950 border border-zinc-850 rounded p-1 text-zinc-300 text-[10px] focus:outline-none focus:border-blue-500"
+                            >
+                              <option value="none">None</option>
+                              <option value="lineThickness">Line Thickness</option>
+                              <option value="glowStrength">Glow Strength</option>
+                              <option value="sensitivity">Sensitivity</option>
+                              <option value="horizontalScale">Horizontal Scale</option>
+                            </select>
+                          </div>
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] text-zinc-400 w-16">TREBLE</span>
+                            <select
+                              value={visuals.trebleMapping || 'none'}
+                              onChange={(e) => setVisuals(prev => ({ ...prev, trebleMapping: e.target.value as any }))}
+                              className="flex-1 bg-zinc-950 border border-zinc-850 rounded p-1 text-zinc-300 text-[10px] focus:outline-none focus:border-blue-500"
+                            >
+                              <option value="none">None</option>
+                              <option value="lineThickness">Line Thickness</option>
+                              <option value="glowStrength">Glow Strength</option>
+                              <option value="sensitivity">Sensitivity</option>
+                              <option value="horizontalScale">Horizontal Scale</option>
+                            </select>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+
+                    <div className="border-t border-zinc-800/60 pt-3.5 space-y-4">
                       {/* Spectrum Analyzer Toggle switch */}
                       <div className="flex items-center justify-between">
                         <div>
@@ -7940,6 +8025,24 @@ export default function App() {
                       >
                         <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
                           particlesSet.beatReactive ? 'translate-x-3.5' : 'translate-x-0'
+                        }`} />
+                      </button>
+                    </div>
+                    
+                    <div className="flex items-center justify-between p-2.5 bg-zinc-950/60 rounded border border-zinc-850">
+                      <div>
+                        <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Angular/Zig-Zag Particle Path</span>
+                        <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">On beat detection, particles move in an alternating angular pattern</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setParticlesSet(prev => ({ ...prev, isAngularBurstActive: !prev.isAngularBurstActive }))}
+                        className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                          particlesSet.isAngularBurstActive ? 'bg-blue-600' : 'bg-zinc-800'
+                        }`}
+                      >
+                        <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                          particlesSet.isAngularBurstActive ? 'translate-x-3.5' : 'translate-x-0'
                         }`} />
                       </button>
                     </div>
@@ -10825,6 +10928,48 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* PWA UPDATE NOTIFICATION */}
+      <AnimatePresence>
+        {pwaUpdateAvailable && (
+          <motion.div
+            initial={{ opacity: 0, y: 50, scale: 0.9 }}
+            animate={{ opacity: 1, y: 0, scale: 1 }}
+            exit={{ opacity: 0, y: 50, scale: 0.9 }}
+            className="fixed bottom-6 right-6 z-[200] max-w-sm w-full bg-blue-950/90 backdrop-blur-md border border-blue-500/30 p-4 rounded-xl shadow-2xl overflow-hidden"
+          >
+            <div className="absolute top-0 left-0 w-full h-1 bg-gradient-to-r from-blue-600 via-indigo-500 to-blue-400"></div>
+            <div className="flex flex-col space-y-3">
+              <div className="flex items-start space-x-3">
+                <div className="w-8 h-8 rounded-full bg-blue-900/50 flex items-center justify-center shrink-0 border border-blue-500/20">
+                  <span className="text-blue-400 text-lg">⚠️</span>
+                </div>
+                <div>
+                  <h4 className="text-sm font-semibold text-blue-100 uppercase tracking-wide font-sans">System Update Available</h4>
+                  <p className="text-[11px] text-blue-300/80 leading-snug mt-1 font-sans">
+                    A new patch is ready for Chaotic Fart Studio Visualizer. Please save your active workbench configurations and refresh or restart the app to update safely.
+                  </p>
+                </div>
+              </div>
+              <div className="flex justify-end space-x-2 pt-2 border-t border-blue-500/20">
+                <button
+                  onClick={() => setPwaUpdateAvailable(false)}
+                  className="px-3 py-1.5 text-[10px] font-semibold text-blue-300 hover:text-white transition-colors"
+                >
+                  Dismiss
+                </button>
+                <button
+                  onClick={() => window.location.reload()}
+                  className="px-3 py-1.5 bg-blue-600 hover:bg-blue-500 text-white rounded text-[10px] font-bold shadow-lg transition-colors"
+                >
+                  Refresh Now
+                </button>
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
     </div>
   );
 }
