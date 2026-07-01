@@ -4875,73 +4875,169 @@ export default function App() {
       </AnimatePresence>
 
       {/* HEADER BAR */}
-      <header id="main-header" className="border-b border-zinc-900 bg-zinc-950/90 px-6 py-4 flex items-center justify-between sticky top-0 z-40 backdrop-blur-sm">
-        <div className="flex items-center space-x-3">
-          <div className="w-10 h-10 rounded-md bg-zinc-900 border border-zinc-800 text-blue-500 flex items-center justify-center shadow-sm overflow-hidden shrink-0">
-            <img 
-              src="https://i.postimg.cc/P5tTmZdt/logo.png" 
-              alt="CFS Logo" 
-              className="w-10 h-10 object-contain rounded-md border border-zinc-800" 
-              onError={(e) => {
-                e.currentTarget.style.display = 'none';
-                if (e.currentTarget.nextElementSibling) {
-                  (e.currentTarget.nextElementSibling as HTMLElement).style.display = 'block';
-                }
-              }}
+      <header id="main-header" className="sticky top-0 z-40 bg-zinc-950/90 backdrop-blur-sm flex flex-col border-b border-zinc-900">
+        <div className="px-6 py-4 flex items-center justify-between">
+          <div className="flex items-center space-x-3">
+            <div className="w-10 h-10 rounded-md bg-zinc-900 border border-zinc-800 text-lime-500 flex items-center justify-center shadow-sm overflow-hidden shrink-0">
+              <img 
+                src="https://i.postimg.cc/P5tTmZdt/logo.png" 
+                alt="CFS Logo" 
+                className="w-10 h-10 object-contain rounded-md border border-zinc-800" 
+                onError={(e) => {
+                  e.currentTarget.style.display = 'none';
+                  if (e.currentTarget.nextElementSibling) {
+                    (e.currentTarget.nextElementSibling as HTMLElement).style.display = 'block';
+                  }
+                }}
+              />
+              <Disc className="w-6 h-6 text-lime-500 animate-spin-slow" style={{ display: 'none' }} />
+            </div>
+            <div className="flex flex-col justify-center mt-0.5">
+              <h1 className="text-sm font-bold tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-[#b8ee02] to-[#a3e635] leading-none drop-shadow-[0_0_8px_rgba(184,238,2,0.3)]">CHAOTIC FART STUDIO VISUALIZER</h1>
+              <span className="text-[9px] font-mono tracking-wider text-lime-600/80 uppercase mt-1">Audio-Reactive Motion Suite • tymark</span>
+            </div>
+          </div>
+
+          {/* Playback Mini Controls in Header */}
+          <div className="hidden sm:flex items-center space-x-3 bg-zinc-900 border border-zinc-800 px-3 py-1 rounded-full text-xs">
+            <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
+            <span className="text-zinc-300 font-mono font-medium truncate max-w-[150px]">
+              {audioTrack.name}
+            </span>
+            <span className="text-zinc-700">|</span>
+            <span className="text-zinc-400 font-mono">
+              {Math.floor(currentTime / 60)}:{(Math.floor(currentTime % 60)).toString().padStart(2, '0')}
+            </span>
+          </div>
+
+          <div className="flex items-center space-x-2.5">
+            {/* Invisible project importer input element */}
+            <input
+              type="file"
+              ref={projectFileRef}
+              onChange={handleOpenProjectFileChange}
+              accept=".json"
+              className="hidden"
             />
-            <Disc className="w-6 h-6 text-blue-500 animate-spin-slow" style={{ display: 'none' }} />
-          </div>
-          <div className="flex flex-col justify-center mt-0.5">
-            <h1 className="text-sm font-bold tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-[#a3e635] to-[#ccff00] leading-none drop-shadow-[0_0_8px_rgba(204,255,0,0.3)]">CHAOTIC FART STUDIO VISUALIZER</h1>
-            <span className="text-[9px] font-mono tracking-wider text-lime-500/80 uppercase mt-1">Audio-Reactive Motion Suite • tymark</span>
+
+            {/* Open File visual toggle */}
+            <button
+              onClick={handleOpenProjectClick}
+              className="flex items-center space-x-1.5 px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 text-zinc-300 hover:text-white rounded-lg text-xs transition-all cursor-pointer font-medium"
+              title="Open an existing project JSON configuration file"
+            >
+              <FolderOpen className="w-3.5 h-3.5 text-lime-500" />
+              <span className="hidden md:inline">Open Project</span>
+            </button>
+
+            {/* Save Project visual toggle */}
+            <button
+              onClick={handleSaveProject}
+              className="flex items-center space-x-1.5 px-3 py-1.5 bg-lime-500/10 hover:bg-lime-500/20 border border-lime-500/20 hover:border-lime-500/40 text-lime-400 hover:text-lime-300 rounded-lg text-xs transition-all cursor-pointer font-medium"
+              title="Export all visualizers, layers and overlay settings to .json file"
+            >
+              <Save className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">Save Project</span>
+            </button>
+
+            <span className="hidden sm:inline text-xs text-lime-500 font-mono font-semibold bg-lime-500/10 px-2 py-1 rounded border border-lime-500/20">
+              PRO STUDIO
+            </span>
           </div>
         </div>
-
-        {/* Playback Mini Controls in Header */}
-        <div className="hidden sm:flex items-center space-x-3 bg-zinc-900 border border-zinc-800 px-3 py-1 rounded-full text-xs">
-          <div className="w-2 h-2 rounded-full bg-emerald-500 animate-pulse" />
-          <span className="text-zinc-300 font-mono font-medium truncate max-w-[150px]">
-            {audioTrack.name}
-          </span>
-          <span className="text-zinc-700">|</span>
-          <span className="text-zinc-400 font-mono">
-            {Math.floor(currentTime / 60)}:{(Math.floor(currentTime % 60)).toString().padStart(2, '0')}
-          </span>
-        </div>
-
-        <div className="flex items-center space-x-2.5">
-          {/* Invisible project importer input element */}
-          <input
-            type="file"
-            ref={projectFileRef}
-            onChange={handleOpenProjectFileChange}
-            accept=".json"
-            className="hidden"
-          />
-
-          {/* Open File visual toggle */}
-          <button
-            onClick={handleOpenProjectClick}
-            className="flex items-center space-x-1.5 px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 text-zinc-300 hover:text-white rounded-lg text-xs transition-all cursor-pointer font-medium"
-            title="Open an existing project JSON configuration file"
-          >
-            <FolderOpen className="w-3.5 h-3.5 text-blue-500" />
-            <span className="hidden md:inline">Open Project</span>
-          </button>
-
-          {/* Save Project visual toggle */}
-          <button
-            onClick={handleSaveProject}
-            className="flex items-center space-x-1.5 px-3 py-1.5 bg-blue-600/10 hover:bg-blue-600/20 border border-blue-500/20 hover:border-blue-500/40 text-blue-400 hover:text-blue-300 rounded-lg text-xs transition-all cursor-pointer font-medium"
-            title="Export all visualizers, layers and overlay settings to .json file"
-          >
-            <Save className="w-3.5 h-3.5" />
-            <span className="hidden md:inline">Save Project</span>
-          </button>
-
-          <span className="hidden sm:inline text-xs text-blue-500 font-mono font-semibold bg-blue-500/10 px-2 py-1 rounded border border-blue-500/20">
-            PRO STUDIO
-          </span>
+        
+        {/* HORIZONTAL 8-TAB HEADER ARRAY */}
+        <div className="w-full bg-zinc-950 border-t border-zinc-900 px-4 py-2 overflow-x-auto scrollbar-hide select-none">
+          <div className="grid grid-cols-8 gap-1 w-full max-w-[1920px] mx-auto min-w-[800px]">
+            <button
+              onClick={() => setActiveTab('track')}
+              className={`flex items-center justify-center space-x-2 py-2 px-3 rounded-t-md font-medium whitespace-nowrap transition-all cursor-pointer ${
+                activeTab === 'track'
+                  ? 'border-b-2 border-lime-500 text-lime-400 bg-lime-400/10 font-semibold'
+                  : 'border-b-2 border-transparent text-lime-700 hover:text-lime-500 hover:bg-lime-400/5'
+              }`}
+            >
+              <Music className="w-4 h-4" />
+              <span className="text-xs uppercase tracking-wide">Track Info</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('background')}
+              className={`flex items-center justify-center space-x-2 py-2 px-3 rounded-t-md font-medium whitespace-nowrap transition-all cursor-pointer ${
+                activeTab === 'background'
+                  ? 'border-b-2 border-lime-500 text-lime-400 bg-lime-400/10 font-semibold'
+                  : 'border-b-2 border-transparent text-lime-700 hover:text-lime-500 hover:bg-lime-400/5'
+              }`}
+            >
+              <Layers className="w-4 h-4" />
+              <span className="text-xs uppercase tracking-wide">Background</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('visuals')}
+              className={`flex items-center justify-center space-x-2 py-2 px-3 rounded-t-md font-medium whitespace-nowrap transition-all cursor-pointer ${
+                activeTab === 'visuals'
+                  ? 'border-b-2 border-lime-500 text-lime-400 bg-lime-400/10 font-semibold'
+                  : 'border-b-2 border-transparent text-lime-700 hover:text-lime-500 hover:bg-lime-400/5'
+              }`}
+            >
+              <Sliders className="w-4 h-4" />
+              <span className="text-xs uppercase tracking-wide">Waves</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('particles')}
+              className={`flex items-center justify-center space-x-2 py-2 px-3 rounded-t-md font-medium whitespace-nowrap transition-all cursor-pointer ${
+                activeTab === 'particles'
+                  ? 'border-b-2 border-lime-500 text-lime-400 bg-lime-400/10 font-semibold'
+                  : 'border-b-2 border-transparent text-lime-700 hover:text-lime-500 hover:bg-lime-400/5'
+              }`}
+            >
+              <Sparkles className="w-4 h-4" />
+              <span className="text-xs uppercase tracking-wide">Particles</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('sfx')}
+              className={`flex items-center justify-center space-x-2 py-2 px-3 rounded-t-md font-medium whitespace-nowrap transition-all cursor-pointer ${
+                activeTab === 'sfx'
+                  ? 'border-b-2 border-lime-500 text-lime-400 bg-lime-400/10 font-semibold'
+                  : 'border-b-2 border-transparent text-lime-700 hover:text-lime-500 hover:bg-lime-400/5'
+              }`}
+            >
+              <Wand2 className="w-4 h-4" />
+              <span className="text-xs uppercase tracking-wide">FX Studio</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('overlay')}
+              className={`flex items-center justify-center space-x-2 py-2 px-3 rounded-t-md font-medium whitespace-nowrap transition-all cursor-pointer ${
+                activeTab === 'overlay'
+                  ? 'border-b-2 border-lime-500 text-lime-400 bg-lime-400/10 font-semibold'
+                  : 'border-b-2 border-transparent text-lime-700 hover:text-lime-500 hover:bg-lime-400/5'
+              }`}
+            >
+              <FileVideo className="w-4 h-4" />
+              <span className="text-xs uppercase tracking-wide">Overlay</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('text')}
+              className={`flex items-center justify-center space-x-2 py-2 px-3 rounded-t-md font-medium whitespace-nowrap transition-all cursor-pointer ${
+                activeTab === 'text'
+                  ? 'border-b-2 border-lime-500 text-lime-400 bg-lime-400/10 font-semibold'
+                  : 'border-b-2 border-transparent text-lime-700 hover:text-lime-500 hover:bg-lime-400/5'
+              }`}
+            >
+              <Type className="w-4 h-4" />
+              <span className="text-xs uppercase tracking-wide">Text</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('export')}
+              className={`flex items-center justify-center space-x-2 py-2 px-3 rounded-t-md font-medium whitespace-nowrap transition-all cursor-pointer ${
+                activeTab === 'export'
+                  ? 'border-b-2 border-lime-500 text-lime-400 bg-lime-400/10 font-semibold'
+                  : 'border-b-2 border-transparent text-lime-700 hover:text-lime-500 hover:bg-lime-400/5'
+              }`}
+            >
+              <Download className="w-4 h-4" />
+              <span className="text-xs uppercase tracking-wide">Export</span>
+            </button>
+          </div>
         </div>
       </header>
 
@@ -4949,7 +5045,7 @@ export default function App() {
       <main id="main-content" className="flex-1 flex flex-col xl:flex-row min-h-0 bg-zinc-950 w-full max-w-[1920px] mx-auto xl:divide-x xl:divide-zinc-900">
         
         {/* LEFT COMPILER VIEW / WORKSPACE STAGE */}
-        <div className="flex-1 flex flex-col p-4 md:p-6 lg:p-8 space-y-6 items-center justify-center overflow-y-auto">
+        <div className="flex-1 flex flex-col p-4 md:p-6 lg:p-8 space-y-6 items-center justify-start overflow-y-auto">
           
           {/* Theme Preset Selection Ribbon at Top */}
           <div className="w-full max-w-4xl space-y-2">
@@ -5196,100 +5292,8 @@ export default function App() {
         {/* RIGHT SIDEBAR CONTROL DECKS */}
         <div className="w-full xl:w-[460px] flex flex-col bg-zinc-950 border-l border-zinc-900">
           
-          {/* Tab Navigation selectors */}
-          <div className="flex border-b border-zinc-900 bg-zinc-950 text-xs overflow-x-auto select-none">
-            <button
-              onClick={() => setActiveTab('track')}
-              className={`flex-1 py-3 px-3.5 flex items-center justify-center space-x-2 border-b-2 font-medium whitespace-nowrap transition-all cursor-pointer ${
-                activeTab === 'track'
-                  ? 'border-blue-600 text-white bg-zinc-900/60 font-semibold'
-                  : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/40'
-              }`}
-            >
-              <Music className="w-3.5 h-3.5" />
-              <span>Track Info</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('background')}
-              className={`flex-1 py-3 px-3.5 flex items-center justify-center space-x-2 border-b-2 font-medium whitespace-nowrap transition-all cursor-pointer ${
-                activeTab === 'background'
-                  ? 'border-blue-600 text-white bg-zinc-900/60 font-semibold'
-                  : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/40'
-              }`}
-            >
-              <Layers className="w-3.5 h-3.5" />
-              <span>Background</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('visuals')}
-              className={`flex-1 py-3 px-3.5 flex items-center justify-center space-x-2 border-b-2 font-medium whitespace-nowrap transition-all cursor-pointer ${
-                activeTab === 'visuals'
-                  ? 'border-blue-600 text-white bg-zinc-900/60 font-semibold'
-                  : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/40'
-              }`}
-            >
-              <Sliders className="w-3.5 h-3.5" />
-              <span>Waves</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('particles')}
-              className={`flex-1 py-3 px-3.5 flex items-center justify-center space-x-2 border-b-2 font-medium whitespace-nowrap transition-all cursor-pointer ${
-                activeTab === 'particles'
-                  ? 'border-blue-600 text-white bg-zinc-900/60 font-semibold'
-                  : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/40'
-              }`}
-            >
-              <Sparkles className="w-3.5 h-3.5" />
-              <span>Particles</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('sfx')}
-              className={`flex-1 py-3 px-3.5 flex items-center justify-center space-x-2 border-b-2 font-medium whitespace-nowrap transition-all cursor-pointer ${
-                activeTab === 'sfx'
-                  ? 'border-blue-600 text-white bg-zinc-900/60 font-semibold'
-                  : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/40'
-              }`}
-            >
-              <Wand2 className="w-3.5 h-3.5" />
-              <span>FX Studio</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('overlay')}
-              className={`flex-1 py-3 px-3.5 flex items-center justify-center space-x-2 border-b-2 font-medium whitespace-nowrap transition-all cursor-pointer ${
-                activeTab === 'overlay'
-                  ? 'border-blue-600 text-white bg-zinc-900/60 font-semibold'
-                  : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/40'
-              }`}
-            >
-              <FileVideo className="w-3.5 h-3.5" />
-              <span>Overlay</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('text')}
-              className={`flex-1 py-3 px-3.5 flex items-center justify-center space-x-2 border-b-2 font-medium whitespace-nowrap transition-all cursor-pointer ${
-                activeTab === 'text'
-                  ? 'border-blue-600 text-white bg-zinc-900/60 font-semibold'
-                  : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/40'
-              }`}
-            >
-              <Type className="w-3.5 h-3.5" />
-              <span>Text</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('export')}
-              className={`flex-1 py-3 px-3.5 flex items-center justify-center space-x-2 border-b-2 font-medium whitespace-nowrap transition-all cursor-pointer ${
-                activeTab === 'export'
-                  ? 'border-blue-600 text-white bg-zinc-900/60 font-semibold'
-                  : 'border-transparent text-zinc-500 hover:text-zinc-300 hover:bg-zinc-900/40'
-              }`}
-            >
-              <Download className="w-3.5 h-3.5" />
-              <span>Export</span>
-            </button>
-          </div>
-
           {/* ACTIVE PANEL CONTENT WRAPPER */}
-          <div className="flex-1 p-5 md:p-6 overflow-y-auto space-y-6 max-h-[calc(100vh-140px)] bg-zinc-950">
+          <div className="h-[calc(100vh-110px)] overflow-y-auto pr-1 space-y-4 custom-scrollbar p-5 md:p-6 bg-zinc-950">
             
             {/* TABS A: AUDIO & TITLE INFOS */}
             {activeTab === 'track' && (
