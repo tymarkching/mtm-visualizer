@@ -1560,6 +1560,10 @@ export function drawVisualizer(
       settings.sensitivity = (settings.sensitivity || 1.2) * (1 + val * 2);
     } else if (mapping === 'horizontalScale') {
       settings.horizontalScale = (settings.horizontalScale || 1.0) * (1 + val * 2);
+    } else if (mapping === 'verticalScale') {
+      settings.verticalScale = (settings.verticalScale || 1.0) * (1 + val * 2);
+    } else if (mapping === 'centerScale') {
+      settings.centerScale = (settings.centerScale || 1.0) * (1 + val * 2);
     }
   };
 
@@ -4450,10 +4454,13 @@ export function drawVisualizer(
 
   // Apply MAX LINE WIDTH / HORIZONTAL SCALE (Slider 2) centered on the canvas width
   const hScale = settings.horizontalScale !== undefined ? settings.horizontalScale : 1.0;
-  if (hScale !== 1.0) {
-    mainCtx.translate(width / 2, 0);
-    mainCtx.scale(hScale, 1.0);
-    mainCtx.translate(-width / 2, 0);
+  const vScale = settings.verticalScale !== undefined ? settings.verticalScale : 1.0;
+  const cScale = settings.centerScale !== undefined ? settings.centerScale : 1.0;
+  
+  if (hScale !== 1.0 || vScale !== 1.0 || cScale !== 1.0) {
+    mainCtx.translate(width / 2, height / 2);
+    mainCtx.scale(hScale * cScale, vScale * cScale);
+    mainCtx.translate(-width / 2, -height / 2);
   }
 
   const drawChromaticAberration = (ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, beatInt: number) => {

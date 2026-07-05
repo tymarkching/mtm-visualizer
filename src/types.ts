@@ -78,6 +78,8 @@ export interface VisualizerSettings {
   lineThickness: number;
   sensitivity: number; // multiplier for Audio Analyser data
   horizontalScale?: number; // horizontal layout stretch scale
+  verticalScale?: number; // vertical layout stretch scale
+  centerScale?: number; // center scale zoom
   fftSize: number; // resolution of audio detail
   barRoundness: number; // border radius for bars
   barSpacing: number;
@@ -199,9 +201,9 @@ export interface VisualizerSettings {
   earthquakeCameraShake?: boolean;
   phosphorTrails?: number;
   clippingThreshold?: number;
-  bassMapping?: 'none' | 'lineThickness' | 'glowStrength' | 'sensitivity' | 'horizontalScale';
-  midMapping?: 'none' | 'lineThickness' | 'glowStrength' | 'sensitivity' | 'horizontalScale';
-  trebleMapping?: 'none' | 'lineThickness' | 'glowStrength' | 'sensitivity' | 'horizontalScale';
+  bassMapping?: 'none' | 'lineThickness' | 'glowStrength' | 'sensitivity' | 'horizontalScale' | 'verticalScale' | 'centerScale';
+  midMapping?: 'none' | 'lineThickness' | 'glowStrength' | 'sensitivity' | 'horizontalScale' | 'verticalScale' | 'centerScale';
+  trebleMapping?: 'none' | 'lineThickness' | 'glowStrength' | 'sensitivity' | 'horizontalScale' | 'verticalScale' | 'centerScale';
   oscillationMultiplier?: number;
 }
 

@@ -41,9 +41,7 @@ import {
 import localforage from 'localforage';
 import { guess } from 'web-audio-beat-detector';
 import GIF from 'gif.js';
-// @ts-ignore
-import gifWorkerUrl from 'gif.js/dist/gif.worker.js?url';
-const gifWorker = gifWorkerUrl;
+const gifWorker = '/gif.worker.js';
 import {
   VisualizerStyle,
   ParticleType,
@@ -7518,6 +7516,8 @@ export default function App() {
                               <option value="glowStrength">Glow Strength</option>
                               <option value="sensitivity">Sensitivity</option>
                               <option value="horizontalScale">Horizontal Scale</option>
+                              <option value="verticalScale">Vertical Scale</option>
+                              <option value="centerScale">Center Scale</option>
                             </select>
                           </div>
                           <div className="flex items-center justify-between">
@@ -7532,6 +7532,8 @@ export default function App() {
                               <option value="glowStrength">Glow Strength</option>
                               <option value="sensitivity">Sensitivity</option>
                               <option value="horizontalScale">Horizontal Scale</option>
+                              <option value="verticalScale">Vertical Scale</option>
+                              <option value="centerScale">Center Scale</option>
                             </select>
                           </div>
                           <div className="flex items-center justify-between">
@@ -7546,6 +7548,8 @@ export default function App() {
                               <option value="glowStrength">Glow Strength</option>
                               <option value="sensitivity">Sensitivity</option>
                               <option value="horizontalScale">Horizontal Scale</option>
+                              <option value="verticalScale">Vertical Scale</option>
+                              <option value="centerScale">Center Scale</option>
                             </select>
                           </div>
                         </div>
