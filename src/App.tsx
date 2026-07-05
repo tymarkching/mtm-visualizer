@@ -42,8 +42,8 @@ import localforage from 'localforage';
 import { guess } from 'web-audio-beat-detector';
 import GIF from 'gif.js';
 // @ts-ignore
-import gifWorkerStr from 'gif.js/dist/gif.worker.js?raw';
-const gifWorker = URL.createObjectURL(new Blob([gifWorkerStr], { type: 'application/javascript' }));
+import gifWorkerUrl from 'gif.js/dist/gif.worker.js?url';
+const gifWorker = gifWorkerUrl;
 import {
   VisualizerStyle,
   ParticleType,
@@ -76,9 +76,47 @@ import { injectMP4Metadata } from './utils/metadata';
 // Pre-configured thematic style presets of premium visualizers
 const PRESETS = [
   {
+    id: 'crimson-pulse',
+    name: 'Crimson Symmetrical',
+    description: 'A deep red symmetrical waveform against a pure black canvas with slow falling stars.',
+    visuals: {
+      style: 'modern-sleek' as VisualizerStyle,
+      primaryColor: '#cc1122',
+      secondaryColor: '#ff3344',
+      glowColor: '#ff0000',
+      glowStrength: 10,
+      lineThickness: 2,
+      sensitivity: 1.2,
+      fftSize: 1024,
+      barRoundness: 0,
+      barSpacing: 0,
+      placement: 'center' as const,
+    },
+    background: {
+      type: 'color' as const,
+      color: '#000000',
+      gradientStart: '#000000',
+      gradientEnd: '#000000',
+      imageUrl: null,
+      videoUrl: null,
+      blur: 0,
+      opacity: 1.0,
+    },
+    title: {
+      visible: true,
+      text: 'CRIMSON PULSE',
+      artist: 'Audio Wave',
+      fontSize: 48,
+      color: '#ff3344',
+      fontFamily: 'Space Grotesk' as const,
+      position: 'bottom-right' as const,
+      fadeIn: true,
+    }
+  },
+  {
     id: 'cyberpunk-sunset',
     name: 'Cyberpunk Sunset',
-    description: 'Neon magenta visuals, flying amber spark particles, circular audio waveforms.',
+    description: 'Neon magenta visuals, flying cyber triangles, and circular audio waveforms.',
     visuals: {
       style: 'circular' as VisualizerStyle,
       primaryColor: '#ff007f', // hot pink
@@ -87,223 +125,16 @@ const PRESETS = [
       glowStrength: 15,
       lineThickness: 3,
       sensitivity: 1.2,
-      fftSize: 256,
-      barRoundness: 4,
-      barSpacing: 4,
-    },
-    particles: {
-      type: 'sparks' as ParticleType,
-      count: 120,
-      minSize: 2,
-      maxSize: 6,
-      speed: 4,
-      color: '#ffaa00',
-      gravity: -1.5, // float upwards
-      wind: 0.5,
-      beatReactive: true,
-      beatThreshold: 130,
-    },
-    background: {
-      type: 'gradient' as const,
-      color: '#050510',
-      gradientStart: '#08020e',
-      gradientEnd: '#020d18',
-      imageUrl: null,
-      videoUrl: null,
-      blur: 0,
-      opacity: 0.75,
-    },
-    title: {
-      visible: true,
-      text: 'CYBERPUNK HARBOR',
-      artist: 'Acoustic Shift',
-      fontSize: 48,
-      color: '#ffffff',
-      fontFamily: 'Space Grotesk' as const,
-      position: 'center' as const,
-      fadeIn: true,
-    }
-  },
-  {
-    id: 'deep-space-aurora',
-    name: 'Nebula Mountain Matrix',
-    description: 'Emerald and blue glow overlapping matrix hills with starry particle dust.',
-    visuals: {
-      style: 'wave-matrix' as VisualizerStyle,
-      primaryColor: '#00ff66', // lime emerald
-      secondaryColor: '#7a22ff', // psychedelic violet
-      glowColor: '#00ff66',
-      glowStrength: 12,
-      lineThickness: 2,
-      sensitivity: 1.5,
-      fftSize: 512,
-      barRoundness: 0,
-      barSpacing: 2,
-    },
-    particles: {
-      type: 'dust' as ParticleType,
-      count: 200,
-      minSize: 1,
-      maxSize: 4,
-      speed: 1.5,
-      color: '#00ffcc',
-      gravity: 0,
-      wind: -0.2,
-      beatReactive: true,
-      beatThreshold: 140,
-    },
-    background: {
-      type: 'color' as const,
-      color: '#030107',
-      gradientStart: '#000000',
-      gradientEnd: '#0c001a',
-      imageUrl: null,
-      videoUrl: null,
-      blur: 0,
-      opacity: 0.8,
-    },
-    title: {
-      visible: true,
-      text: 'NEBULA MATRIX LULLABY',
-      artist: 'Solar Drift',
-      fontSize: 42,
-      color: '#00ffcc',
-      fontFamily: 'JetBrains Mono' as const,
-      position: 'top-left' as const,
-      fadeIn: true,
-    }
-  },
-  {
-    id: 'retro-wave-vhs',
-    name: 'Retro 80s Grid',
-    description: 'Vintage glowing grid lines, rising neon bubbles, futuristic display typeface.',
-    visuals: {
-      style: 'retro' as VisualizerStyle,
-      primaryColor: '#00ffff',
-      secondaryColor: '#ff00ff',
-      glowColor: '#ff00ff',
-      glowStrength: 20,
-      lineThickness: 4,
-      sensitivity: 1.4,
       fftSize: 1024,
-      barRoundness: 0,
-      barSpacing: 3,
-    },
-    particles: {
-      type: 'bubbles' as ParticleType,
-      count: 60,
-      minSize: 4,
-      maxSize: 12,
-      speed: 2,
-      color: '#00ffbb',
-      gravity: -1.2,
-      wind: 0,
-      beatReactive: true,
-      beatThreshold: 120,
+      barRoundness: 4,
+      barSpacing: 2,
+      placement: 'center' as const,
     },
     background: {
       type: 'gradient' as const,
-      color: '#0a0a14',
-      gradientStart: '#02000c',
-      gradientEnd: '#1e002e',
-      imageUrl: null,
-      videoUrl: null,
-      blur: 2,
-      opacity: 0.85,
-    },
-    title: {
-      visible: true,
-      text: 'NEON WAVE CITADEL',
-      artist: 'Vektor Horizon',
-      fontSize: 52,
-      color: '#ff00a2',
-      fontFamily: 'Space Grotesk' as const,
-      position: 'center' as const,
-      fadeIn: true,
-    }
-  },
-  {
-    id: 'sakura-petal-drift',
-    name: 'Sakura Petal Breeze',
-    description: 'Drifting sakura blossoms, romantic red-violet orbits, classic serif display.',
-    visuals: {
-      style: 'laser-orbit' as VisualizerStyle,
-      primaryColor: '#ffcad4', // baby pink
-      secondaryColor: '#9d4edd', // purple orchid
-      glowColor: '#ffcad4',
-      glowStrength: 8,
-      lineThickness: 3,
-      sensitivity: 1.1,
-      fftSize: 256,
-      barRoundness: 2,
-      barSpacing: 3,
-    },
-    particles: {
-      type: 'sakura' as ParticleType,
-      count: 90,
-      minSize: 5,
-      maxSize: 14,
-      speed: 1.8,
-      color: '#ff85a1',
-      gravity: 0.8, // drift downward
-      wind: 1.2, // swept sideways
-      beatReactive: true,
-      beatThreshold: 130,
-    },
-    background: {
-      type: 'gradient' as const,
-      color: '#0d0713',
-      gradientStart: '#1d0b1d',
-      gradientEnd: '#0b020a',
-      imageUrl: null,
-      videoUrl: null,
-      blur: 0,
-      opacity: 0.8,
-    },
-    title: {
-      visible: true,
-      text: 'SAKURA FALLS',
-      artist: 'Haru Nostalgia',
-      fontSize: 44,
-      color: '#ffd0da',
-      fontFamily: 'Playfair Display' as const,
-      position: 'bottom-left' as const,
-      fadeIn: true,
-    }
-  },
-  {
-    id: 'minimal-ivory',
-    name: 'Monochromatic Wave',
-    description: 'Sleek silver flowing wavelines and subtle dust sparkles over black canvas.',
-    visuals: {
-      style: 'waveform' as VisualizerStyle,
-      primaryColor: '#ffffff',
-      secondaryColor: '#6e7681',
-      glowColor: '#ffffff',
-      glowStrength: 5,
-      lineThickness: 2.5,
-      sensitivity: 1.0,
-      fftSize: 512,
-      barRoundness: 0,
-      barSpacing: 4,
-    },
-    particles: {
-      type: 'stars' as ParticleType,
-      count: 150,
-      minSize: 1,
-      maxSize: 3,
-      speed: 0.8,
-      color: '#8c959f',
-      gravity: -0.1,
-      wind: 0.1,
-      beatReactive: false,
-      beatThreshold: 150,
-    },
-    background: {
-      type: 'color' as const,
-      color: '#030303',
-      gradientStart: '#000000',
-      gradientEnd: '#1e1e1e',
+      color: '#000000',
+      gradientStart: '#1a0033',
+      gradientEnd: '#000000',
       imageUrl: null,
       videoUrl: null,
       blur: 0,
@@ -311,12 +142,240 @@ const PRESETS = [
     },
     title: {
       visible: true,
-      text: 'AMORPHOUS VOID',
-      artist: 'The Anti-Sound Scheme',
-      fontSize: 38,
-      color: '#ffffff',
+      text: 'CYBERPUNK',
+      artist: 'Synthwave Engine',
+      fontSize: 56,
+      color: '#00ffff',
       fontFamily: 'Outfit' as const,
       position: 'center' as const,
+      fadeIn: true,
+    }
+  },
+  {
+    id: 'toxic-overdrive',
+    name: 'Toxic Overdrive',
+    description: 'Aggressive green and acid yellow digital bars with intense neon glow.',
+    visuals: {
+      style: 'digital-vu-blocks' as VisualizerStyle,
+      primaryColor: '#00ff00',
+      secondaryColor: '#ccff00',
+      glowColor: '#00ff00',
+      glowStrength: 25,
+      lineThickness: 4,
+      sensitivity: 1.6,
+      fftSize: 1024,
+      barRoundness: 2,
+      barSpacing: 4,
+      placement: 'center' as const,
+    },
+    background: {
+      type: 'color' as const,
+      color: '#021000',
+      gradientStart: '#001000',
+      gradientEnd: '#0a1a05',
+      imageUrl: null,
+      videoUrl: null,
+      blur: 0,
+      opacity: 0.85,
+    },
+    title: {
+      visible: true,
+      text: 'TOXIC OVERDRIVE',
+      artist: 'Acid Injection',
+      fontSize: 54,
+      color: '#00ff00',
+      fontFamily: 'JetBrains Mono' as const,
+      position: 'top-left' as const,
+      fadeIn: true,
+    }
+  },
+  {
+    id: 'retro-80s-grid',
+    name: 'Retro 80s Grid',
+    description: 'Neon purple grid styling with ambient neon digital particles.',
+    visuals: {
+      style: 'retro' as VisualizerStyle,
+      primaryColor: '#ff00ff',
+      secondaryColor: '#00ffff',
+      glowColor: '#ff00ff',
+      glowStrength: 20,
+      lineThickness: 3,
+      sensitivity: 1.4,
+      fftSize: 2048,
+      barRoundness: 0,
+      barSpacing: 0,
+      placement: 'center' as const,
+    },
+    background: {
+      type: 'gradient' as const,
+      color: '#000000',
+      gradientStart: '#2b00ff',
+      gradientEnd: '#000000',
+      imageUrl: null,
+      videoUrl: null,
+      blur: 2,
+      opacity: 0.8,
+    },
+    title: {
+      visible: true,
+      text: 'RETRO 80S',
+      artist: 'Vaporwave',
+      fontSize: 60,
+      color: '#00ffff',
+      fontFamily: 'Space Grotesk' as const,
+      position: 'top-right' as const,
+      fadeIn: true,
+    }
+  },
+  {
+    id: 'sakura-petal-breeze',
+    name: 'Sakura Petal Breeze',
+    description: 'Gentle fresnel waves with drifting sakura petals over a dark violet canvas.',
+    visuals: {
+      style: 'fresnel-wave' as VisualizerStyle,
+      primaryColor: '#ffb7c5',
+      secondaryColor: '#ffffff',
+      glowColor: '#ffb7c5',
+      glowStrength: 12,
+      lineThickness: 2,
+      sensitivity: 1.0,
+      fftSize: 2048,
+      barRoundness: 0,
+      barSpacing: 0,
+      placement: 'center' as const,
+    },
+    background: {
+      type: 'color' as const,
+      color: '#1a0a1a',
+      gradientStart: '#1a0a1a',
+      gradientEnd: '#000000',
+      imageUrl: null,
+      videoUrl: null,
+      blur: 0,
+      opacity: 1.0,
+    },
+    title: {
+      visible: true,
+      text: 'SAKURA BREEZE',
+      artist: 'Ambient Journey',
+      fontSize: 42,
+      color: '#ffb7c5',
+      fontFamily: 'Inter' as const,
+      position: 'bottom-left' as const,
+      fadeIn: true,
+    }
+  },
+  {
+    id: 'monochromatic-wave',
+    name: 'Monochromatic Wave',
+    description: 'Sleek silver flowing wavelines and subtle dust sparkles over black canvas.',
+    visuals: {
+      style: 'waveform' as VisualizerStyle,
+      primaryColor: '#ffffff',
+      secondaryColor: '#aaaaaa',
+      glowColor: '#ffffff',
+      glowStrength: 5,
+      lineThickness: 2.5,
+      sensitivity: 1.1,
+      fftSize: 2048,
+      barRoundness: 0,
+      barSpacing: 0,
+      placement: 'center' as const,
+    },
+    background: {
+      type: 'color' as const,
+      color: '#050505',
+      gradientStart: '#000000',
+      gradientEnd: '#000000',
+      imageUrl: null,
+      videoUrl: null,
+      blur: 0,
+      opacity: 1.0,
+    },
+    title: {
+      visible: true,
+      text: 'MINIMAL',
+      artist: 'Monochrome',
+      fontSize: 40,
+      color: '#ffffff',
+      fontFamily: 'Inter' as const,
+      position: 'center' as const,
+      fadeIn: true,
+    }
+  },
+  {
+    id: 'nebula-mountain-matrix',
+    name: 'Nebula Mountain Matrix',
+    description: 'Cosmic purple wave matrix with stardust nebula particles.',
+    visuals: {
+      style: 'wave-matrix' as VisualizerStyle,
+      primaryColor: '#8a2be2',
+      secondaryColor: '#4b0082',
+      glowColor: '#8a2be2',
+      glowStrength: 18,
+      lineThickness: 2,
+      sensitivity: 1.3,
+      fftSize: 1024,
+      barRoundness: 0,
+      barSpacing: 2,
+      placement: 'center' as const,
+    },
+    background: {
+      type: 'gradient' as const,
+      color: '#000000',
+      gradientStart: '#000000',
+      gradientEnd: '#1a0033',
+      imageUrl: null,
+      videoUrl: null,
+      blur: 5,
+      opacity: 0.9,
+    },
+    title: {
+      visible: true,
+      text: 'NEBULA MATRIX',
+      artist: 'Deep Space',
+      fontSize: 50,
+      color: '#d8b4fe',
+      fontFamily: 'Outfit' as const,
+      position: 'top-left' as const,
+      fadeIn: true,
+    }
+  },
+  {
+    id: 'synthwave-horizon',
+    name: 'Synthwave Horizon',
+    description: 'Vaporwave sunset colors intersecting with dynamic laser beams.',
+    visuals: {
+      style: 'cyber-laser-horizon' as VisualizerStyle,
+      primaryColor: '#ff0055',
+      secondaryColor: '#00d0ff',
+      glowColor: '#ff0055',
+      glowStrength: 18,
+      lineThickness: 2,
+      sensitivity: 1.5,
+      fftSize: 2048,
+      barRoundness: 0,
+      barSpacing: 2,
+      placement: 'center' as const,
+    },
+    background: {
+      type: 'gradient' as const,
+      color: '#10051a',
+      gradientStart: '#000010',
+      gradientEnd: '#2a003a',
+      imageUrl: null,
+      videoUrl: null,
+      blur: 2,
+      opacity: 0.8,
+    },
+    title: {
+      visible: true,
+      text: 'SYNTH HORIZON',
+      artist: 'Neon Nostalgia',
+      fontSize: 48,
+      color: '#00d0ff',
+      fontFamily: 'Outfit' as const,
+      position: 'bottom-right' as const,
       fadeIn: true,
     }
   }
@@ -494,7 +553,16 @@ export default function App() {
   // Core Visualizer Customizations
   const [visuals, setVisuals] = useState<VisualizerSettings>(PRESETS[0].visuals);
   const [particlesSet, setParticlesSet] = useState<ParticleSettings>(() => ({
-    ...PRESETS[0].particles,
+    type: 'stars' as ParticleType,
+    count: 100,
+    minSize: 3,
+    maxSize: 6,
+    speed: 0.5,
+    color: '#ff3333',
+    gravity: 0.5,
+    wind: 0.1,
+    beatReactive: true,
+    beatThreshold: 140,
     enabled: false,
   }));
   const [background, setBackground] = useState<BackgroundSettings>(PRESETS[0].background);
@@ -917,13 +985,9 @@ export default function App() {
   // Apply Preset Config
   const loadPreset = (preset: typeof PRESETS[0]) => {
     setVisuals(preset.visuals);
-    setParticlesSet(prev => ({
-      ...preset.particles,
-      enabled: prev.enabled,
-    }));
     setBackground(preset.background);
     setTitleOverlay(preset.title);
-
+    
     // Update track names to match preset titles if no file is uploaded
     if (!audioTrack.file) {
       setAudioTrack(prev => ({
@@ -934,26 +998,42 @@ export default function App() {
     }
   };
 
-  const handleShufflePreset = () => {
-    const activeIndex = PRESETS.findIndex(
-      p => visuals.style === p.visuals.style && 
-           background.type === p.background.type && 
-           particlesSet.type === p.particles.type
-    );
-    let nextIndex = activeIndex;
-    if (PRESETS.length > 1) {
-      // Keep selecting random until it is a different one
-      let attempts = 0;
-      while (nextIndex === activeIndex && attempts < 10) {
-        nextIndex = Math.floor(Math.random() * PRESETS.length);
-        attempts++;
-      }
-    } else {
-      nextIndex = 0;
-    }
-    if (PRESETS[nextIndex]) {
-      loadPreset(PRESETS[nextIndex]);
-    }
+  const handleRandomizeStyles = () => {
+    const randColor = () => '#' + Math.floor(Math.random()*16777215).toString(16).padStart(6, '0');
+    
+    // Generate dark colors for background to prevent blinding bright canvas
+    const randDarkColor = () => {
+      const r = Math.floor(Math.random() * 40).toString(16).padStart(2, '0');
+      const g = Math.floor(Math.random() * 40).toString(16).padStart(2, '0');
+      const b = Math.floor(Math.random() * 60).toString(16).padStart(2, '0');
+      return '#' + r + g + b;
+    };
+    
+    const waveStyles: VisualizerStyle[] = ['waveform', 'bars', 'circular', 'radial-bars', 'retro', 'neon-tunnel', 'laser-orbit', 'wave-matrix', 'heartbeat-ekg', 'fresnel-wave', 'dna-helix', 'double-mirror-bars', 'circular-orbit', 'radial-inside-out', 'digital-vu-blocks', 'dna-helix-thread', 'smooth-area-silhouette', 'floating-matrix-particles', 'symmetrical-waveform', 'rounded-pill-bars', 'neon-glow-string', 'floating-bubble-particles', 'mirrored-wave-silhouette', 'retro-arcade-dot-grid'];
+    const partTypes: ParticleType[] = ['stars', 'bubbles', 'sparks', 'sakura', 'dust', 'digital', 'hearts', 'glow-circles', 'spark-stars', 'snowflakes'];
+    const bgTypes = ['color', 'gradient'];
+    
+    setVisuals(prev => ({
+      ...prev,
+      style: waveStyles[Math.floor(Math.random() * waveStyles.length)],
+      primaryColor: randColor(),
+      secondaryColor: randColor(),
+      glowColor: randColor(),
+      glowStrength: Math.floor(Math.random() * 30),
+      lineThickness: 1 + Math.random() * 5,
+      sensitivity: 0.5 + Math.random() * 2,
+      placement: 'center'
+    }));
+    
+    
+    
+    setBackground(prev => ({
+      ...prev,
+      type: bgTypes[Math.floor(Math.random() * bgTypes.length)] as 'color' | 'gradient',
+      color: randDarkColor(),
+      gradientStart: randDarkColor(),
+      gradientEnd: randDarkColor(),
+    }));
   };
 
   // Serialize and download visualizer configuration as project JSON
@@ -2706,6 +2786,8 @@ export default function App() {
     let lastBeatTime = 0;
     const beatCooldown = 150; // ms
     let currentShakeAmt = 0;
+    let accumulatedAutoRotation = 0;
+    let lastAutoRotateTime = performance.now();
 
     // Persistent interpolation arrays for motion smoothing
     let smoothAnalyser: Float32Array | null = null;
@@ -2761,13 +2843,31 @@ export default function App() {
             lastBeatTime = timeNow;
           }
         } else {
-          // Simple beat detect: monitor bass index (usually peak mid-lows bin 1 - 5)
-          let bassSum = 0;
-          const cutoff = Math.floor(analyserData.length * 0.12) || 4; // target bass bins
-          for (let i = 0; i < cutoff; i++) {
-            bassSum += analyserData[i];
+          // Simple beat detect: monitor selected frequency index
+          let targetSum = 0;
+          let count = 0;
+          const target = particlesSetRef.current?.audioDriveTarget || 'sub-bass';
+          
+          let startIndex = 0;
+          let endIndex = Math.floor(analyserData.length * 0.12) || 4; // sub-bass default
+
+          if (target === 'vocal') {
+            startIndex = Math.floor(analyserData.length * 0.15);
+            endIndex = Math.floor(analyserData.length * 0.45);
+          } else if (target === 'high-end') {
+            startIndex = Math.floor(analyserData.length * 0.55);
+            endIndex = Math.floor(analyserData.length * 0.95);
           }
-          const bassVal = bassSum / cutoff;
+
+          for (let i = startIndex; i < endIndex; i++) {
+            targetSum += analyserData[i];
+            count++;
+          }
+          let bassValRaw = targetSum / Math.max(1, count);
+          let targetMultiplier = 1.0;
+          if (target === 'vocal') targetMultiplier = 1.5;
+          if (target === 'high-end') targetMultiplier = 2.2;
+          const bassVal = bassValRaw * targetMultiplier;
           
           // Dynamic threshold value depending on beatSensitivity
           const beatSens = visualsRef.current.beatSensitivity !== undefined ? visualsRef.current.beatSensitivity : 1.0;
@@ -2865,7 +2965,22 @@ export default function App() {
       }
 
       // Global Canvas Rotation (Subtle persistent rotation of the entire stage)
-      const rotDeg = visualsRef.current.canvasRotation || 0;
+      let rotDeg = visualsRef.current.canvasRotation || 0;
+      
+      const currentPerfTime = performance.now();
+      const deltaTime = (currentPerfTime - lastAutoRotateTime) / 1000;
+      lastAutoRotateTime = currentPerfTime;
+      
+      if (visualsRef.current.autoRotateCanvas) {
+        const speed = visualsRef.current.autoRotateSpeed !== undefined ? visualsRef.current.autoRotateSpeed : 1.0;
+        // 1.0 speed = 10 degrees per second
+        accumulatedAutoRotation += speed * 10 * deltaTime;
+        if (accumulatedAutoRotation > 360) accumulatedAutoRotation -= 360;
+        if (accumulatedAutoRotation < -360) accumulatedAutoRotation += 360;
+      }
+      
+      rotDeg += accumulatedAutoRotation;
+
       if (rotDeg !== 0) {
         const rad = (rotDeg * Math.PI) / 180;
         ctx.translate(canvas.width / 2, canvas.height / 2);
@@ -2899,7 +3014,7 @@ export default function App() {
 
       // 2. Compute and Draw Particles
       if (particlesSetRef.current?.enabled) {
-        let bassIntensity = bassReactiveFactor; // Default to low range energy
+        let bassIntensity = Math.min(1.0, bassReactiveFactor * 1.2); // Default to low range energy
 
         // Section 3: Audio Band Link (Dropdown Select)
         // Options: 'sub-bass' (Default - tracks low range), 'vocal' (Tracks center), 'high-end' (Tracks treble)
@@ -2913,7 +3028,7 @@ export default function App() {
               vocalSum += analyserData[i];
               vocalCount++;
             }
-            bassIntensity = (vocalSum / Math.max(1, vocalCount)) / 255;
+            bassIntensity = Math.min(1.0, ((vocalSum / Math.max(1, vocalCount)) / 255) * 1.5);
           } else {
             bassIntensity = mainBeatReactiveFactor;
           }
@@ -2927,7 +3042,7 @@ export default function App() {
               highSum += analyserData[i];
               highCount++;
             }
-            bassIntensity = (highSum / Math.max(1, highCount)) / 255;
+            bassIntensity = Math.min(1.0, ((highSum / Math.max(1, highCount)) / 255) * 2.2);
           } else {
             bassIntensity = 0.15;
           }
@@ -4114,6 +4229,28 @@ export default function App() {
 
       // Restore global canvas state
       ctx.restore();
+
+      // Horizontal Scan-line Glitch Effect
+      if (visualsRef.current.glitchIntensity && visualsRef.current.glitchIntensity > 0) {
+        // Higher intensity increases probability and severity. Boosted on beat.
+        const baseProb = (visualsRef.current.glitchIntensity / 10) * 0.1;
+        const glitchProbability = isBeat ? baseProb + 0.1 : baseProb;
+        
+        if (Math.random() < glitchProbability) {
+          const numSlices = Math.floor(Math.random() * 3 * visualsRef.current.glitchIntensity) + 1;
+          for (let i = 0; i < numSlices; i++) {
+            const sliceY = Math.random() * canvas.height;
+            const sliceHeight = Math.random() * 30 + 5;
+            const offset = (Math.random() - 0.5) * 50 * visualsRef.current.glitchIntensity;
+            
+            ctx.drawImage(
+              canvas,
+              0, sliceY, canvas.width, sliceHeight,
+              offset, sliceY, canvas.width, sliceHeight
+            );
+          }
+        }
+      }
     };
 
     const scheduleBackup = () => {
@@ -5058,36 +5195,39 @@ export default function App() {
                 <span className="text-[10px] font-mono text-zinc-500 hidden sm:inline">1-Click Fast Formatting</span>
                 <button
                   type="button"
-                  onClick={handleShufflePreset}
+                  onClick={handleRandomizeStyles}
                   className="flex items-center space-x-1 px-2 py-0.5 rounded bg-blue-950/40 text-blue-400 border border-blue-900/40 hover:bg-blue-600 hover:text-white transition-all text-[10px] font-mono font-semibold cursor-pointer active:scale-95"
-                  title="Shuffle randomly style presets"
+                  title="Randomize everything"
                 >
                   <Shuffle className="w-3 h-3" />
-                  <span>Shuffle Preset</span>
+                  <span>🎲 RANDOMIZE STYLES</span>
                 </button>
               </div>
             </div>
             
-            <div className="grid grid-cols-2 md:grid-cols-5 gap-2.5">
+            <div className="grid grid-cols-4 sm:grid-cols-8 gap-2 w-full items-center">
               {PRESETS.map((p) => {
-                const isActive = visuals.style === p.visuals.style && background.type === p.background.type && particlesSet.type === p.particles.type;
+                const isActive = visuals.style === p.visuals.style && background.type === p.background.type;
                 return (
                   <button
                     key={p.id}
                     onClick={() => loadPreset(p)}
-                    className={`flex flex-col items-left text-left p-3 rounded-lg border text-xs transition-all relative overflow-hidden ${
+                    title={p.description}
+                    style={isActive ? { borderColor: p.visuals.primaryColor, boxShadow: `0 0 12px ${p.visuals.primaryColor}30` } : {}}
+                    className={`flex items-center justify-start text-left px-2 py-1.5 rounded border text-[10px] transition-all relative overflow-hidden group ${
                       isActive
-                        ? 'bg-zinc-900 border-zinc-700 text-white font-medium'
-                        : 'bg-zinc-950/20 border-zinc-900 hover:bg-zinc-900/40 hover:border-zinc-800 text-zinc-400'
+                        ? 'bg-zinc-900 text-white font-medium'
+                        : 'bg-zinc-950/20 border-zinc-900 hover:bg-zinc-900/40 hover:border-zinc-700 text-zinc-400'
                     }`}
                   >
-                    <span className="font-medium block text-zinc-200 truncate w-full">{p.name}</span>
-                    <span className="text-[9px] text-zinc-500 mt-0.5 line-clamp-1 font-mono">{p.description}</span>
-                    {isActive && (
-                      <span className="absolute right-1.5 top-1.5 bg-blue-600 text-white p-0.5 rounded-full text-[8px]">
-                        <Check className="w-2 h-2" />
-                      </span>
-                    )}
+                    <span 
+                      className="w-1.5 h-1.5 rounded-full mr-1.5 shrink-0 transition-all duration-300" 
+                      style={{ 
+                        backgroundColor: p.visuals.primaryColor, 
+                        boxShadow: isActive ? `0 0 6px ${p.visuals.primaryColor}` : 'none'
+                      }} 
+                    />
+                    <span className="truncate w-full">{p.name}</span>
                   </button>
                 );
               })}
@@ -5935,6 +6075,7 @@ export default function App() {
                         { id: 'dna-helix-thread', name: 'DNA Helix Thread' },
                         { id: 'smooth-area-silhouette', name: 'Area Silhouette' },
                         { id: 'floating-matrix-particles', name: 'Floating Particles' },
+                        { id: 'symmetrical-waveform', name: 'Symmetrical Pulse' },
                         { id: 'rounded-pill-bars', name: 'Rounded Pill Bars' },
                         { id: 'neon-glow-string', name: 'Neon Glow String' },
                         { id: 'floating-bubble-particles', name: 'Floating Bubbles' },
@@ -6520,6 +6661,42 @@ export default function App() {
                         </div>
                       </div>
                     </div>
+
+                    {/* Pre-defined Waveform Themes */}
+                    {((visuals.colorMode || 'gradient') === 'gradient') && (
+                      <div className="pt-3">
+                        <label className="block text-[10px] text-zinc-400 font-mono mb-2 uppercase tracking-wide">Waveform Themes</label>
+                        <div className="grid grid-cols-2 gap-2">
+                          {[
+                            { name: 'Sunset', colors: ['#ff4d4d', '#f9cb28'] },
+                            { name: 'Ocean', colors: ['#00c6ff', '#0072ff'] },
+                            { name: 'Forest', colors: ['#11998e', '#38ef7d'] },
+                            { name: 'Monochrome', colors: ['#ffffff', '#434343'] },
+                            { name: 'Cyberpunk', colors: ['#ff007f', '#00ffff'] },
+                            { name: 'Amethyst', colors: ['#9D50BB', '#6E48AA'] },
+                            { name: 'Fire', colors: ['#f12711', '#f5af19'] },
+                            { name: 'Ice', colors: ['#1e3c72', '#2a5298'] }
+                          ].map(theme => (
+                            <button
+                              key={theme.name}
+                              type="button"
+                              onClick={() => setVisuals(prev => ({
+                                ...prev,
+                                primaryColor: theme.colors[0],
+                                secondaryColor: theme.colors[1]
+                              }))}
+                              className="flex items-center space-x-2 bg-zinc-950/40 border border-zinc-800 hover:border-zinc-600 rounded p-1.5 transition-all cursor-pointer group"
+                            >
+                              <div
+                                className="w-4 h-4 rounded-full border border-zinc-700 flex-shrink-0"
+                                style={{ background: `linear-gradient(to right, ${theme.colors[0]}, ${theme.colors[1]})` }}
+                              />
+                              <span className="text-[10px] text-zinc-400 group-hover:text-white font-sans truncate">{theme.name}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    )}
 
                     {(visuals.colorMode || 'gradient') === 'rainbow' && (
                       <p className="text-[10px] text-zinc-500 leading-normal font-sans italic pt-1">
@@ -7250,6 +7427,42 @@ export default function App() {
                         className="w-full accent-blue-600 cursor-pointer"
                       />
                     </div>
+                    
+                    <div className="flex items-center justify-between p-2 bg-[#07070a]/40 rounded border border-zinc-950/40">
+                      <div>
+                        <span className="font-semibold text-zinc-300 block font-sans text-xs">Auto-Rotate Canvas</span>
+                        <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Slowly rotates the entire stage</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setVisuals(prev => ({ ...prev, autoRotateCanvas: !prev.autoRotateCanvas }))}
+                        className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                          visuals.autoRotateCanvas ? 'bg-blue-600' : 'bg-zinc-800'
+                        }`}
+                      >
+                        <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                          visuals.autoRotateCanvas ? 'translate-x-3.5' : 'translate-x-0'
+                        }`} />
+                      </button>
+                    </div>
+
+                    {visuals.autoRotateCanvas && (
+                      <div className="space-y-1 p-2.5 bg-[#07070a]/40 rounded border border-zinc-950/40 mt-1 animate-in fade-in duration-200">
+                        <div className="flex justify-between font-mono text-[9px] text-zinc-400 font-bold">
+                          <span>AUTO-ROTATE SPEED</span>
+                          <span className="text-white font-semibold">{(visuals.autoRotateSpeed !== undefined ? visuals.autoRotateSpeed : 1.0).toFixed(1)}x</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="-10.0"
+                          max="10.0"
+                          step="0.1"
+                          value={visuals.autoRotateSpeed !== undefined ? visuals.autoRotateSpeed : 1.0}
+                          onChange={(e) => setVisuals(prev => ({ ...prev, autoRotateSpeed: parseFloat(e.target.value) }))}
+                          className="w-full accent-blue-600 cursor-pointer"
+                        />
+                      </div>
+                    )}
 
                     <div className="grid grid-cols-1 gap-3 pt-1">
                       <div className="space-y-1">
@@ -7408,6 +7621,28 @@ export default function App() {
                       </div>
 
 
+
+                      {/* Glitch Intensity Slider */}
+                      <div className="border-t border-zinc-800/60 pt-3.5 space-y-1.5 animate-fade-in">
+                        <div className="flex justify-between font-mono text-[9px] text-zinc-400">
+                          <span>GLITCH INTENSITY</span>
+                          <span className="text-blue-400 font-mono font-semibold">
+                            {visuals.glitchIntensity ? `${visuals.glitchIntensity.toFixed(1)}` : 'DISABLED'}
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0.0"
+                          max="10.0"
+                          step="0.5"
+                          value={typeof visuals.glitchIntensity === 'number' ? visuals.glitchIntensity : 0}
+                          onChange={(e) => setVisuals(prev => ({ ...prev, glitchIntensity: parseFloat(e.target.value) }))}
+                          className="w-full accent-blue-650 cursor-pointer"
+                        />
+                        <p className="text-[9px] text-zinc-500 font-sans leading-relaxed">
+                          Triggers occasional horizontal scan-line displacement effects on the canvas, boosted by peak bass beats
+                        </p>
+                      </div>
 
                       {/* Audio-Reactive FX Section */}
                       <div id="audio-reactive-fx-section" className="border-t border-zinc-800/60 pt-4 mt-4 space-y-3">
@@ -7884,7 +8119,7 @@ export default function App() {
                         </div>
                         <input
                           type="range"
-                          min="3"
+                          min="1"
                           max="25"
                           value={particlesSet.maxSize}
                           onChange={(e) => setParticlesSet(prev => ({ ...prev, maxSize: Math.max(particlesSet.minSize + 1, parseInt(e.target.value)) }))}
@@ -7924,6 +8159,42 @@ export default function App() {
                         />
                       </div>
                     </div>
+
+                    <div className="flex items-center justify-between p-2 bg-[#07070a]/40 rounded border border-zinc-950/40">
+                      <div>
+                        <span className="font-semibold text-zinc-300 block font-sans text-xs">Audio-Reactive Gravity</span>
+                        <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Gravity increases during loud sections</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setParticlesSet(prev => ({ ...prev, audioReactiveGravity: !prev.audioReactiveGravity }))}
+                        className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                          particlesSet.audioReactiveGravity ? 'bg-blue-600' : 'bg-zinc-800'
+                        }`}
+                      >
+                        <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                          particlesSet.audioReactiveGravity ? 'translate-x-3.5' : 'translate-x-0'
+                        }`} />
+                      </button>
+                    </div>
+
+                    {particlesSet.audioReactiveGravity && (
+                      <div className="space-y-1 p-2.5 bg-[#07070a]/40 rounded border border-zinc-950/40 animate-in fade-in duration-200">
+                        <div className="flex justify-between font-mono text-[9px] text-zinc-400 font-bold">
+                          <span>REACTIVE GRAVITY STRENGTH</span>
+                          <span className="text-white font-semibold">{(particlesSet.audioGravityMultiplier !== undefined ? particlesSet.audioGravityMultiplier : 1.0).toFixed(1)}x</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0.1"
+                          max="10.0"
+                          step="0.1"
+                          value={particlesSet.audioGravityMultiplier !== undefined ? particlesSet.audioGravityMultiplier : 1.0}
+                          onChange={(e) => setParticlesSet(prev => ({ ...prev, audioGravityMultiplier: parseFloat(e.target.value) }))}
+                          className="w-full accent-blue-600 cursor-pointer"
+                        />
+                      </div>
+                    )}
 
                     {/* Particle Movement Speed linear multiplier */}
                     <div className="space-y-1 bg-zinc-950/40 p-2 rounded border border-zinc-900">
@@ -8013,6 +8284,42 @@ export default function App() {
                         <option value="vocal">Vocal Midrange</option>
                         <option value="high-end">High-End Sparkle</option>
                       </select>
+                    </div>
+
+                    <div className="flex items-center justify-between p-2.5 bg-zinc-950/60 rounded border border-zinc-850 mt-2">
+                      <div>
+                        <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Straight Motion Override</span>
+                        <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Bypass wind sway, forcing a strict linear trajectory.</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setParticlesSet(prev => ({ ...prev, straightMotionOverride: !prev.straightMotionOverride }))}
+                        className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                          particlesSet.straightMotionOverride ? 'bg-blue-600' : 'bg-zinc-800'
+                        }`}
+                      >
+                        <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                          particlesSet.straightMotionOverride ? 'translate-x-3.5' : 'translate-x-0'
+                        }`} />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between p-2.5 bg-zinc-950/60 rounded border border-zinc-850 mt-2">
+                      <div>
+                        <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Chaotic Wind Drift</span>
+                        <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Inject continuous random force vectors for organic drift.</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setParticlesSet(prev => ({ ...prev, chaoticWindDrift: !prev.chaoticWindDrift }))}
+                        className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                          particlesSet.chaoticWindDrift ? 'bg-blue-600' : 'bg-zinc-800'
+                        }`}
+                      >
+                        <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                          particlesSet.chaoticWindDrift ? 'translate-x-3.5' : 'translate-x-0'
+                        }`} />
+                      </button>
                     </div>
 
                     <div className="flex items-center justify-between p-2.5 bg-zinc-950/60 rounded border border-zinc-850">

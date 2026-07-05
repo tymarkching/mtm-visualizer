@@ -17,6 +17,7 @@ export type VisualizerStyle =
   | 'dna-helix-thread'         // Intertwined sine waves reacting to mid and treble
   | 'smooth-area-silhouette'   // Filled vector polygon wave with opacity gradient
   | 'floating-matrix-particles'// column particles rising to frequency thresholds
+  | 'symmetrical-waveform'     // Symmetrical diamond-like pulse waveform
   | 'rounded-pill-bars'        // Modern Rounded Pill Bars with rounded caps
   | 'neon-glow-string'         // Neon Glow String Line connected via Bezier with heavy blur
   | 'floating-bubble-particles'// Floating Bubble Particles scaling with frequency
@@ -93,6 +94,8 @@ export interface VisualizerSettings {
   useCustomGradientDirection?: boolean;
   gradientDirectionAngle?: number; // 0 to 360
   canvasRotation?: number; // global stage rotation in degrees
+  autoRotateCanvas?: boolean; // toggle auto rotation
+  autoRotateSpeed?: number; // speed of auto rotation
   flashOnBeat?: boolean; // flash glowColor/visualizer to white on every detected beat
   flashIntensity?: number; // flash intensity (0 to 1, default 1)
   flashColorMode?: 'white' | 'custom' | 'colorA' | 'glowColor'; // option for flash color
@@ -109,6 +112,7 @@ export interface VisualizerSettings {
   colorInvertOnBeat?: boolean; // flip the primary/secondary spectrum colors on a beat-triggered basis for a strobe-like flashing effect
   cycleColors?: boolean; // slowly rotate the primary and secondary colors over time
   colorCycleSpeed?: number; // speed multiplier for color hue rotation cycling over time (e.g. 0.1 to 10)
+  glitchIntensity?: number; // intensity for horizontal scan-line displacement effect
   beatSensitivity?: number; // threshold sensitivity for beat detection (e.g. 1.0 to 10.0 or 0 to 1)
   reactiveTextGlow?: boolean; // link on-screen text glow to middle/high frequency audio data
   shakeIntensity?: number; // multiplier/slider for camera shake response
@@ -212,6 +216,8 @@ export interface ParticleSettings {
   gravity: number; // speed pulling down
   wind: number; // speed drift horizontally
   beatReactive: boolean; // do they burst/react on beat?
+  audioReactiveGravity?: boolean; // gravity scales with audio loudness
+  audioGravityMultiplier?: number; // strength of audio-reactive gravity
   isAngularBurstActive?: boolean; // jagged angular pattern on beat burst
   beatThreshold: number; // frequency index or amplitude required
   enablePhysics?: boolean; // simple canvas-based particle collisions (bouncing off each other)
@@ -234,6 +240,8 @@ export interface ParticleSettings {
   particleTwinkle?: boolean;
   orbitalSway?: boolean;
   particleGlitch?: boolean;
+  straightMotionOverride?: boolean;
+  chaoticWindDrift?: boolean;
 }
 
 export interface TitleOverlaySettings {

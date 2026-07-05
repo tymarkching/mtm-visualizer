@@ -311,7 +311,7 @@ export function createParticle(
 
   // Lifespan
   const maxLife = settings.lifetime
-    ? Math.round(settings.lifetime * 60)
+    ? Math.round(settings.lifetime * 60 * (0.6 + Math.random() * 0.8))
     : (50 + Math.random() * 100);
 
   let targetBaseColor = settings.color || '#ff007f';
@@ -324,6 +324,9 @@ export function createParticle(
       pColor = `hsl(${finalHue}, ${hsl.s}%, ${hsl.l}%)`;
   }
 
+  // Initial random time-delay offset for staggered birth cycle
+  const initialLife = randomY ? maxLife * Math.random() : maxLife;
+
   return {
     x,
     y,
@@ -332,7 +335,7 @@ export function createParticle(
     size,
     color: pColor,
     alpha: 0.1 + Math.random() * 0.8,
-    life: maxLife,
+    life: initialLife,
     maxLife,
     angle: dir === 'spiral-vortex' ? angle : Math.random() * Math.PI * 2,
     spin: (Math.random() - 0.5) * 0.05,
@@ -444,7 +447,7 @@ export function updateParticles(
     if (beatReactivePulseEnabled || settings.isAngularBurstActive) {
       if (isBeat) {
         // Immediate, sharp velocity burst and expansion
-        const intensityScale = Math.max(0.5, bassIntensity); // make it pronounced
+        const intensityScale = Math.max(0.6, bassIntensity); // make it pronounced
         
         if (settings.isAngularBurstActive) {
           // Angular/Zig-Zag Pattern: Alternate direction vector by 45 degrees every 6 frames
@@ -454,26 +457,39 @@ export function updateParticles(
           
           const currentVAngle = Math.atan2(baseVy, baseVx);
           const baseVMag = Math.sqrt(baseVx * baseVx + baseVy * baseVy);
-          const boostedMag = baseVMag * (1.6 + intensityScale * 1.8);
+          const boostedMag = baseVMag * (1.8 + intensityScale * 2.2);
           
           p.vx = Math.cos(currentVAngle + angleOffset) * boostedMag;
           p.vy = Math.sin(currentVAngle + angleOffset) * boostedMag;
         } else {
-          p.vx = baseVx * (1.6 + intensityScale * 1.8);
-          p.vy = baseVy * (1.6 + intensityScale * 1.8);
+          p.vx = baseVx * (1.8 + intensityScale * 2.2);
+          p.vy = baseVy * (1.8 + intensityScale * 2.2);
         }
         
         if (beatReactivePulseEnabled) {
-          p.size = Math.min(settings.maxSize * 2.8, baseSize * (1.4 + intensityScale * 0.4));
+          p.size = Math.min(settings.maxSize * 3.5, baseSize * (1.6 + intensityScale * 0.8));
         } else {
           p.size = baseSize;
         }
       } else {
-        // Smoothly decay back to standard baseline using linear interpolation (lerp) with 0.08 dampening factor
-        p.vx = p.vx + (baseVx - p.vx) * 0.08;
-        p.vy = p.vy + (baseVy - p.vy) * 0.08;
+        // Smoothly decay back to standard baseline using linear interpolation (lerp)
+        // AND add continuous breathing size based on bassIntensity to make it more alive
+        let dynamicVx = baseVx;
+        let dynamicVy = baseVy;
+        let dynamicSize = baseSize;
+        
         if (beatReactivePulseEnabled) {
-          p.size = p.size + (baseSize - p.size) * 0.08;
+          // Continuous breathing based on live audio intensity
+          dynamicSize = baseSize * (1.0 + bassIntensity * 1.5);
+          dynamicVx = baseVx * (1.0 + bassIntensity * 0.8);
+          dynamicVy = baseVy * (1.0 + bassIntensity * 0.8);
+        }
+        
+        p.vx = p.vx + (dynamicVx - p.vx) * 0.12;
+        p.vy = p.vy + (dynamicVy - p.vy) * 0.12;
+        
+        if (beatReactivePulseEnabled) {
+          p.size = p.size + (dynamicSize - p.size) * 0.15;
         } else {
           p.size = baseSize;
         }
@@ -486,16 +502,34 @@ export function updateParticles(
     }
 
     // Apply winds & gravity
-    p.vx += settings.wind * 0.01;
-    p.vy += settings.gravity * 0.01;
+    if (!settings.straightMotionOverride) {
+      p.vx += settings.wind * 0.01;
+    }
+
+    let currentGravity = settings.gravity;
+    if (settings.audioReactiveGravity) {
+      const multiplier = settings.audioGravityMultiplier !== undefined ? settings.audioGravityMultiplier : 1.0;
+      // Add gravity scaled by volume (loud sections = drop faster)
+      currentGravity += (Math.pow(overallVolume, 1.5) * multiplier * 5.0);
+    }
+    if (!settings.straightMotionOverride) {
+      p.vy += currentGravity * 0.01;
+    }
+
+    if (settings.chaoticWindDrift) {
+      p.vx += (Math.random() - 0.5) * 0.4;
+      p.vy += (Math.random() - 0.5) * 0.4;
+    }
 
     // Decoloration or drift friction depending on particle type
-    if (settings.type === 'sakura') {
-      // Wind-swept sway
-      p.vx += Math.sin(p.life * 0.05) * 0.05;
-    } else if (settings.type === 'bubbles' || settings.type === 'floating-bubbles') {
-      // Bobbing wobble
-      p.vx += Math.sin(p.life * 0.1) * 0.08;
+    if (!settings.straightMotionOverride) {
+      if (settings.type === 'sakura') {
+        // Wind-swept sway
+        p.vx += Math.sin(p.life * 0.05) * 0.05;
+      } else if (settings.type === 'bubbles' || settings.type === 'floating-bubbles') {
+        // Bobbing wobble
+        p.vx += Math.sin(p.life * 0.1) * 0.08;
+      }
     }
 
     // Record history before position changes
@@ -589,41 +623,43 @@ export function updateParticles(
       p.x = width / 2 + Math.cos(p.angle) * p.radius;
       p.y = height / 2 + Math.sin(p.angle) * p.radius;
     } else {
-      if (settings.type === 'swerve-plexus') {
-        const frameCount = Date.now() / 16;
-        let verticalDrift = 0;
-        if (settings.emittingDirection === 'float-up') verticalDrift = -p.speed * 0.5;
-        if (settings.emittingDirection === 'fall-down') verticalDrift = p.speed * 0.5;
-        p.vx = Math.cos(p.angle + frameCount * 0.02) * p.speed;
-        p.vy = Math.sin(p.angle + frameCount * 0.015) * p.speed + verticalDrift;
-      } else if (settings.type === 'electro-storm') {
-        if (Math.random() > 0.8) {
-          p.vx += (Math.random() - 0.5) * 5;
-          p.vy += (Math.random() - 0.5) * 5;
-        }
-      } else if (settings.type === 'liquid-gold') {
-        p.vx = Math.sin(p.y / 20 + p.hue) * 2;
-      } else if (settings.type === 'dnb-neuro') {
-        const cx = width / 2;
-        const cy = height / 2;
-        p.vx += (cx - p.x) * 0.001;
-        p.vy += (cy - p.y) * 0.001;
-      } else if (settings.type === 'speedcore-glitch') {
-        if (Math.random() > 0.9) {
-          p.vx = (Math.random() - 0.5) * 20;
-          p.vy = (Math.random() - 0.5) * 2;
-        }
-      } else if (settings.type === 'frenchcore-spark') {
-        if (isBeat) {
-           p.vx *= 1.2;
-           p.vy *= 1.2;
+      if (!settings.straightMotionOverride) {
+        if (settings.type === 'swerve-plexus') {
+          const frameCount = Date.now() / 16;
+          let verticalDrift = 0;
+          if (settings.emittingDirection === 'float-up') verticalDrift = -p.speed * 0.5;
+          if (settings.emittingDirection === 'fall-down') verticalDrift = p.speed * 0.5;
+          p.vx = Math.cos(p.angle + frameCount * 0.02) * p.speed;
+          p.vy = Math.sin(p.angle + frameCount * 0.015) * p.speed + verticalDrift;
+        } else if (settings.type === 'electro-storm') {
+          if (Math.random() > 0.8) {
+            p.vx += (Math.random() - 0.5) * 5;
+            p.vy += (Math.random() - 0.5) * 5;
+          }
+        } else if (settings.type === 'liquid-gold') {
+          p.vx = Math.sin(p.y / 20 + p.hue) * 2;
+        } else if (settings.type === 'dnb-neuro') {
+          const cx = width / 2;
+          const cy = height / 2;
+          p.vx += (cx - p.x) * 0.001;
+          p.vy += (cy - p.y) * 0.001;
+        } else if (settings.type === 'speedcore-glitch') {
+          if (Math.random() > 0.9) {
+            p.vx = (Math.random() - 0.5) * 20;
+            p.vy = (Math.random() - 0.5) * 2;
+          }
+        } else if (settings.type === 'frenchcore-spark') {
+          if (isBeat) {
+             p.vx *= 1.2;
+             p.vy *= 1.2;
+          }
         }
       }
       
       let finalVx = p.vx * dynamicBaseSpeedMultiplier * burstSpeedMult;
       let finalVy = p.vy * dynamicBaseSpeedMultiplier * burstSpeedMult;
       
-      if (settings.orbitalSway) {
+      if (settings.orbitalSway && !settings.straightMotionOverride) {
         const cx = width / 2;
         const cy = height / 2;
         const dx = p.x - cx;
@@ -931,7 +967,30 @@ export function drawParticles(
         baseColor = lerpColor(colorA, colorB, xRatio);
       } else {
         // solid color mode
-        baseColor = settings.color || '#ff007f';
+        baseColor = p.color || settings.color || '#ff007f';
+        if (settings.colorInvertOnBeat && isBeat) {
+          if (baseColor.startsWith('#') && baseColor.length === 7) {
+            const hex = baseColor.slice(1);
+            const r = (255 - parseInt(hex.slice(0, 2), 16)).toString(16).padStart(2, '0');
+            const g = (255 - parseInt(hex.slice(2, 4), 16)).toString(16).padStart(2, '0');
+            const b = (255 - parseInt(hex.slice(4, 6), 16)).toString(16).padStart(2, '0');
+            baseColor = `#${r}${g}${b}`;
+          } else {
+            baseColor = '#ffffff';
+          }
+        }
+      }
+    } else {
+      if (settings.colorInvertOnBeat && isBeat) {
+          if (baseColor.startsWith('#') && baseColor.length === 7) {
+            const hex = baseColor.slice(1);
+            const r = (255 - parseInt(hex.slice(0, 2), 16)).toString(16).padStart(2, '0');
+            const g = (255 - parseInt(hex.slice(2, 4), 16)).toString(16).padStart(2, '0');
+            const b = (255 - parseInt(hex.slice(4, 6), 16)).toString(16).padStart(2, '0');
+            baseColor = `#${r}${g}${b}`;
+          } else {
+            baseColor = '#ffffff';
+          }
       }
     }
 
@@ -1932,6 +1991,35 @@ export function drawVisualizer(
       ctx.stroke();
     }
 
+  } else if (settings.style === 'symmetrical-waveform') {
+    // Symmetrical diamond-like pulse waveform (center bass, edge treble, vertical mirrored)
+    const densityPoints = settings.barFrequencyCount !== undefined && settings.barFrequencyCount > 0
+      ? settings.barFrequencyCount
+      : Math.min(256, dataLen);
+    const sliceWidth = width / densityPoints;
+    const spacing = settings.barSpacing !== undefined ? settings.barSpacing : 0;
+    const barWidth = Math.max(1, sliceWidth - spacing);
+    
+    for (let i = 0; i < densityPoints; i++) {
+      const distFromCenter = Math.abs(i - densityPoints / 2) / (densityPoints / 2); // 0 at center, 1 at edges
+      
+      // Map to frequency bins (bass in center, mids/treble on edges)
+      const idx = Math.floor(Math.pow(distFromCenter, 1.2) * (dataLen * 0.6));
+      const value = analyserData[idx] || 0;
+      
+      let barHeight = (value / 255) * (height * 0.45) * settings.sensitivity;
+      
+      // Taper off the extreme ends to enforce a clean diamond shape
+      const envelope = Math.sin(Math.PI * (i / densityPoints));
+      barHeight *= (0.2 + 0.8 * envelope);
+      
+      if (barHeight < 1) barHeight = 1;
+      
+      const x = i * sliceWidth;
+      
+      ctx.fillStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, distFromCenter);
+      ctx.fillRect(x, midY - barHeight, barWidth, barHeight * 2);
+    }
   } else if (settings.style === 'bars') {
     // Traditional frequency visualizer bars
     const barCount = settings.barFrequencyCount !== undefined && settings.barFrequencyCount > 0
