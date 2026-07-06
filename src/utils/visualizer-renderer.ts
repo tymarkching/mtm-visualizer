@@ -187,8 +187,8 @@ export function swapPrimarySecondaryPixels(
   primaryColorHex: string,
   secondaryColorHex: string
 ) {
-  const rgbP = hexToRgb(primaryColorHex) || { r: 255, g: 0, b: 0 };
-  const rgbS = hexToRgb(secondaryColorHex) || { r: 0, g: 0, b: 255 };
+  const rgbP = hexToRgb(primaryColorHex) || { r: 184, g: 238, b: 2 };
+  const rgbS = hexToRgb(secondaryColorHex) || { r: 163, g: 230, b: 53 };
 
   const pR = rgbP.r, pG = rgbP.g, pB = rgbP.b;
   const sR = rgbS.r, sG = rgbS.g, sB = rgbS.b;
@@ -314,7 +314,7 @@ export function createParticle(
     ? Math.round(settings.lifetime * 60 * (0.6 + Math.random() * 0.8))
     : (50 + Math.random() * 100);
 
-  let targetBaseColor = settings.color || '#ff007f';
+  let targetBaseColor = settings.color || '#b8ee02';
   let pColor = targetBaseColor;
 
   if (settings.particleColorRandomness && settings.particleColorRandomness > 0) {
@@ -401,7 +401,7 @@ export function updateParticles(
           maxRadius: Math.sqrt(width * width + height * height) * 0.55,
           speed: 10,
           strength: 40,
-          color: settings.color || '#00ffff'
+          color: settings.color || '#a3e635'
         });
       }
     }
@@ -946,15 +946,15 @@ export function drawParticles(
 
   for (const p of particles) {
     // SECTION 2: LINKING PARTICLE FIELD TO GLOBAL COLOR MODES
-    let baseColor = p.color || settings.color || '#ff007f';
+    let baseColor = p.color || settings.color || '#b8ee02';
 
     if (globalVisuals) {
       const mode = globalVisuals.colorMode || 'solid';
       if (mode === 'rainbow') {
         baseColor = `hsl(${p.hue || 0}, 100%, 60%)`;
       } else if (mode === 'gradient') {
-        let colorA = globalVisuals.primaryColor || '#ff007f';
-        let colorB = globalVisuals.secondaryColor || '#00ffff';
+        let colorA = globalVisuals.primaryColor || '#b8ee02';
+        let colorB = globalVisuals.secondaryColor || '#a3e635';
         
         // Strobe effect: instantly swap colorA and colorB on each beat
         if (settings.colorInvertOnBeat && isBeat) {
@@ -967,7 +967,7 @@ export function drawParticles(
         baseColor = lerpColor(colorA, colorB, xRatio);
       } else {
         // solid color mode
-        baseColor = p.color || settings.color || '#ff007f';
+        baseColor = p.color || settings.color || '#b8ee02';
         if (settings.colorInvertOnBeat && isBeat) {
           if (baseColor.startsWith('#') && baseColor.length === 7) {
             const hex = baseColor.slice(1);
@@ -1469,6 +1469,7 @@ export function drawVisualizer(
   }
 
   let settings = { ...incomingSettings };
+  settings.lineThickness = (settings.lineThickness !== undefined ? settings.lineThickness : 2) * 2;
   
   if (settings.useCustomWaveformColor && settings.waveformColor) {
     settings.primaryColor = settings.waveformColor;
@@ -1681,12 +1682,12 @@ export function drawVisualizer(
 
   // Apply visualizer-wide bloom filter
   if (settings.glowIntensity !== undefined && settings.glowIntensity > 0) {
-    ctx.filter = `drop-shadow(0 0 ${settings.glowIntensity}px ${settings.glowColor || settings.primaryColor || '#00ffcc'}) brightness(${(1 + settings.glowIntensity * 0.05).toFixed(2)})`;
+    ctx.filter = `drop-shadow(0 0 ${settings.glowIntensity}px ${settings.glowColor || settings.primaryColor || '#b8ee02'}) brightness(${(1 + settings.glowIntensity * 0.05).toFixed(2)})`;
   } else {
     ctx.filter = 'none';
   }
 
-  const primaryRGB = hexToRgb(settings.primaryColor) || { r: 0, g: 255, b: 200 };
+  const primaryRGB = hexToRgb(settings.primaryColor) || { r: 184, g: 238, b: 2 };
   const secondaryRGB = hexToRgb(settings.secondaryColor) || { r: 255, g: 0, b: 128 };
 
   // Glow Setup
@@ -1710,12 +1711,12 @@ export function drawVisualizer(
       } else if (flashColorMode === 'colorA') {
         targetColor = settings.primaryColor;
       } else if (flashColorMode === 'glowColor') {
-        targetColor = settings.glowColor || settings.primaryColor || '#00ffcc';
+        targetColor = settings.glowColor || settings.primaryColor || '#b8ee02';
       }
 
       // Blend from base glow color (or primary color as fallback) to target color
-      const startColor = settings.glowColor || settings.primaryColor || '#00ffcc';
-      const startRGB = hexToRgb(startColor) || { r: 0, g: 255, b: 200 };
+      const startColor = settings.glowColor || settings.primaryColor || '#b8ee02';
+      const startRGB = hexToRgb(startColor) || { r: 184, g: 238, b: 2 };
       const targetRGB = hexToRgb(targetColor) || { r: 255, g: 255, b: 255 };
 
       // Calculate final blend factor
@@ -1946,7 +1947,7 @@ export function drawVisualizer(
           y = midY - barHeight / 2;
         }
 
-        ctx.fillStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, i / barCount);
+        ctx.fillStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, settings.frequencyBasedColoring ? Math.min(1.0, value / 255) : i / barCount);
         
         ctx.beginPath();
         if (radius > 0) {
@@ -2056,7 +2057,7 @@ export function drawVisualizer(
         y = midY - barHeight / 2;
       }
 
-      ctx.fillStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, i / totalBars);
+      ctx.fillStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, settings.frequencyBasedColoring ? Math.min(1.0, value / 255) : i / totalBars);
       
       // Draw nicely rounded bar rectangles
       ctx.beginPath();
@@ -2124,7 +2125,7 @@ export function drawVisualizer(
       const xEnd = centerX + cos * (baseRadius + len);
       const yEnd = centerY + sin * (baseRadius + len);
 
-      ctx.strokeStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, i / itemSlots);
+      ctx.strokeStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, settings.frequencyBasedColoring ? Math.min(1.0, val / 255) : i / itemSlots);
       ctx.lineWidth = settings.lineThickness;
       
       ctx.beginPath();
@@ -2214,7 +2215,7 @@ export function drawVisualizer(
 
     // Render Grid Baseline dynamically styled with color schemes and Thickness/Thinness slider lineThickness
     ctx.save();
-    let baselineColor = '#ff007f'; // default classic retro magenta/pink
+    let baselineColor = '#b8ee02'; // default classic retro magenta/pink
     if (mode === 'solid') {
       baselineColor = settings.primaryColor;
     } else if (mode === 'gradient') {
@@ -2276,7 +2277,7 @@ export function drawVisualizer(
 
       const baseAngle = (i / numLasers) * Math.PI * 2 + timeAngle;
       
-      ctx.strokeStyle = getDynamicColor(settings.secondaryColor, '#00ffff', i / numLasers);
+      ctx.strokeStyle = getDynamicColor(settings.secondaryColor, '#a3e635', i / numLasers);
       ctx.lineWidth = 3 + (val / 255) * 5;
 
       ctx.beginPath();
@@ -2627,7 +2628,7 @@ export function drawVisualizer(
 
        const x = startX + i * step;
       
-      ctx.fillStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, i / barCount);
+      ctx.fillStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, settings.frequencyBasedColoring ? Math.min(1.0, value / 255) : i / barCount);
       
       // Top mirror bar
       ctx.beginPath();
@@ -2897,7 +2898,7 @@ export function drawVisualizer(
 
         ctx.beginPath();
         ctx.arc(x, y, size, 0, Math.PI * 2);
-        ctx.fillStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, i / colCount);
+        ctx.fillStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, settings.frequencyBasedColoring ? Math.min(1.0, val / 255) : i / colCount);
         ctx.globalAlpha = alpha;
         ctx.fill();
       }
@@ -2933,7 +2934,7 @@ export function drawVisualizer(
         y = midY - barHeight / 2;
       }
 
-      ctx.fillStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, i / barCount);
+      ctx.fillStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, settings.frequencyBasedColoring ? Math.min(1.0, value / 255) : i / barCount);
       ctx.beginPath();
       if (ctx.roundRect) {
         ctx.roundRect(x, y, barWidth, barHeight, radius);
@@ -3044,7 +3045,7 @@ export function drawVisualizer(
     }
 
     if (points.length > 0) {
-      const rgb1 = hexToRgb(settings.primaryColor) || { r: 0, g: 255, b: 200 };
+      const rgb1 = hexToRgb(settings.primaryColor) || { r: 184, g: 238, b: 2 };
       const rgb2 = hexToRgb(settings.secondaryColor) || { r: 255, g: 0, b: 128 };
       
       const gradient = ctx.createLinearGradient(0, midY - height * 0.3, 0, midY + height * 0.3);
@@ -3123,7 +3124,7 @@ export function drawVisualizer(
             ? '#ef4444' // red caps
             : r > dotRows * 0.5
               ? '#fbbf24' // yellow middle
-              : getDynamicColor(settings.primaryColor, settings.secondaryColor, i / colCount);
+              : getDynamicColor(settings.primaryColor, settings.secondaryColor, settings.frequencyBasedColoring ? Math.min(1.0, val / 255) : i / colCount);
           ctx.globalAlpha = 1.0;
         } else {
           ctx.fillStyle = '#ffffff';
@@ -3167,7 +3168,7 @@ export function drawVisualizer(
       // Pulse glow gradient
       ctx.beginPath();
       const radialGrad = ctx.createRadialGradient(band.x, orbY, 1, band.x, orbY, activeRadius);
-      const rgb = hexToRgb(band.color) || { r: 0, g: 255, b: 200 };
+      const rgb = hexToRgb(band.color) || { r: 184, g: 238, b: 2 };
       radialGrad.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.85)`);
       radialGrad.addColorStop(0.35, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.3)`);
       radialGrad.addColorStop(1, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0)`);
@@ -3646,7 +3647,7 @@ export function drawVisualizer(
       const x = startX + i * step;
       const numberOfBlocks = Math.max(1, Math.floor(barHeight / (blockHeight + blockGap)));
       
-      ctx.fillStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, i / totalBars);
+      ctx.fillStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, settings.frequencyBasedColoring ? Math.min(1.0, value / 255) : i / totalBars);
       
       for (let b = 0; b < numberOfBlocks; b++) {
         const blockY = midY - (b * (blockHeight + blockGap)) - blockHeight;
@@ -3786,7 +3787,7 @@ export function drawVisualizer(
     }
     
     if (points.length > 0) {
-      const rgb1 = hexToRgb(settings.primaryColor) || { r: 0, g: 255, b: 200 };
+      const rgb1 = hexToRgb(settings.primaryColor) || { r: 184, g: 238, b: 2 };
       const rgb2 = hexToRgb(settings.secondaryColor) || { r: 255, g: 0, b: 128 };
       
       const gradient = ctx.createLinearGradient(0, midY - height * 0.35, 0, midY + height * 0.35);
@@ -3872,7 +3873,7 @@ export function drawVisualizer(
       ctx.lineJoin = 'round';
       
       const reflexGrad = ctx.createLinearGradient(0, midY, 0, height);
-      const rgb = hexToRgb(settings.primaryColor) || { r: 0, g: 255, b: 200 };
+      const rgb = hexToRgb(settings.primaryColor) || { r: 184, g: 238, b: 2 };
       reflexGrad.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.55)`);
       reflexGrad.addColorStop(1, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.0)`);
       ctx.strokeStyle = reflexGrad;
@@ -3910,7 +3911,7 @@ export function drawVisualizer(
     const dotRadius = Math.max(1.5, computedBarWidth * 0.45);
     const dotGap = Math.max(2, computedBarWidth * 0.4);
     
-    const rgbPrimary = hexToRgb(settings.primaryColor) || { r: 0, g: 255, b: 200 };
+    const rgbPrimary = hexToRgb(settings.primaryColor) || { r: 184, g: 238, b: 2 };
     const rgbSecondary = hexToRgb(settings.secondaryColor) || { r: 255, g: 0, b: 128 };
 
     const maxIdx = Math.floor(dataLen * 0.65);
@@ -3967,7 +3968,7 @@ export function drawVisualizer(
     }
     
     if (points.length > 0) {
-      const rgb1 = hexToRgb(settings.primaryColor) || { r: 0, g: 255, b: 200 };
+      const rgb1 = hexToRgb(settings.primaryColor) || { r: 184, g: 238, b: 2 };
       const rgb2 = hexToRgb(settings.secondaryColor) || { r: 255, g: 0, b: 128 };
       
       // 1. Draw top mountain structure
@@ -4042,7 +4043,7 @@ export function drawVisualizer(
       const pinLength = (value / 255) * (height * 0.35) * settings.sensitivity + 2;
       const x = i * (computedBarWidth + spacing) + computedBarWidth / 2;
       
-      const pinColor = getDynamicColor(settings.primaryColor, settings.secondaryColor, i / totalBars);
+      const pinColor = getDynamicColor(settings.primaryColor, settings.secondaryColor, settings.frequencyBasedColoring ? Math.min(1.0, value / 255) : i / totalBars);
       
       // Top pins (glowing pins shooting upward)
       ctx.beginPath();
@@ -4147,7 +4148,7 @@ export function drawVisualizer(
     
     // Gradient reflection stroke
     const reflectionGrad = ctx.createLinearGradient(0, midY, 0, height);
-    const rgb = hexToRgb(settings.primaryColor) || { r: 0, g: 255, b: 200 };
+    const rgb = hexToRgb(settings.primaryColor) || { r: 184, g: 238, b: 2 };
     reflectionGrad.addColorStop(0, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.55)`);
     reflectionGrad.addColorStop(1, `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, 0.0)`);
     
@@ -4527,6 +4528,31 @@ export function drawVisualizer(
     }
   } else {
     drawChromaticAberration(mainCtx, visualizerWavesCanvas, beatIntensity);
+
+    if (settings.waterReflection) {
+      mainCtx.save();
+      const placement = settings.placement || 'center';
+      const stylePosition = settings.stylePositions?.[settings.style];
+      const styleSetting = settings.styleSettings?.[settings.style];
+      const yOffset = styleSetting?.yOffset !== undefined ? styleSetting.yOffset : (stylePosition?.yOffset !== undefined ? stylePosition.yOffset : undefined);
+      const defaultYPercent = placement === 'top' ? 25 : placement === 'bottom' ? 75 : 50;
+      const yPercent = yOffset !== undefined ? yOffset : defaultYPercent;
+      const baselineY = height * (yPercent / 100);
+      
+      mainCtx.translate(0, baselineY);
+      mainCtx.scale(1, -0.6);
+      mainCtx.translate(0, -baselineY);
+      
+      mainCtx.globalAlpha = 0.25;
+      mainCtx.globalCompositeOperation = 'screen';
+      if ('filter' in mainCtx) {
+        mainCtx.filter = 'blur(6px)';
+      }
+      
+      mainCtx.translate(0, 5); // Slight gap
+      drawChromaticAberration(mainCtx, visualizerWavesCanvas, beatIntensity);
+      mainCtx.restore();
+    }
   }
 
   mainCtx.restore();
@@ -4685,7 +4711,7 @@ function colorToRgba(colorStr: string | CanvasGradient, alpha: number): string |
     return colorStr; // Cannot change alpha of CanvasGradient easily this way, so return as is
   }
   if (colorStr.startsWith('#')) {
-    const rgb = hexToRgb(colorStr) || { r: 0, g: 255, b: 200 };
+    const rgb = hexToRgb(colorStr) || { r: 184, g: 238, b: 2 };
     return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${alpha})`;
   }
   if (colorStr.startsWith('rgb(')) {

@@ -205,6 +205,8 @@ export interface VisualizerSettings {
   midMapping?: 'none' | 'lineThickness' | 'glowStrength' | 'sensitivity' | 'horizontalScale' | 'verticalScale' | 'centerScale';
   trebleMapping?: 'none' | 'lineThickness' | 'glowStrength' | 'sensitivity' | 'horizontalScale' | 'verticalScale' | 'centerScale';
   oscillationMultiplier?: number;
+  waterReflection?: boolean;
+  frequencyBasedColoring?: boolean;
 }
 
 export interface ParticleSettings {
