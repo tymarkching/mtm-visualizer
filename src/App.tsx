@@ -1,5 +1,5 @@
 import React, { useState, useRef, useEffect } from 'react';
-import { motion, AnimatePresence } from 'motion/react';
+import { motion, AnimatePresence, useSpring } from 'motion/react';
 import {
   Play,
   Pause,
@@ -36,7 +36,7 @@ import {
   ArrowRight,
   ArrowDownRight,
   ArrowUpRight,
-  Share2
+  Share2, ChevronDown
 } from 'lucide-react';
 import localforage from 'localforage';
 import { guess } from 'web-audio-beat-detector';
@@ -550,6 +550,19 @@ export default function App() {
 
   // Core Visualizer Customizations
   const [visuals, setVisuals] = useState<VisualizerSettings>(PRESETS[0].visuals);
+  const [isPaletteDropdownOpen, setIsPaletteDropdownOpen] = useState<boolean>(false);
+
+  // Smoothly animate water reflection toggle
+  const waterReflectionAnim = useSpring(visuals.waterReflection ? 1 : 0, { stiffness: 60, damping: 15 });
+  useEffect(() => {
+    waterReflectionAnim.set(visuals.waterReflection ? 1 : 0);
+  }, [visuals.waterReflection, waterReflectionAnim]);
+
+  // Smoothly animate reflection depth to drive opacity fade-in
+  const waterDepthAnim = useSpring(visuals.waterReflectionDepth !== undefined ? visuals.waterReflectionDepth : 0.4, { stiffness: 80, damping: 20 });
+  useEffect(() => {
+    waterDepthAnim.set(visuals.waterReflectionDepth !== undefined ? visuals.waterReflectionDepth : 0.4);
+  }, [visuals.waterReflectionDepth, waterDepthAnim]);
   const [particlesSet, setParticlesSet] = useState<ParticleSettings>(() => ({
     type: 'stars' as ParticleType,
     count: 100,
@@ -3548,12 +3561,17 @@ export default function App() {
         });
       }
 
+      // Inject the animated water reflection alpha into the ref for rendering
+      const currentVisuals = { ...visualsRef.current };
+      currentVisuals._waterReflectionAnimValue = waterReflectionAnim.get();
+      currentVisuals._waterReflectionDepthAnimValue = waterDepthAnim.get();
+
       // 4. Draw Audio Waveform/Spectrums
       drawVisualizer(
         ctx,
         canvas.width,
         canvas.height,
-        visualsRef.current,
+        currentVisuals,
         analyserData,
         waveformData,
         beatIntensity
@@ -6679,43 +6697,70 @@ export default function App() {
                     {((visuals.colorMode || 'gradient') === 'gradient' || (visuals.colorMode || 'gradient') === 'solid') && (
                       <div className="pt-3">
                         <label className="block text-[10px] text-zinc-400 font-mono mb-2 uppercase tracking-wide">Global Color Palette</label>
-                        <div className="grid grid-cols-2 gap-2">
-                          {[
-                            { name: 'Sunset', colors: ['#ff4d4d', '#f9cb28', '#ff4d4d'] },
-                            { name: 'Ocean', colors: ['#00c6ff', '#0072ff', '#00c6ff'] },
-                            { name: 'Forest', colors: ['#11998e', '#38ef7d', '#11998e'] },
-                            { name: 'Monochrome', colors: ['#ffffff', '#434343', '#ffffff'] },
-                            { name: 'Cyberpunk', colors: ['#ff007f', '#00ffff', '#ff007f'] },
-                            { name: 'Amethyst', colors: ['#9D50BB', '#6E48AA', '#9D50BB'] },
-                            { name: 'Fire', colors: ['#f12711', '#f5af19', '#f12711'] },
-                            { name: 'Ice', colors: ['#1e3c72', '#2a5298', '#1e3c72'] },
-                            { name: 'Neon Toxic', colors: ['#39ff14', '#00ff00', '#39ff14'] },
-                            { name: 'Vaporwave', colors: ['#ff71ce', '#01cdfe', '#b967ff'] }
-                          ].map(theme => (
-                            <button
-                              key={theme.name}
-                              type="button"
-                              onClick={() => {
-                                setVisuals(prev => ({
-                                  ...prev,
-                                  primaryColor: theme.colors[0],
-                                  secondaryColor: theme.colors[1],
-                                  glowColor: theme.colors[2]
-                                }));
-                                setParticlesSet(prev => ({
-                                  ...prev,
-                                  color: theme.colors[0]
-                                }));
-                              }}
-                              className="flex items-center space-x-2 bg-zinc-950/40 border border-zinc-800 hover:border-zinc-600 rounded p-1.5 transition-all cursor-pointer group"
-                            >
-                              <div
-                                className="w-4 h-4 rounded-full border border-zinc-700 flex-shrink-0"
-                                style={{ background: `linear-gradient(to right, ${theme.colors[0]}, ${theme.colors[1]})` }}
-                              />
-                              <span className="text-[10px] text-zinc-400 group-hover:text-white font-sans truncate">{theme.name}</span>
-                            </button>
-                          ))}
+                        <div className="relative">
+                          <button
+                            type="button"
+                            onClick={() => setIsPaletteDropdownOpen(!isPaletteDropdownOpen)}
+                            className="w-full flex items-center justify-between bg-zinc-900/50 border border-zinc-800 hover:border-zinc-700 rounded-lg p-2 transition-colors"
+                          >
+                            <span className="text-xs text-zinc-300 font-sans">Select Preset Palette...</span>
+                            <ChevronDown className={`w-4 h-4 text-zinc-500 transition-transform ${isPaletteDropdownOpen ? 'rotate-180' : ''}`} />
+                          </button>
+                          
+                          <AnimatePresence>
+                            {isPaletteDropdownOpen && (
+                              <motion.div
+                                initial={{ opacity: 0, y: -5 }}
+                                animate={{ opacity: 1, y: 0 }}
+                                exit={{ opacity: 0, y: -5 }}
+                                transition={{ duration: 0.15 }}
+                                className="absolute top-full left-0 right-0 mt-1 z-50 max-h-48 overflow-y-auto bg-zinc-950 border border-zinc-800 rounded-lg shadow-xl"
+                              >
+                                {[
+                                  { name: 'Sunset', colors: ['#ff4d4d', '#f9cb28', '#ff4d4d'] },
+                                  { name: 'Ocean', colors: ['#00c6ff', '#0072ff', '#00c6ff'] },
+                                  { name: 'Forest', colors: ['#11998e', '#38ef7d', '#11998e'] },
+                                  { name: 'Monochrome', colors: ['#ffffff', '#434343', '#ffffff'] },
+                                  { name: 'Cyberpunk', colors: ['#ff007f', '#00ffff', '#ff007f'] },
+                                  { name: 'Amethyst', colors: ['#9D50BB', '#6E48AA', '#9D50BB'] },
+                                  { name: 'Fire', colors: ['#f12711', '#f5af19', '#f12711'] },
+                                  { name: 'Ice', colors: ['#1e3c72', '#2a5298', '#1e3c72'] },
+                                  { name: 'Neon Toxic', colors: ['#39ff14', '#00ff00', '#39ff14'] },
+                                  { name: 'Vaporwave', colors: ['#ff71ce', '#01cdfe', '#b967ff'] },
+                                  { name: 'Crimson Night', colors: ['#8b0000', '#ff0000', '#ff4500'] },
+                                  { name: 'Golden Hour', colors: ['#ffb347', '#ffcc33', '#ffd700'] },
+                                  { name: 'Midnight Blue', colors: ['#191970', '#000080', '#0000cd'] },
+                                  { name: 'Emerald City', colors: ['#50c878', '#00ff7f', '#3cb371'] },
+                                  { name: 'Cotton Candy', colors: ['#ffbcd9', '#c4e0f9', '#ffbcd9'] }
+                                ].map(theme => (
+                                  <button
+                                    key={theme.name}
+                                    type="button"
+                                    onClick={() => {
+                                      setVisuals(prev => ({
+                                        ...prev,
+                                        primaryColor: theme.colors[0],
+                                        secondaryColor: theme.colors[1],
+                                        glowColor: theme.colors[2]
+                                      }));
+                                      setParticlesSet(prev => ({
+                                        ...prev,
+                                        color: theme.colors[0]
+                                      }));
+                                      setIsPaletteDropdownOpen(false);
+                                    }}
+                                    className="w-full flex items-center space-x-3 px-3 py-2 hover:bg-zinc-900 transition-colors text-left"
+                                  >
+                                    <div
+                                      className="w-4 h-4 rounded-full border border-zinc-700 flex-shrink-0"
+                                      style={{ background: `linear-gradient(to right, ${theme.colors[0]}, ${theme.colors[1]})` }}
+                                    />
+                                    <span className="text-[11px] text-zinc-300 group-hover:text-white font-sans">{theme.name}</span>
+                                  </button>
+                                ))}
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
                         </div>
                       </div>
                     )}
@@ -8036,22 +8081,321 @@ export default function App() {
                         )}
 
                         {/* Water Reflection Filter */}
-                        <div className="flex items-center justify-between p-2.5 bg-[#07070a]/80 rounded border border-zinc-950/60 mt-3">
-                          <div className="text-left max-w-[78%]">
-                            <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Water Surface Reflection</span>
-                            <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Render a watery rippled reflection on the lower half of the visualizer canvas</span>
+                        <div className="flex flex-col gap-2 p-2.5 bg-[#07070a]/80 rounded border border-zinc-950/60 mt-3">
+                          <div className="flex items-center justify-between">
+                            <div className="text-left max-w-[78%]">
+                              <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Water Surface Reflection</span>
+                              <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Render a watery rippled reflection on the lower half of the visualizer canvas</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setVisuals(prev => ({ ...prev, waterReflection: !prev.waterReflection }))}
+                              className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                                visuals.waterReflection ? 'bg-brand-green' : 'bg-zinc-800'
+                              }`}
+                            >
+                              <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                                visuals.waterReflection ? 'translate-x-3.5' : 'translate-x-0'
+                              }`} />
+                            </button>
                           </div>
-                          <button
-                            type="button"
-                            onClick={() => setVisuals(prev => ({ ...prev, waterReflection: !prev.waterReflection }))}
-                            className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
-                              visuals.waterReflection ? 'bg-brand-green' : 'bg-zinc-800'
-                            }`}
-                          >
-                            <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
-                              visuals.waterReflection ? 'translate-x-3.5' : 'translate-x-0'
-                            }`} />
-                          </button>
+                          
+                          <AnimatePresence>
+                            {visuals.waterReflection && (
+                              <motion.div
+                                initial={{ height: 0, opacity: 0 }}
+                                animate={{ height: 'auto', opacity: 1 }}
+                                exit={{ height: 0, opacity: 0 }}
+                                transition={{ duration: 0.3, ease: "easeInOut" }}
+                                className="pt-2 mt-1 border-t border-zinc-900/50 space-y-3 overflow-hidden"
+                              >
+                                <div className="grid grid-cols-2 gap-2 mb-3">
+                                <button
+                                  type="button"
+                                  onClick={() => setVisuals(prev => ({
+                                    ...prev,
+                                    waterReflectionTint: '#00ffff',
+                                    waterReflectionOpacity: 0.6,
+                                    waterReflectionBlur: 4,
+                                    waterRefractionScale: 1.5,
+                                    waterBeatIntensityMod: 1.2,
+                                    waterRippleSpeed: 1.2,
+                                    waterReflectionDepth: 0.5,
+                                    waterRippleTexture: true,
+                                    waterDistortion: true,
+                                    waterRippleIntensity: 0.8,
+                                    waterSyncToWaveform: true,
+                                    waterColorShift: false
+                                  }))}
+                                  className="w-full bg-cyan-900/40 hover:bg-cyan-900/60 text-cyan-400 text-[10px] font-mono uppercase py-1.5 px-2 rounded border border-cyan-900/50 transition-colors truncate"
+                                >
+                                  Tropical Lagoon
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setVisuals(prev => ({
+                                    ...prev,
+                                    waterReflectionTint: '#8800ff',
+                                    waterReflectionOpacity: 0.7,
+                                    waterReflectionBlur: 3,
+                                    waterRefractionScale: 2.0,
+                                    waterBeatIntensityMod: 2.5,
+                                    waterRippleSpeed: 0.8,
+                                    waterReflectionDepth: 0.7,
+                                    waterRippleTexture: true,
+                                    waterDistortion: true,
+                                    waterRippleIntensity: 1.2,
+                                    waterSyncToWaveform: true,
+                                    waterColorShift: true
+                                  }))}
+                                  className="w-full bg-purple-900/40 hover:bg-purple-900/60 text-purple-400 text-[10px] font-mono uppercase py-1.5 px-2 rounded border border-purple-900/50 transition-colors truncate"
+                                >
+                                  Midnight River
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setVisuals(prev => ({
+                                    ...prev,
+                                    waterReflectionTint: '#00ff44',
+                                    waterReflectionOpacity: 0.8,
+                                    waterReflectionBlur: 6,
+                                    waterRefractionScale: 3.0,
+                                    waterBeatIntensityMod: 1.8,
+                                    waterRippleSpeed: 1.5,
+                                    waterReflectionDepth: 0.4,
+                                    waterRippleTexture: true,
+                                    waterDistortion: true,
+                                    waterRippleIntensity: 1.5,
+                                    waterSyncToWaveform: true,
+                                    waterColorShift: false
+                                  }))}
+                                  className="w-full bg-green-900/40 hover:bg-green-900/60 text-green-400 text-[10px] font-mono uppercase py-1.5 px-2 rounded border border-green-900/50 transition-colors truncate"
+                                >
+                                  Toxic Sludge
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setVisuals(prev => ({
+                                    ...prev,
+                                    waterReflectionTint: '#ffaa00',
+                                    waterReflectionOpacity: 0.9,
+                                    waterReflectionBlur: 1,
+                                    waterRefractionScale: 0.5,
+                                    waterBeatIntensityMod: 0.5,
+                                    waterRippleSpeed: 2.0,
+                                    waterReflectionDepth: 0.3,
+                                    waterRippleTexture: false,
+                                    waterDistortion: true,
+                                    waterRippleIntensity: 0.3,
+                                    waterSyncToWaveform: false,
+                                    waterColorShift: false
+                                  }))}
+                                  className="w-full bg-orange-900/40 hover:bg-orange-900/60 text-orange-400 text-[10px] font-mono uppercase py-1.5 px-2 rounded border border-orange-900/50 transition-colors truncate"
+                                >
+                                  Liquid Gold
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setVisuals(prev => ({
+                                    ...prev,
+                                    waterReflectionTint: '#ffffff',
+                                    waterReflectionOpacity: 0.4,
+                                    waterReflectionBlur: 2,
+                                    waterRefractionScale: 1,
+                                    waterBeatIntensityMod: 1,
+                                    waterRippleSpeed: 1,
+                                    waterReflectionDepth: 0.4,
+                                    waterRippleTexture: false,
+                                    waterDistortion: false,
+                                    waterRippleIntensity: 0.2,
+                                    waterSyncToWaveform: false,
+                                    waterColorShift: false
+                                  }))}
+                                  className="w-full col-span-2 bg-zinc-800 hover:bg-zinc-700 text-zinc-300 text-[10px] font-mono uppercase py-1.5 rounded border border-zinc-700 transition-colors"
+                                >
+                                  Reset Effects
+                                </button>
+                              </div>
+
+                              <div>
+                                <label className="flex justify-between text-[10px] font-semibold text-zinc-400 font-mono uppercase mb-1">
+                                  <span>Reflection Depth</span>
+                                  <span className="text-zinc-500">{((visuals.waterReflectionDepth !== undefined ? visuals.waterReflectionDepth : 0.4)).toFixed(2)}</span>
+                                </label>
+                                <input
+                                  type="range"
+                                  min="0.1"
+                                  max="1"
+                                  step="0.05"
+                                  value={visuals.waterReflectionDepth !== undefined ? visuals.waterReflectionDepth : 0.4}
+                                  onChange={(e) => setVisuals(prev => ({ ...prev, waterReflectionDepth: parseFloat(e.target.value) }))}
+                                  className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-brand-green"
+                                />
+                              </div>
+                              
+                              <div>
+                                <label className="flex justify-between text-[10px] font-semibold text-zinc-400 font-mono uppercase mb-1">
+                                  <span>Ripple Speed</span>
+                                  <span className="text-zinc-500">{((visuals.waterRippleSpeed !== undefined ? visuals.waterRippleSpeed : 1)).toFixed(1)}x</span>
+                                </label>
+                                <input
+                                  type="range"
+                                  min="0.1"
+                                  max="5"
+                                  step="0.1"
+                                  value={visuals.waterRippleSpeed !== undefined ? visuals.waterRippleSpeed : 1}
+                                  onChange={(e) => setVisuals(prev => ({ ...prev, waterRippleSpeed: parseFloat(e.target.value) }))}
+                                  className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-brand-green"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="flex justify-between text-[10px] font-semibold text-zinc-400 font-mono uppercase mb-1">
+                                  <span>Refraction Scale</span>
+                                  <span className="text-zinc-500">{((visuals.waterRefractionScale !== undefined ? visuals.waterRefractionScale : 1)).toFixed(1)}</span>
+                                </label>
+                                <input
+                                  type="range"
+                                  min="0"
+                                  max="5"
+                                  step="0.1"
+                                  value={visuals.waterRefractionScale !== undefined ? visuals.waterRefractionScale : 1}
+                                  onChange={(e) => setVisuals(prev => ({ ...prev, waterRefractionScale: parseFloat(e.target.value) }))}
+                                  className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-brand-green"
+                                />
+                              </div>
+                              <div>
+                                <label className="flex justify-between text-[10px] font-semibold text-zinc-400 font-mono uppercase mb-1">
+                                  <span>Beat Intensity Mod</span>
+                                  <span className="text-zinc-500">{((visuals.waterBeatIntensityMod !== undefined ? visuals.waterBeatIntensityMod : 1)).toFixed(1)}</span>
+                                </label>
+                                <input
+                                  type="range"
+                                  min="0"
+                                  max="5"
+                                  step="0.1"
+                                  value={visuals.waterBeatIntensityMod !== undefined ? visuals.waterBeatIntensityMod : 1}
+                                  onChange={(e) => setVisuals(prev => ({ ...prev, waterBeatIntensityMod: parseFloat(e.target.value) }))}
+                                  className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-brand-green"
+                                />
+                              </div>
+                              
+                              <div className="flex items-center justify-between pt-2 border-t border-zinc-900/50">
+                                <div className="text-left">
+                                  <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Ripple Texture</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setVisuals(prev => ({ ...prev, waterRippleTexture: !prev.waterRippleTexture }))}
+                                  className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                                    visuals.waterRippleTexture ? 'bg-brand-green' : 'bg-zinc-800'
+                                  }`}
+                                >
+                                  <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                                    visuals.waterRippleTexture ? 'translate-x-3.5' : 'translate-x-0'
+                                  }`} />
+                                </button>
+                              </div>
+
+                              <div className="flex items-center justify-between pt-2 border-t border-zinc-900/50">
+                                <div className="text-left">
+                                  <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Water Distortion</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setVisuals(prev => ({ ...prev, waterDistortion: !prev.waterDistortion }))}
+                                  className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                                    visuals.waterDistortion ? 'bg-brand-green' : 'bg-zinc-800'
+                                  }`}
+                                >
+                                  <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                                    visuals.waterDistortion ? 'translate-x-3.5' : 'translate-x-0'
+                                  }`} />
+                                </button>
+                              </div>
+
+                              <div>
+                                <label className="flex justify-between text-[10px] font-semibold text-zinc-400 font-mono uppercase mb-1">
+                                  <span>Ripple Intensity</span>
+                                  <span className="text-zinc-500">{((visuals.waterRippleIntensity !== undefined ? visuals.waterRippleIntensity : 0.5)).toFixed(2)}</span>
+                                </label>
+                                <input
+                                  type="range"
+                                  min="0"
+                                  max="2"
+                                  step="0.05"
+                                  value={visuals.waterRippleIntensity !== undefined ? visuals.waterRippleIntensity : 0.5}
+                                  onChange={(e) => setVisuals(prev => ({ ...prev, waterRippleIntensity: parseFloat(e.target.value) }))}
+                                  className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-brand-green"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="flex justify-between text-[10px] font-semibold text-zinc-400 font-mono uppercase mb-1">
+                                  <span>Reflection Blur</span>
+                                  <span className="text-zinc-500">{((visuals.waterReflectionBlur !== undefined ? visuals.waterReflectionBlur : 2)).toFixed(1)}px</span>
+                                </label>
+                                <input
+                                  type="range"
+                                  min="0"
+                                  max="20"
+                                  step="0.5"
+                                  value={visuals.waterReflectionBlur !== undefined ? visuals.waterReflectionBlur : 2}
+                                  onChange={(e) => setVisuals(prev => ({ ...prev, waterReflectionBlur: parseFloat(e.target.value) }))}
+                                  className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-brand-green"
+                                />
+                              </div>
+
+                              <div>
+                                <label className="flex justify-between text-[10px] font-semibold text-zinc-400 font-mono uppercase mb-1">
+                                  <span>Opacity</span>
+                                  <span className="text-zinc-500">{Math.round((visuals.waterReflectionOpacity !== undefined ? visuals.waterReflectionOpacity : 0.4) * 100)}%</span>
+                                </label>
+                                <input
+                                  type="range"
+                                  min="0.1"
+                                  max="1"
+                                  step="0.05"
+                                  value={visuals.waterReflectionOpacity !== undefined ? visuals.waterReflectionOpacity : 0.4}
+                                  onChange={(e) => setVisuals(prev => ({ ...prev, waterReflectionOpacity: parseFloat(e.target.value) }))}
+                                  className="w-full h-1 bg-zinc-800 rounded-lg appearance-none cursor-pointer accent-brand-green"
+                                />
+                              </div>
+
+                              <div className="flex items-center justify-between">
+                                <label className="text-[10px] font-semibold text-zinc-400 font-mono uppercase">Reflection Tint</label>
+                                <div className="flex items-center gap-2">
+                                  <div className="text-[10px] text-zinc-500 font-mono uppercase">{visuals.waterReflectionTint || '#ffffff'}</div>
+                                  <input
+                                    type="color"
+                                    value={visuals.waterReflectionTint || '#ffffff'}
+                                    onChange={(e) => setVisuals(prev => ({ ...prev, waterReflectionTint: e.target.value }))}
+                                    className="w-6 h-6 rounded cursor-pointer bg-transparent border-0 p-0"
+                                  />
+                                </div>
+                              </div>
+
+
+
+                              <div className="flex items-center justify-between pt-2 border-t border-zinc-900/50">
+                                <div className="text-left">
+                                  <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Color Shift</span>
+                                </div>
+                                <button
+                                  type="button"
+                                  onClick={() => setVisuals(prev => ({ ...prev, waterColorShift: !prev.waterColorShift }))}
+                                  className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                                    visuals.waterColorShift ? 'bg-brand-green' : 'bg-zinc-800'
+                                  }`}
+                                >
+                                  <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                                    visuals.waterColorShift ? 'translate-x-3.5' : 'translate-x-0'
+                                  }`} />
+                                </button>
+                              </div>
+                              </motion.div>
+                            )}
+                          </AnimatePresence>
                         </div>
                       </div>
 

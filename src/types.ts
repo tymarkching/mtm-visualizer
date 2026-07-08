@@ -206,6 +206,18 @@ export interface VisualizerSettings {
   trebleMapping?: 'none' | 'lineThickness' | 'glowStrength' | 'sensitivity' | 'horizontalScale' | 'verticalScale' | 'centerScale';
   oscillationMultiplier?: number;
   waterReflection?: boolean;
+  waterRefractionScale?: number;
+  waterBeatIntensityMod?: number;
+  waterReflectionTint?: string;
+  waterReflectionOpacity?: number;
+  waterReflectionBlur?: number;
+  waterRippleTexture?: boolean;
+  waterDistortion?: boolean;
+  waterRippleIntensity?: number;
+  waterRippleSpeed?: number;
+  waterReflectionDepth?: number;
+  waterColorShift?: boolean;
+  waterSyncToWaveform?: boolean;
   frequencyBasedColoring?: boolean;
 }
 

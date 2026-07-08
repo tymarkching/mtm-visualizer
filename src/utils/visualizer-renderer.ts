@@ -31,6 +31,8 @@ let mirrorInvertedOffscreenCtxY: CanvasRenderingContext2D | null = null;
 
 // Dedicated offscreen canvas for isolating visualizer drawing from main canvas background/videos/text
 let visualizerWavesCanvas: HTMLCanvasElement | null = null;
+let waterReflectionCanvas: HTMLCanvasElement | null = null;
+let noiseTextureCanvas: HTMLCanvasElement | null = null;
 let globalActiveStyleColor: string | CanvasGradient | null = null;
 
 interface Shockwave {
@@ -4529,8 +4531,19 @@ export function drawVisualizer(
   } else {
     drawChromaticAberration(mainCtx, visualizerWavesCanvas, beatIntensity);
 
-    if (settings.waterReflection) {
-      mainCtx.save();
+    const reflectionAnimVal = (settings as any)._waterReflectionAnimValue !== undefined ? (settings as any)._waterReflectionAnimValue : (settings.waterReflection ? 1 : 0);
+    
+    if (reflectionAnimVal > 0.01) {
+      if (!waterReflectionCanvas) {
+        waterReflectionCanvas = document.createElement('canvas');
+      }
+      if (waterReflectionCanvas.width !== width || waterReflectionCanvas.height !== height) {
+        waterReflectionCanvas.width = width;
+        waterReflectionCanvas.height = height;
+      }
+      const waterCtx = waterReflectionCanvas.getContext('2d')!;
+      waterCtx.clearRect(0, 0, width, height);
+      
       const placement = settings.placement || 'center';
       const stylePosition = settings.stylePositions?.[settings.style];
       const styleSetting = settings.styleSettings?.[settings.style];
@@ -4539,18 +4552,156 @@ export function drawVisualizer(
       const yPercent = yOffset !== undefined ? yOffset : defaultYPercent;
       const baselineY = height * (yPercent / 100);
       
-      mainCtx.translate(0, baselineY);
-      mainCtx.scale(1, -0.6);
-      mainCtx.translate(0, -baselineY);
+      let depth = settings.waterReflectionDepth !== undefined ? settings.waterReflectionDepth : 0.4;
       
-      mainCtx.globalAlpha = 0.25;
-      mainCtx.globalCompositeOperation = 'screen';
-      if ('filter' in mainCtx) {
-        mainCtx.filter = 'blur(6px)';
+      if (settings.waterSyncToWaveform) {
+        // Modulate vertical depth scale based on beat intensity
+        depth = depth * (1.0 + beatIntensity * 0.5);
       }
       
-      mainCtx.translate(0, 5); // Slight gap
-      drawChromaticAberration(mainCtx, visualizerWavesCanvas, beatIntensity);
+      // Adjust baseline based on depth to keep it anchored near the source
+      // The larger the depth, the less we need to push it down
+      const depthOffset = 0.15 * (0.4 / Math.max(0.1, depth));
+      const reflectionBaseline = baselineY + (height * depthOffset); 
+      
+      waterCtx.save();
+      waterCtx.translate(0, reflectionBaseline);
+      waterCtx.scale(1, -depth); // Scale vertically based on depth slider
+      waterCtx.translate(0, -baselineY);
+      
+      const refractionScale = settings.waterRefractionScale !== undefined ? settings.waterRefractionScale : 1;
+      const beatMod = settings.waterBeatIntensityMod !== undefined ? settings.waterBeatIntensityMod : 1;
+      const rippleSpeed = settings.waterRippleSpeed !== undefined ? settings.waterRippleSpeed : 1;
+      
+      // Time-based harmonic oscillation + beat-based burst
+      const t = performance.now() * 0.0015 * rippleSpeed;
+      const rippleIntMult = settings.waterRippleIntensity !== undefined ? settings.waterRippleIntensity * 2.0 : 1.0;
+      const dynamicIntensity = (1.0 + beatIntensity * beatMod * 5.0) * refractionScale * rippleIntMult;
+      
+      // Slice rendering for ripple effect
+      const sliceCount = 20; 
+      const sliceHeight = Math.ceil(height / sliceCount);
+      const maxDist = Math.max(baselineY, height - baselineY, 1);
+      for (let y = 0; y < height; y += sliceHeight) {
+        const distFromBaseline = Math.abs(y - baselineY);
+        const normalizedDist = distFromBaseline / maxDist;
+        
+        const wave1 = Math.sin(t * 2.0 + normalizedDist * 30.0);
+        const wave2 = Math.cos(t * 1.5 - normalizedDist * 45.0);
+        
+        const xOffset = (wave1 + wave2 * 0.5) * (normalizedDist * 20.0 * dynamicIntensity);
+        
+        waterCtx.drawImage(
+          visualizerWavesCanvas!,
+          0, y, width, sliceHeight,
+          xOffset, y, width, sliceHeight
+        );
+        
+        if (settings.waterDistortion) {
+           waterCtx.save();
+           waterCtx.globalCompositeOperation = 'screen';
+           // Red shift
+           waterCtx.shadowColor = 'rgba(255, 0, 0, 0.6)';
+           waterCtx.shadowBlur = 0;
+           waterCtx.shadowOffsetX = width * 2 - (normalizedDist * 8.0 * dynamicIntensity);
+           waterCtx.drawImage(
+              visualizerWavesCanvas!,
+              0, y, width, sliceHeight,
+              xOffset - width * 2, y, width, sliceHeight
+           );
+           // Blue shift
+           waterCtx.shadowColor = 'rgba(0, 50, 255, 0.6)';
+           waterCtx.shadowBlur = 0;
+           waterCtx.shadowOffsetX = width * 2 + (normalizedDist * 8.0 * dynamicIntensity);
+           waterCtx.drawImage(
+              visualizerWavesCanvas!,
+              0, y, width, sliceHeight,
+              xOffset - width * 2, y, width, sliceHeight
+           );
+           waterCtx.restore();
+        }
+      }
+      waterCtx.restore();
+      
+      // Apply Tint
+      waterCtx.save();
+      waterCtx.globalCompositeOperation = 'source-atop';
+      
+      let hueShift = 0;
+      if (settings.waterColorShift) {
+        // Shift hue based on time or beat
+        hueShift = (performance.now() * 0.05 + beatIntensity * 50) % 360;
+        waterCtx.filter = `hue-rotate(${hueShift}deg)`;
+      }
+      
+      if (settings.waterReflectionTint && settings.waterReflectionTint !== '#ffffff') {
+        waterCtx.fillStyle = settings.waterReflectionTint;
+        waterCtx.globalAlpha = 0.8;
+        waterCtx.fillRect(0, 0, width, height);
+      }
+      
+      waterCtx.restore();
+      
+
+      
+      // Apply Noise Texture if enabled
+      if (settings.waterRippleTexture) {
+        if (!noiseTextureCanvas) {
+          noiseTextureCanvas = document.createElement('canvas');
+          noiseTextureCanvas.width = 256;
+          noiseTextureCanvas.height = 256;
+          const noiseCtx = noiseTextureCanvas.getContext('2d')!;
+          const imgData = noiseCtx.createImageData(256, 256);
+          for (let i = 0; i < imgData.data.length; i += 4) {
+            const v = Math.random() * 255;
+            imgData.data[i] = v;
+            imgData.data[i+1] = v;
+            imgData.data[i+2] = v;
+            imgData.data[i+3] = 40; // low opacity noise
+          }
+          noiseCtx.putImageData(imgData, 0, 0);
+        }
+        
+        waterCtx.globalCompositeOperation = 'source-atop';
+        waterCtx.globalAlpha = 0.15;
+        // Scroll the noise texture based on time to simulate flowing water
+        const noiseOffsetX = (performance.now() * 0.05) % 256;
+        const noiseOffsetY = (performance.now() * 0.02) % 256;
+        
+        waterCtx.save();
+        waterCtx.translate(noiseOffsetX, noiseOffsetY);
+        const pat = waterCtx.createPattern(noiseTextureCanvas, 'repeat');
+        if (pat) {
+          waterCtx.fillStyle = pat;
+          waterCtx.fillRect(-noiseOffsetX, -noiseOffsetY, width, height);
+        }
+        waterCtx.restore();
+        waterCtx.globalAlpha = 1.0;
+        waterCtx.globalCompositeOperation = 'source-over';
+      }
+      
+      // Draw the composed reflection canvas back to the main canvas
+      mainCtx.save();
+      let baseOpacity = settings.waterReflectionOpacity !== undefined ? settings.waterReflectionOpacity : 0.4;
+      
+      if (settings.waterSyncToWaveform) {
+        baseOpacity = Math.min(1.0, baseOpacity * (0.5 + beatIntensity * 1.5));
+      }
+      // Apply the animated toggle transition value, and smoothly tie to depth
+      const depthAnimVal = (settings as any)._waterReflectionDepthAnimValue !== undefined ? (settings as any)._waterReflectionDepthAnimValue : 0.4;
+      // Fade in smoothly as depth increases (scale base opacity up to 1.5x based on depth)
+      const depthFadeMultiplier = Math.min(1.5, Math.max(0.1, depthAnimVal / 0.4));
+      mainCtx.globalAlpha = baseOpacity * reflectionAnimVal * depthFadeMultiplier;
+      mainCtx.globalCompositeOperation = 'screen';
+      
+      const blurAmount = settings.waterReflectionBlur !== undefined ? settings.waterReflectionBlur : 2;
+      if (blurAmount > 0 && 'filter' in mainCtx) {
+        mainCtx.filter = `blur(${blurAmount}px)`;
+      } else if ('filter' in mainCtx) {
+        mainCtx.filter = 'none';
+      }
+      
+      mainCtx.drawImage(waterReflectionCanvas, 0, 0);
       mainCtx.restore();
     }
   }
