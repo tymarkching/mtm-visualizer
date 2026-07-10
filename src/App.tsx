@@ -36,7 +36,7 @@ import {
   ArrowRight,
   ArrowDownRight,
   ArrowUpRight,
-  Share2, ChevronDown
+  Share2, ChevronDown, Mic, Radio, HelpCircle
 } from 'lucide-react';
 import localforage from 'localforage';
 import { guess } from 'web-audio-beat-detector';
@@ -640,13 +640,25 @@ export default function App() {
   // Audio Playback & Web Audio API state
   // SFX Tab States
   const [sfxEcho, setSfxEcho] = useState<boolean>(false);
+  const [sfxBassBoost, setSfxBassBoost] = useState<boolean>(false);
   const [sfxDelayTime, setSfxDelayTime] = useState<number>(0.3);
   const [sfxFeedback, setSfxFeedback] = useState<number>(0.4);
   const [sfxReverbSpace, setSfxReverbSpace] = useState<'none' | 'room' | 'hall' | 'cosmic'>('none');
   const [sfxReverbMix, setSfxReverbMix] = useState<number>(0.3);
+  const [sfxReverbDecay, setSfxReverbDecay] = useState<number>(2.0);
   const [sfxPan, setSfxPan] = useState<number>(0.0);
   const [sfxAutoPan, setSfxAutoPan] = useState<boolean>(false);
   const [sfxPlaybackRate, setSfxPlaybackRate] = useState<number>(1.0);
+
+  // Voice Morphing & Disguise States
+  const [sfxVoicePreset, setSfxVoicePreset] = useState<'none' | 'demon' | 'robot' | 'radio' | 'alien' | 'custom'>('none');
+  const [sfxVoicePitch, setSfxVoicePitch] = useState<number>(0); // -12 to 12 semitones
+  const [sfxRingModMix, setSfxRingModMix] = useState<number>(0.0); // 0.0 to 1.0 (dry/wet)
+  const [sfxRingModFreq, setSfxRingModFreq] = useState<number>(100); // 30Hz to 1500Hz
+  const [sfxRingModWave, setSfxRingModWave] = useState<'sine' | 'triangle' | 'sawtooth' | 'square'>('sine');
+  const [sfxVocoderMix, setSfxVocoderMix] = useState<number>(0.0); // 0.0 to 1.0 (dry/wet)
+  const [sfxVocoderCarrierFreq, setSfxVocoderCarrierFreq] = useState<number>(110); // 60Hz to 400Hz
+  const [sfxVocoderWave, setSfxVocoderWave] = useState<'sawtooth' | 'triangle' | 'square'>('sawtooth');
 
   // DSP States
   const [dspPlaybackSpeed, setDspPlaybackSpeed] = useState<number>(1.0);
@@ -660,11 +672,22 @@ export default function App() {
 
   // SFX Refs
   const delayNodeRef = useRef<DelayNode | null>(null);
+  const sfxBassBoostFilterRef = useRef<BiquadFilterNode | null>(null);
   const echoWetGainNodeRef = useRef<GainNode | null>(null);
   const feedbackGainNodeRef = useRef<GainNode | null>(null);
   const convolverNodeRef = useRef<ConvolverNode | null>(null);
   const reverbWetGainNodeRef = useRef<GainNode | null>(null);
   const stereoPannerNodeRef = useRef<StereoPannerNode | null>(null);
+
+  // Voice Morphing & Disguise Refs
+  const sfxRingModOscRef = useRef<OscillatorNode | null>(null);
+  const sfxRingModDryGainRef = useRef<GainNode | null>(null);
+  const sfxRingModWetGainRef = useRef<GainNode | null>(null);
+  const sfxVocoderOsc1Ref = useRef<OscillatorNode | null>(null);
+  const sfxVocoderOsc2Ref = useRef<OscillatorNode | null>(null);
+  const sfxVocoderDryGainRef = useRef<GainNode | null>(null);
+  const sfxVocoderWetGainRef = useRef<GainNode | null>(null);
+  const sfxVocoderBandpassRef = useRef<BiquadFilterNode | null>(null);
 
   // DSP Refs
   const dspDelayNodeRef = useRef<DelayNode | null>(null);
@@ -711,7 +734,7 @@ export default function App() {
       try {
         const ctx = audioContextRef.current;
         if (sfxReverbSpace !== 'none') {
-          const dur = sfxReverbSpace === 'room' ? 0.8 : sfxReverbSpace === 'hall' ? 2.0 : 4.5;
+          const dur = sfxReverbDecay;
           const dec = sfxReverbSpace === 'room' ? 5.0 : sfxReverbSpace === 'hall' ? 3.0 : 1.5;
           convolverNodeRef.current.buffer = createImpulseResponse(ctx, dur, dec);
         } else {
@@ -724,7 +747,7 @@ export default function App() {
         reverbWetGainNodeRef.current.gain.setTargetAtTime(sfxReverbSpace !== 'none' ? sfxReverbMix : 0.0, audioContextRef.current.currentTime, 0.01);
       } catch (err) {}
     }
-  }, [sfxReverbSpace, sfxReverbMix]);
+  }, [sfxReverbSpace, sfxReverbMix, sfxReverbDecay]);
 
   useEffect(() => {
     if (stereoPannerNodeRef.current && audioContextRef.current && !sfxAutoPan) {
@@ -742,6 +765,85 @@ export default function App() {
     }
   }, [sfxPlaybackRate]);
 
+  // Real-time Visual Signal Indicators loop in FX Studio
+  useEffect(() => {
+    if (activeTab !== 'sfx') return;
+
+    let animId: number;
+    const smoothLevels = new Array(10).fill(0);
+    let overallPeakSmooth = 0;
+
+    const update = () => {
+      if (analyserRef.current) {
+        try {
+          const fftSize = analyserRef.current.fftSize;
+          const sampleRate = analyserRef.current.context.sampleRate;
+          const bufferLength = analyserRef.current.frequencyBinCount;
+          const dataArray = new Uint8Array(bufferLength);
+          analyserRef.current.getByteFrequencyData(dataArray);
+
+          // We have 10 bands: [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
+          const freqs = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+
+          freqs.forEach((f, idx) => {
+            // Calculate approximate bin index
+            const bin = Math.round((f * fftSize) / sampleRate);
+            // Clamp to valid index
+            const clampedBin = Math.max(0, Math.min(bufferLength - 1, bin));
+            
+            // Get value, normalize to 0-1
+            const rawVal = dataArray[clampedBin] / 255;
+            
+            let multiplier = 1.0;
+            if (f > 1000) multiplier = 1.4;
+            if (f > 4000) multiplier = 1.8;
+            if (f > 8000) multiplier = 2.5;
+            
+            const targetVal = Math.min(1.0, rawVal * multiplier);
+
+            // Apply smoothing / decay
+            smoothLevels[idx] = smoothLevels[idx] * 0.75 + targetVal * 0.25;
+
+            const element = document.getElementById(`eq-signal-${idx}`);
+            if (element) {
+              element.style.width = `${smoothLevels[idx] * 100}%`;
+              element.style.opacity = `${0.2 + smoothLevels[idx] * 0.8}`;
+            }
+          });
+
+          // Calculate overall peak from time domain waveform data
+          const timeData = new Uint8Array(fftSize);
+          analyserRef.current.getByteTimeDomainData(timeData);
+          let maxDeviation = 0;
+          for (let i = 0; i < timeData.length; i++) {
+            const dev = Math.abs(timeData[i] - 128);
+            if (dev > maxDeviation) maxDeviation = dev;
+          }
+          const peak = maxDeviation / 128; // 0.0 to 1.0
+          
+          // Smooth the overall peak
+          overallPeakSmooth = overallPeakSmooth * 0.8 + peak * 0.2;
+
+          // Update general peak level DOM elements
+          const ids = ['delay-signal-peak', 'reverb-signal-peak', 'speed-signal-peak', 'panner-signal-peak'];
+          ids.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) {
+              el.style.width = `${overallPeakSmooth * 100}%`;
+              el.style.opacity = `${0.2 + overallPeakSmooth * 0.8}`;
+            }
+          });
+        } catch (err) {}
+      }
+      animId = requestAnimationFrame(update);
+    };
+
+    animId = requestAnimationFrame(update);
+    return () => {
+      cancelAnimationFrame(animId);
+    };
+  }, [activeTab]);
+
   // DSP parameters to AudioNode synchronization
   useEffect(() => {
     if (audioRef.current) {
@@ -754,10 +856,67 @@ export default function App() {
   useEffect(() => {
     if (dspPitchShifterSetRef.current) {
       try {
-        dspPitchShifterSetRef.current(dspPitchShift);
+        dspPitchShifterSetRef.current(dspPitchShift + sfxVoicePitch);
       } catch (err) {}
     }
-  }, [dspPitchShift]);
+  }, [dspPitchShift, sfxVoicePitch]);
+
+  // Voice Modulator Synchronizers
+  useEffect(() => {
+    if (audioContextRef.current) {
+      const ctx = audioContextRef.current;
+      if (sfxRingModDryGainRef.current) {
+        sfxRingModDryGainRef.current.gain.setTargetAtTime(1.0 - sfxRingModMix, ctx.currentTime, 0.01);
+      }
+      if (sfxRingModWetGainRef.current) {
+        sfxRingModWetGainRef.current.gain.setTargetAtTime(sfxRingModMix, ctx.currentTime, 0.01);
+      }
+    }
+  }, [sfxRingModMix]);
+
+  useEffect(() => {
+    if (sfxRingModOscRef.current && audioContextRef.current) {
+      const ctx = audioContextRef.current;
+      sfxRingModOscRef.current.frequency.setTargetAtTime(sfxRingModFreq, ctx.currentTime, 0.01);
+    }
+  }, [sfxRingModFreq]);
+
+  useEffect(() => {
+    if (sfxRingModOscRef.current) {
+      sfxRingModOscRef.current.type = sfxRingModWave;
+    }
+  }, [sfxRingModWave]);
+
+  useEffect(() => {
+    if (audioContextRef.current) {
+      const ctx = audioContextRef.current;
+      if (sfxVocoderDryGainRef.current) {
+        sfxVocoderDryGainRef.current.gain.setTargetAtTime(1.0 - sfxVocoderMix, ctx.currentTime, 0.01);
+      }
+      if (sfxVocoderWetGainRef.current) {
+        sfxVocoderWetGainRef.current.gain.setTargetAtTime(sfxVocoderMix, ctx.currentTime, 0.01);
+      }
+    }
+  }, [sfxVocoderMix]);
+
+  useEffect(() => {
+    if (audioContextRef.current) {
+      const ctx = audioContextRef.current;
+      if (sfxVocoderOsc1Ref.current) {
+        sfxVocoderOsc1Ref.current.frequency.setTargetAtTime(sfxVocoderCarrierFreq, ctx.currentTime, 0.01);
+      }
+      if (sfxVocoderOsc2Ref.current) {
+        sfxVocoderOsc2Ref.current.frequency.setTargetAtTime(sfxVocoderCarrierFreq * 1.003, ctx.currentTime, 0.01);
+      }
+    }
+  }, [sfxVocoderCarrierFreq]);
+
+  useEffect(() => {
+    if (sfxVocoderOsc1Ref.current && sfxVocoderOsc2Ref.current) {
+      sfxVocoderOsc1Ref.current.type = sfxVocoderWave;
+      sfxVocoderOsc2Ref.current.type = sfxVocoderWave;
+    }
+  }, [sfxVocoderWave]);
 
   useEffect(() => {
     if (dspDelayNodeRef.current && audioContextRef.current) {
@@ -795,6 +954,57 @@ export default function App() {
       } catch (err) {}
     }
   }, [dspSubBassSaturation]);
+
+  useEffect(() => {
+    if (sfxBassBoostFilterRef.current && audioContextRef.current) {
+      try {
+        const gainVal = sfxBassBoost ? 12.0 : 0.0;
+        sfxBassBoostFilterRef.current.gain.setValueAtTime(gainVal, audioContextRef.current.currentTime);
+      } catch (err) {}
+    }
+  }, [sfxBassBoost]);
+
+  useEffect(() => {
+    const handleSidebarClick = (e: MouseEvent) => {
+      const button = (e.target as HTMLElement).closest('button');
+      if (!button) return;
+
+      const sidebar = document.getElementById('control-sidebar');
+      if (!sidebar || !sidebar.contains(button)) return;
+
+      const computedStyle = window.getComputedStyle(button);
+      if (computedStyle.position === 'static') {
+        button.style.position = 'relative';
+      }
+      if (computedStyle.overflow !== 'hidden') {
+        button.style.overflow = 'hidden';
+      }
+
+      const rect = button.getBoundingClientRect();
+      const x = e.clientX - rect.left;
+      const y = e.clientY - rect.top;
+
+      const ripple = document.createElement('span');
+      ripple.className = 'absolute rounded-full pointer-events-none animate-ripple bg-white/20';
+      ripple.style.width = '100px';
+      ripple.style.height = '100px';
+      ripple.style.marginLeft = '-50px';
+      ripple.style.marginTop = '-50px';
+      ripple.style.left = `${x}px`;
+      ripple.style.top = `${y}px`;
+
+      button.appendChild(ripple);
+
+      setTimeout(() => {
+        ripple.remove();
+      }, 600);
+    };
+
+    document.addEventListener('click', handleSidebarClick, true);
+    return () => {
+      document.removeEventListener('click', handleSidebarClick, true);
+    };
+  }, []);
 
   useEffect(() => {
     if (dspPannerNodeRef.current && audioContextRef.current) {
@@ -1006,6 +1216,55 @@ export default function App() {
         name: preset.title.text,
         artist: preset.title.artist,
       }));
+    }
+  };
+
+  const applyVoicePreset = (preset: 'none' | 'demon' | 'robot' | 'radio' | 'alien' | 'custom') => {
+    initAudioSystem();
+    setSfxVoicePreset(preset);
+    if (preset === 'none') {
+      setSfxVoicePitch(0);
+      setSfxRingModMix(0.0);
+      setSfxVocoderMix(0.0);
+    } else if (preset === 'demon') {
+      setSfxVoicePitch(-6);
+      setSfxRingModMix(0.35);
+      setSfxRingModFreq(45);
+      setSfxRingModWave('sawtooth');
+      setSfxVocoderMix(0.0);
+      setSfxReverbSpace('cosmic');
+      setSfxReverbMix(0.4);
+      setSfxReverbDecay(4.5);
+      setSfxBassBoost(true);
+    } else if (preset === 'robot') {
+      setSfxVoicePitch(0);
+      setSfxRingModMix(0.15);
+      setSfxRingModFreq(80);
+      setSfxRingModWave('sine');
+      setSfxVocoderMix(0.85);
+      setSfxVocoderCarrierFreq(120);
+      setSfxVocoderWave('sawtooth');
+      setSfxReverbSpace('room');
+      setSfxReverbMix(0.25);
+      setSfxReverbDecay(1.0);
+    } else if (preset === 'radio') {
+      setSfxVoicePitch(1);
+      setSfxRingModMix(0.0);
+      setSfxVocoderMix(0.0);
+      setSfxReverbSpace('none');
+      setEqBands([-12, -12, -10, 4, 8, 8, 6, -6, -12, -12]);
+    } else if (preset === 'alien') {
+      setSfxVoicePitch(5);
+      setSfxRingModMix(0.65);
+      setSfxRingModFreq(350);
+      setSfxRingModWave('triangle');
+      setSfxVocoderMix(0.15);
+      setSfxVocoderCarrierFreq(220);
+      setSfxVocoderWave('triangle');
+      setSfxAutoPan(true);
+      setSfxReverbSpace('cosmic');
+      setSfxReverbMix(0.5);
+      setSfxReverbDecay(5.5);
     }
   };
 
@@ -1332,7 +1591,7 @@ export default function App() {
       reverbDryGain.gain.value = 1.0;
       const convolver = ctx.createConvolver();
       if (sfxReverbSpace !== 'none') {
-        const dur = sfxReverbSpace === 'room' ? 0.8 : sfxReverbSpace === 'hall' ? 2.0 : 4.5;
+        const dur = sfxReverbDecay;
         const dec = sfxReverbSpace === 'room' ? 5.0 : sfxReverbSpace === 'hall' ? 3.0 : 1.5;
         convolver.buffer = createImpulseResponse(ctx, dur, dec);
       } else {
@@ -1375,6 +1634,13 @@ export default function App() {
       dspBassFilter.frequency.value = 80;
       dspBassFilter.gain.value = dspSubBassSaturation;
       dspBassRef.current = dspBassFilter;
+
+      // 1b. SFX 60Hz Bass Boost Low-shelf Filter
+      const sfxBassBoostFilter = ctx.createBiquadFilter();
+      sfxBassBoostFilter.type = 'lowshelf';
+      sfxBassBoostFilter.frequency.value = 60;
+      sfxBassBoostFilter.gain.value = sfxBassBoost ? 12.0 : 0.0;
+      sfxBassBoostFilterRef.current = sfxBassBoostFilter;
 
       // 2. Pitch Shifter ScriptProcessor
       const dspPitchShifter = createPitchShifter(ctx);
@@ -1455,12 +1721,121 @@ export default function App() {
       dspVocalDryGainRef.current = vocalDryGain;
       dspVocalWetGainRef.current = vocalWetGain;
 
+      // --- VOICE MORPHING & DISGUISE BLOCK ---
+      const sfxVoiceInput = ctx.createGain();
+      const sfxVoiceOutput = ctx.createGain();
+
+      // 1. Ring Modulator Nodes
+      const sfxRingInput = ctx.createGain();
+      const sfxRingDry = ctx.createGain();
+      sfxRingDry.gain.value = 1.0 - sfxRingModMix;
+      const sfxRingWet = ctx.createGain();
+      sfxRingWet.gain.value = sfxRingModMix;
+      const sfxRingMul = ctx.createGain();
+      sfxRingMul.gain.value = 0.0;
+      const sfxRingOsc = ctx.createOscillator();
+      sfxRingOsc.type = sfxRingModWave;
+      sfxRingOsc.frequency.value = sfxRingModFreq;
+      const sfxRingOscGain = ctx.createGain();
+      sfxRingOscGain.gain.value = 1.0;
+      const sfxRingOutput = ctx.createGain();
+
+      sfxRingInput.connect(sfxRingDry);
+      sfxRingDry.connect(sfxRingOutput);
+      sfxRingInput.connect(sfxRingMul);
+      sfxRingOsc.connect(sfxRingOscGain);
+      sfxRingOscGain.connect(sfxRingMul.gain);
+      sfxRingMul.connect(sfxRingWet);
+      sfxRingWet.connect(sfxRingOutput);
+
+      sfxRingModOscRef.current = sfxRingOsc;
+      sfxRingModDryGainRef.current = sfxRingDry;
+      sfxRingModWetGainRef.current = sfxRingWet;
+
+      try {
+        sfxRingOsc.start(0);
+      } catch (e) {}
+
+      // 2. Vocoder / Talking Synth Nodes
+      const sfxVocInput = ctx.createGain();
+      const sfxVocDry = ctx.createGain();
+      sfxVocDry.gain.value = 1.0 - sfxVocoderMix;
+      const sfxVocWet = ctx.createGain();
+      sfxVocWet.gain.value = sfxVocoderMix;
+      const sfxVocOutput = ctx.createGain();
+
+      const sfxVocOsc1 = ctx.createOscillator();
+      sfxVocOsc1.type = sfxVocoderWave;
+      sfxVocOsc1.frequency.value = sfxVocoderCarrierFreq;
+      const sfxVocOsc2 = ctx.createOscillator();
+      sfxVocOsc2.type = sfxVocoderWave;
+      sfxVocOsc2.frequency.value = sfxVocoderCarrierFreq * 1.003;
+
+      const sfxVocSynthGain = ctx.createGain();
+      sfxVocSynthGain.gain.value = 0.0;
+
+      const sfxVocFormant = ctx.createBiquadFilter();
+      sfxVocFormant.type = 'bandpass';
+      sfxVocFormant.Q.value = 6.0;
+      sfxVocFormant.frequency.value = 400;
+
+      const makeRectifierCurve = () => {
+        const curve = new Float32Array(65536);
+        for (let i = 0; i < 65536; i++) {
+          const x = (i - 32768) / 32768;
+          curve[i] = Math.abs(x);
+        }
+        return curve;
+      };
+      const sfxVocRectifier = ctx.createWaveShaper();
+      sfxVocRectifier.curve = makeRectifierCurve();
+
+      const sfxVocEnvelopeLowpass = ctx.createBiquadFilter();
+      sfxVocEnvelopeLowpass.type = 'lowpass';
+      sfxVocEnvelopeLowpass.frequency.value = 12.0;
+
+      const sfxVocEnvelopeScaler = ctx.createGain();
+      sfxVocEnvelopeScaler.gain.value = 2400.0;
+
+      sfxVocInput.connect(sfxVocDry);
+      sfxVocDry.connect(sfxVocOutput);
+
+      sfxVocInput.connect(sfxVocRectifier);
+      sfxVocRectifier.connect(sfxVocEnvelopeLowpass);
+      sfxVocEnvelopeLowpass.connect(sfxVocSynthGain.gain);
+      sfxVocEnvelopeLowpass.connect(sfxVocEnvelopeScaler);
+      sfxVocEnvelopeScaler.connect(sfxVocFormant.frequency);
+
+      sfxVocOsc1.connect(sfxVocSynthGain);
+      sfxVocOsc2.connect(sfxVocSynthGain);
+      sfxVocSynthGain.connect(sfxVocFormant);
+      sfxVocFormant.connect(sfxVocWet);
+      sfxVocWet.connect(sfxVocOutput);
+
+      sfxVocoderOsc1Ref.current = sfxVocOsc1;
+      sfxVocoderOsc2Ref.current = sfxVocOsc2;
+      sfxVocoderDryGainRef.current = sfxVocDry;
+      sfxVocoderWetGainRef.current = sfxVocWet;
+      sfxVocoderBandpassRef.current = sfxVocFormant;
+
+      try {
+        sfxVocOsc1.start(0);
+        sfxVocOsc2.start(0);
+      } catch (e) {}
+
+      sfxVoiceInput.connect(sfxRingInput);
+      sfxRingOutput.connect(sfxVocInput);
+      sfxVocOutput.connect(sfxVoiceOutput);
+
       // --- CONNECT THE SYSTEM IN SERIES ---
       // 10 EQ filters final node -> low-shelf bass booster
       eqFilters[eqFilters.length - 1].connect(dspBassFilter);
 
-      // Bass Booster -> Pitch Shifter
-      dspBassFilter.connect(dspPitchShifter.node);
+      // dspBassFilter -> sfxBassBoostFilter
+      dspBassFilter.connect(sfxBassBoostFilter);
+
+      // sfxBassBoostFilter -> Pitch Shifter
+      sfxBassBoostFilter.connect(dspPitchShifter.node);
 
       // Pitch Shifter -> Dynamics Compressor
       dspPitchShifter.node.connect(dspComp);
@@ -1474,8 +1849,11 @@ export default function App() {
       // DSP Delay -> Vocal Attenuator
       dspDelayOutput.connect(dspVocalInput);
 
-      // Vocal Attenuator -> legacy/SFX Echo Input
-      dspVocalOutput.connect(echoInput);
+      // Vocal Attenuator -> Voice Morph Block
+      dspVocalOutput.connect(sfxVoiceInput);
+
+      // Voice Morph Block -> legacy/SFX Echo Input
+      sfxVoiceOutput.connect(echoInput);
       
       // Echo Output -> Reverb Input
       echoOutput.connect(reverbInput);
@@ -5201,27 +5579,27 @@ export default function App() {
         <div className="flex-1 flex flex-col p-4 md:p-6 lg:p-8 space-y-6 items-center justify-start overflow-y-auto">
           
           {/* Theme Preset Selection Ribbon at Top */}
-          <div className="w-full max-w-4xl space-y-2">
-            <div className="flex items-center justify-between">
+          <div className="w-full max-w-4xl space-y-3 bg-zinc-950/20 p-3 rounded-xl border border-zinc-900/30">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
               <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 flex items-center space-x-1.5 font-mono">
                 <Sparkles className="w-3.5 h-3.5 text-brand-green" />
                 <span>Visual presets style selector</span>
               </span>
-              <div className="flex items-center space-x-2.5">
-                <span className="text-[10px] font-mono text-zinc-500 hidden sm:inline">1-Click Fast Formatting</span>
+              
+              <div className="flex items-center justify-between sm:justify-end gap-3">
                 <button
                   type="button"
                   onClick={handleRandomizeStyles}
-                  className="flex items-center space-x-1 px-2 py-0.5 rounded bg-zinc-950 text-zinc-400 border border-zinc-800 hover:border-brand-green hover:text-brand-green-hover hover:shadow-brand-green/20 hover:bg-brand-green/10 transition-all text-[10px] font-mono font-semibold cursor-pointer active:scale-95"
+                  className="flex items-center space-x-1 px-2 py-0.5 rounded bg-zinc-950 text-zinc-400 border border-zinc-800 hover:border-brand-green hover:text-brand-green-hover hover:shadow-brand-green/20 hover:bg-brand-green/10 transition-all text-[10px] font-mono font-semibold cursor-pointer active:scale-95 shrink-0"
                   title="Randomize everything"
                 >
                   <Shuffle className="w-3 h-3" />
-                  <span>🎲 RANDOMIZE STYLES</span>
+                  <span>🎲 RANDOM</span>
                 </button>
               </div>
             </div>
             
-            <div className="grid grid-cols-4 sm:grid-cols-8 gap-2 w-full items-center">
+            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 w-full items-center">
               {PRESETS.map((p) => {
                 const isActive = visuals.style === p.visuals.style && background.type === p.background.type;
                 return (
@@ -5230,10 +5608,10 @@ export default function App() {
                     onClick={() => loadPreset(p)}
                     title={p.description}
                     style={isActive ? { boxShadow: `0 0 12px var(--color-brand-green)` } : {}}
-                    className={`flex items-center justify-start text-left px-3 py-2 rounded-t-md border-b-2 text-[10px] transition-all relative overflow-hidden group cursor-pointer ${
+                    className={`flex items-center justify-start text-left px-3 py-2 rounded-md border text-[10px] transition-all relative overflow-hidden group cursor-pointer ${
                       isActive
                         ? 'bg-brand-green text-zinc-950 font-bold border-brand-green'
-                        : 'border-transparent text-lime-700 font-medium hover:text-brand-green hover:bg-brand-green-hover/5'
+                        : 'border-zinc-900/50 bg-zinc-950/40 text-lime-700 font-medium hover:text-brand-green hover:bg-brand-green-hover/5 hover:border-zinc-800'
                     }`}
                   >
                     <span 
@@ -5668,295 +6046,7 @@ export default function App() {
                   </div>
                 </div>
 
-                {/* Core 10-Band Equalizer Deck */}
-                <div className="bg-zinc-950/40 p-4 rounded-xl border border-zinc-900/50 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider font-mono flex items-center space-x-2">
-                      <Sliders className="w-3.5 h-3.5 text-brand-green" />
-                      <span>10-BAND PRO EQUALIZER</span>
-                    </span>
-                    {eqBands.some(v => v !== 0) && (
-                      <button
-                        onClick={() => {
-                          setEqBands([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-                        }}
-                        className="text-[9px] font-mono text-brand-green hover:text-brand-green-hover transition-colors cursor-pointer"
-                      >
-                        RESET
-                      </button>
-                    )}
-                  </div>
 
-                  <div className="grid grid-cols-2 gap-2.5">
-                    {[32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000].map((freq, idx) => {
-                      const val = eqBands[idx];
-                      const fullLabels: { [f: number]: string } = {
-                        32: '32 Hz (Sub-Bass Rumble)',
-                        64: '64 Hz (Kick Drum Thump)',
-                        125: '125 Hz (Bass Warmth)',
-                        250: '250 Hz (Vocal Body)',
-                        500: '500 Hz (Instrument Clarity)',
-                        1000: '1 kHz (Vocal Presence)',
-                        2000: '2 kHz (Instrument Snap)',
-                        4000: '4 kHz (Treble Sharpness)',
-                        8000: '8 kHz (Treble Sizzle)',
-                        16000: '16 kHz (Air Sparkle)'
-                      };
-                      return (
-                        <div key={freq} className="space-y-1 bg-zinc-900/20 p-2 rounded border border-zinc-900/40">
-                          <div className="flex justify-between font-mono text-[9px]">
-                            <span className="text-zinc-300 font-semibold">{fullLabels[freq]}</span>
-                            <span className="text-brand-green-hover font-bold">{val > 0 ? `+${val}` : val} dB</span>
-                          </div>
-                          <input
-                            type="range"
-                            min="-12"
-                            max="12"
-                            step="1"
-                            value={val}
-                            onChange={(e) => {
-                              initAudioSystem();
-                              const newBands = [...eqBands];
-                              newBands[idx] = parseInt(e.target.value);
-                              setEqBands(newBands);
-                            }}
-                            className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none mt-1"
-                          />
-                        </div>
-                      );
-                    })}
-                  </div>
-                </div>
-
-                {/* Section B: DSP CONTROLS (Digital Signal Processing) */}
-                <div className="bg-zinc-950/40 p-4 rounded-xl border border-zinc-900/50 space-y-4">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider font-mono flex items-center space-x-2">
-                      <Activity className="w-3.5 h-3.5 text-brand-green animate-pulse" />
-                      <span>DSP CONTROLS (Digital Signal Processing)</span>
-                    </span>
-                    {(dspPlaybackSpeed !== 1.0 || dspPitchShift !== 0 || dspDelayTime !== 0 || dspDelayFeedback !== 0 || dspCompressorThreshold !== 0 || dspSubBassSaturation !== 0 || dspStereoBalance !== 0 || dspVocalAttenuator) && (
-                      <button
-                        onClick={() => {
-                          setDspPlaybackSpeed(1.0);
-                          setDspPitchShift(0);
-                          setDspDelayTime(0.0);
-                          setDspDelayFeedback(0.0);
-                          setDspCompressorThreshold(0.0);
-                          setDspSubBassSaturation(0.0);
-                          setDspStereoBalance(0.0);
-                          setDspVocalAttenuator(false);
-                        }}
-                        className="text-[9px] font-mono text-brand-green hover:text-brand-green-hover transition-colors cursor-pointer uppercase"
-                      >
-                        Reset DSP
-                      </button>
-                    )}
-                  </div>
-
-                  <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
-                    {/* Control 1: Playback Speed */}
-                    <div className="space-y-1.5 bg-zinc-900/20 p-2.5 rounded border border-zinc-900/40">
-                      <div className="flex justify-between font-mono text-[9px]">
-                        <span className="text-zinc-300 font-semibold uppercase">Playback Speed</span>
-                        <span className="text-brand-green-hover font-bold">{dspPlaybackSpeed.toFixed(2)}x</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="0.5"
-                        max="2.0"
-                        step="0.05"
-                        value={dspPlaybackSpeed}
-                        onChange={(e) => {
-                          initAudioSystem();
-                          setDspPlaybackSpeed(parseFloat(e.target.value));
-                        }}
-                        className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none mt-1"
-                      />
-                      <div className="flex justify-between text-[8px] text-zinc-550 font-mono">
-                        <span>0.5x Slow</span>
-                        <span>1.0x Normal</span>
-                        <span>2.0x Fast</span>
-                      </div>
-                    </div>
-
-                    {/* Control 2: Pitch Shift */}
-                    <div className="space-y-1.5 bg-zinc-900/20 p-2.5 rounded border border-zinc-900/40">
-                      <div className="flex justify-between font-mono text-[9px]">
-                        <span className="text-zinc-300 font-semibold uppercase">Pitch Shift</span>
-                        <span className="text-brand-green-hover font-bold">
-                          {dspPitchShift > 0 ? `+${dspPitchShift}` : dspPitchShift} semitones
-                        </span>
-                      </div>
-                      <input
-                        type="range"
-                        min="-12"
-                        max="12"
-                        step="1"
-                        value={dspPitchShift}
-                        onChange={(e) => {
-                          initAudioSystem();
-                          setDspPitchShift(parseInt(e.target.value));
-                        }}
-                        className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none mt-1"
-                      />
-                      <div className="flex justify-between text-[8px] text-zinc-550 font-mono">
-                        <span>-12 Octave Down</span>
-                        <span>0 Flat</span>
-                        <span>+12 Octave Up</span>
-                      </div>
-                    </div>
-
-                    {/* Control 3: Delay Time */}
-                    <div className="space-y-1.5 bg-zinc-900/20 p-2.5 rounded border border-zinc-900/40">
-                      <div className="flex justify-between font-mono text-[9px]">
-                        <span className="text-zinc-300 font-semibold uppercase">Delay Time</span>
-                        <span className="text-brand-green-hover font-bold">{(dspDelayTime * 1000).toFixed(0)} ms</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="0"
-                        max="1"
-                        step="0.05"
-                        value={dspDelayTime}
-                        onChange={(e) => {
-                          initAudioSystem();
-                          setDspDelayTime(parseFloat(e.target.value));
-                        }}
-                        className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none mt-1"
-                      />
-                      <div className="flex justify-between text-[8px] text-zinc-550 font-mono">
-                        <span>0 ms Dry</span>
-                        <span>500 ms</span>
-                        <span>1000 ms</span>
-                      </div>
-                    </div>
-
-                    {/* Control 4: Delay Feedback */}
-                    <div className="space-y-1.5 bg-zinc-900/20 p-2.5 rounded border border-zinc-900/40">
-                      <div className="flex justify-between font-mono text-[9px]">
-                        <span className="text-zinc-300 font-semibold uppercase">Delay Feedback</span>
-                        <span className="text-brand-green-hover font-bold">{dspDelayFeedback.toFixed(0)}%</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="0"
-                        max="95"
-                        step="5"
-                        value={dspDelayFeedback}
-                        onChange={(e) => {
-                          initAudioSystem();
-                          setDspDelayFeedback(parseInt(e.target.value));
-                        }}
-                        className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none mt-1"
-                      />
-                      <div className="flex justify-between text-[8px] text-zinc-550 font-mono">
-                        <span>0% Single Delay</span>
-                        <span>50% Echo</span>
-                        <span>95% Infinite</span>
-                      </div>
-                    </div>
-
-                    {/* Control 5: Master Compressor (Threshold) */}
-                    <div className="space-y-1.5 bg-zinc-900/20 p-2.5 rounded border border-zinc-900/40">
-                      <div className="flex justify-between font-mono text-[9px]">
-                        <span className="text-zinc-300 font-semibold uppercase">Master Compressor (Threshold)</span>
-                        <span className="text-brand-green-hover font-bold">{dspCompressorThreshold.toFixed(0)} dB</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="-100"
-                        max="0"
-                        step="1"
-                        value={dspCompressorThreshold}
-                        onChange={(e) => {
-                          initAudioSystem();
-                          setDspCompressorThreshold(parseInt(e.target.value));
-                        }}
-                        className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none mt-1"
-                      />
-                      <div className="flex justify-between text-[8px] text-zinc-550 font-mono">
-                        <span>-100 dB Full Squash</span>
-                        <span>-50 dB</span>
-                        <span>0 dB Bypass</span>
-                      </div>
-                    </div>
-
-                    {/* Control 6: Sub-Bass Saturation */}
-                    <div className="space-y-1.5 bg-zinc-900/20 p-2.5 rounded border border-zinc-900/40">
-                      <div className="flex justify-between font-mono text-[9px]">
-                        <span className="text-zinc-300 font-semibold uppercase">Sub-Bass Saturation</span>
-                        <span className="text-brand-green-hover font-bold">+{dspSubBassSaturation.toFixed(1)} dB</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="0"
-                        max="12"
-                        step="0.5"
-                        value={dspSubBassSaturation}
-                        onChange={(e) => {
-                          initAudioSystem();
-                          setDspSubBassSaturation(parseFloat(e.target.value));
-                        }}
-                        className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none mt-1"
-                      />
-                      <div className="flex justify-between text-[8px] text-zinc-550 font-mono">
-                        <span>0 dB Neutral</span>
-                        <span>+6 dB Medium Boost</span>
-                        <span>+12 dB Heavy Sub Rumble</span>
-                      </div>
-                    </div>
-
-                    {/* Control 7: Stereo Balance */}
-                    <div className="space-y-1.5 bg-zinc-900/20 p-2.5 rounded border border-zinc-900/40">
-                      <div className="flex justify-between font-mono text-[9px]">
-                        <span className="text-zinc-300 font-semibold uppercase">Stereo Balance</span>
-                        <span className="text-brand-green-hover font-bold">
-                          {dspStereoBalance === 0 ? 'Center' : dspStereoBalance < 0 ? `L ${Math.abs(dspStereoBalance).toFixed(2)}` : `R ${dspStereoBalance.toFixed(2)}`}
-                        </span>
-                      </div>
-                      <input
-                        type="range"
-                        min="-1.0"
-                        max="1.0"
-                        step="0.05"
-                        value={dspStereoBalance}
-                        onChange={(e) => {
-                          initAudioSystem();
-                          setDspStereoBalance(parseFloat(e.target.value));
-                        }}
-                        className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none mt-1"
-                      />
-                      <div className="flex justify-between text-[8px] text-zinc-550 font-mono">
-                        <span>L (Full Left)</span>
-                        <span>0.0 Center</span>
-                        <span>R (Full Right)</span>
-                      </div>
-                    </div>
-
-                    {/* Control 8: Vocal Attenuator (Toggle) */}
-                    <div className="flex items-center justify-between bg-zinc-900/20 p-2.5 rounded border border-zinc-900/40">
-                      <div className="flex flex-col text-left">
-                        <span className="text-zinc-300 font-mono text-[9px] font-semibold uppercase">Vocal Attenuator</span>
-                        <span className="text-[8px] text-zinc-550 font-mono mt-0.5">Phase-cancels center frequencies</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => {
-                          initAudioSystem();
-                          setDspVocalAttenuator(prev => !prev);
-                        }}
-                        className={`relative w-9 h-5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
-                          dspVocalAttenuator ? 'bg-brand-green shadow-[0_0_8px_rgba(184,238,2,0.4)]' : 'bg-zinc-800'
-                        }`}
-                      >
-                        <span className={`absolute top-[2.5px] left-[2px] bg-zinc-100 rounded-full h-4 w-4 transition-all ${
-                          dspVocalAttenuator ? 'translate-x-4' : 'translate-x-0'
-                        }`} />
-                      </button>
-                    </div>
-                  </div>
-                </div>
 
                 {/* VISIBLE TITLE TEXT OVERLAYS SETTINGS */}
                 <div className="space-y-4">
@@ -8193,6 +8283,70 @@ export default function App() {
                                   className="w-full bg-orange-900/40 hover:bg-orange-900/60 text-orange-400 text-[10px] font-mono uppercase py-1.5 px-2 rounded border border-orange-900/50 transition-colors truncate"
                                 >
                                   Liquid Gold
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setVisuals(prev => ({
+                                    ...prev,
+                                    waterReflectionTint: '#ffffff',
+                                    waterReflectionOpacity: 0.8,
+                                    waterReflectionBlur: 0.5,
+                                    waterRefractionScale: 0.5,
+                                    waterBeatIntensityMod: 0.2,
+                                    waterRippleSpeed: 0.5,
+                                    waterReflectionDepth: 0.15,
+                                    waterRippleTexture: false,
+                                    waterDistortion: false,
+                                    waterRippleIntensity: 0.1,
+                                    waterSyncToWaveform: false,
+                                    waterColorShift: false
+                                  }))}
+                                  className="w-full bg-blue-900/40 hover:bg-blue-900/60 text-blue-400 text-[10px] font-mono uppercase py-1.5 px-2 rounded border border-blue-900/50 transition-colors truncate"
+                                >
+                                  Mirror Calm
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setVisuals(prev => ({
+                                    ...prev,
+                                    waterReflectionTint: '#00aaff',
+                                    waterReflectionOpacity: 0.7,
+                                    waterReflectionBlur: 3,
+                                    waterRefractionScale: 4.0,
+                                    waterBeatIntensityMod: 3.0,
+                                    waterRippleSpeed: 3.5,
+                                    waterReflectionDepth: 0.6,
+                                    waterRippleTexture: true,
+                                    waterDistortion: true,
+                                    waterRippleIntensity: 2.0,
+                                    waterSyncToWaveform: true,
+                                    waterColorShift: false
+                                  }))}
+                                  className="w-full bg-cyan-900/40 hover:bg-cyan-900/60 text-cyan-400 text-[10px] font-mono uppercase py-1.5 px-2 rounded border border-cyan-900/50 transition-colors truncate"
+                                >
+                                  Water Ripple
+                                </button>
+                                <button
+                                  type="button"
+                                  onClick={() => setVisuals(prev => ({
+                                    ...prev,
+                                    waterReflectionTint: '#ff00ff',
+                                    waterReflectionOpacity: 0.85,
+                                    waterReflectionBlur: 5,
+                                    waterRefractionScale: 5.0,
+                                    waterBeatIntensityMod: 4.0,
+                                    waterRippleSpeed: 2.5,
+                                    waterReflectionDepth: 0.8,
+                                    waterRippleTexture: true,
+                                    waterDistortion: true,
+                                    waterRippleIntensity: 2.0,
+                                    waterSyncToWaveform: true,
+                                    waterColorShift: true,
+                                    chromaticAberration: true
+                                  }))}
+                                  className="w-full bg-fuchsia-900/40 hover:bg-fuchsia-900/60 text-fuchsia-400 text-[10px] font-mono uppercase py-1.5 px-2 rounded border border-fuchsia-900/50 transition-colors truncate"
+                                >
+                                  Chromatic Tide
                                 </button>
                                 <button
                                   type="button"
@@ -11232,8 +11386,14 @@ export default function App() {
                         16000: '16 kHz (Air Sparkle)'
                       };
                       return (
-                        <div key={freq} className="space-y-1 bg-zinc-900/20 p-2 rounded border border-zinc-900/40">
-                          <div className="flex justify-between font-mono text-[9px]">
+                        <div key={freq} className="space-y-1 bg-zinc-900/20 p-2 rounded border border-zinc-900/40 relative overflow-hidden">
+                          {/* Real-time spectrum LED indicator background */}
+                          <div 
+                            id={`eq-signal-${idx}`}
+                            className="absolute bottom-0 left-0 h-[2.5px] bg-brand-green/30 transition-all duration-75 pointer-events-none"
+                            style={{ width: '0%' }}
+                          />
+                          <div className="flex justify-between font-mono text-[9px] relative z-10">
                             <span className="text-zinc-300 font-semibold">{fullLabels[freq]}</span>
                             <span className="text-brand-green-hover font-bold">{val > 0 ? `+${val}` : val} dB</span>
                           </div>
@@ -11249,7 +11409,7 @@ export default function App() {
                               newBands[idx] = parseInt(e.target.value);
                               setEqBands(newBands);
                             }}
-                            className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none mt-1"
+                            className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none mt-1 relative z-10"
                           />
                         </div>
                       );
@@ -11257,9 +11417,253 @@ export default function App() {
                   </div>
                 </div>
 
+                {/* DSP CONTROLS (Digital Signal Processing) */}
+                <div className="bg-zinc-950/40 p-5 rounded-xl border border-zinc-900/50 space-y-5 animate-fadeIn">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-900/60 pb-3">
+                    <div className="flex items-center space-x-2">
+                      <Activity className="w-4 h-4 text-brand-green-hover animate-pulse" />
+                      <div>
+                        <span className="text-[11px] font-semibold text-zinc-300 font-mono tracking-wide uppercase block">
+                          DSP CONTROLS (Digital Signal Processing)
+                        </span>
+                        <span className="text-[9px] text-zinc-500 block">
+                          Serial DSP processing layers for hardware-accelerated sound enhancement
+                        </span>
+                      </div>
+                    </div>
+                    {(dspPlaybackSpeed !== 1.0 || dspPitchShift !== 0 || dspDelayTime !== 0 || dspDelayFeedback !== 0 || dspCompressorThreshold !== 0 || dspSubBassSaturation !== 0 || dspStereoBalance !== 0 || dspVocalAttenuator) && (
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setDspPlaybackSpeed(1.0);
+                          setDspPitchShift(0);
+                          setDspDelayTime(0.0);
+                          setDspDelayFeedback(0.0);
+                          setDspCompressorThreshold(0.0);
+                          setDspSubBassSaturation(0.0);
+                          setDspStereoBalance(0.0);
+                          setDspVocalAttenuator(false);
+                        }}
+                        className="text-[9.5px] font-mono text-brand-green-hover hover:text-lime-300 transition-colors cursor-pointer border-none bg-transparent"
+                      >
+                        RESET ALL DSP
+                      </button>
+                    )}
+                  </div>
+
+                  <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                    {/* Control 1: Playback Speed */}
+                    <div className="space-y-1.5 bg-zinc-900/20 p-3 rounded-lg border border-zinc-900/40 text-left">
+                      <div className="flex justify-between font-mono text-[9.5px]">
+                        <span className="text-zinc-300 font-semibold uppercase">DSP Playback Speed</span>
+                        <span className="text-brand-green-hover font-bold">{dspPlaybackSpeed.toFixed(2)}x</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0.5"
+                        max="2.0"
+                        step="0.05"
+                        value={dspPlaybackSpeed}
+                        onChange={(e) => {
+                          initAudioSystem();
+                          setDspPlaybackSpeed(parseFloat(e.target.value));
+                        }}
+                        className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-950 rounded-lg appearance-none mt-1"
+                      />
+                      <div className="flex justify-between text-[8px] text-zinc-500 font-mono">
+                        <span>0.5x Slow</span>
+                        <span>1.0x Normal</span>
+                        <span>2.0x Fast</span>
+                      </div>
+                    </div>
+
+                    {/* Control 2: Pitch Shift */}
+                    <div className="space-y-1.5 bg-zinc-900/20 p-3 rounded-lg border border-zinc-900/40 text-left">
+                      <div className="flex justify-between font-mono text-[9.5px]">
+                        <span className="text-zinc-300 font-semibold uppercase">DSP Pitch Shift</span>
+                        <span className="text-brand-green-hover font-bold">
+                          {dspPitchShift > 0 ? `+${dspPitchShift}` : dspPitchShift} semitones
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="-12"
+                        max="12"
+                        step="1"
+                        value={dspPitchShift}
+                        onChange={(e) => {
+                          initAudioSystem();
+                          setDspPitchShift(parseInt(e.target.value));
+                        }}
+                        className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-950 rounded-lg appearance-none mt-1"
+                      />
+                      <div className="flex justify-between text-[8px] text-zinc-500 font-mono">
+                        <span>-12 Octave Down</span>
+                        <span>0 Flat</span>
+                        <span>+12 Octave Up</span>
+                      </div>
+                    </div>
+
+                    {/* Control 3: Delay Time */}
+                    <div className="space-y-1.5 bg-zinc-900/20 p-3 rounded-lg border border-zinc-900/40 text-left">
+                      <div className="flex justify-between font-mono text-[9.5px]">
+                        <span className="text-zinc-300 font-semibold uppercase">DSP Delay Time</span>
+                        <span className="text-brand-green-hover font-bold">{(dspDelayTime * 1000).toFixed(0)} ms</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.05"
+                        value={dspDelayTime}
+                        onChange={(e) => {
+                          initAudioSystem();
+                          setDspDelayTime(parseFloat(e.target.value));
+                        }}
+                        className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-950 rounded-lg appearance-none mt-1"
+                      />
+                      <div className="flex justify-between text-[8px] text-zinc-500 font-mono">
+                        <span>0 ms Dry</span>
+                        <span>500 ms</span>
+                        <span>1000 ms</span>
+                      </div>
+                    </div>
+
+                    {/* Control 4: Delay Feedback */}
+                    <div className="space-y-1.5 bg-zinc-900/20 p-3 rounded-lg border border-zinc-900/40 text-left">
+                      <div className="flex justify-between font-mono text-[9.5px]">
+                        <span className="text-zinc-300 font-semibold uppercase">DSP Delay Feedback</span>
+                        <span className="text-brand-green-hover font-bold">{dspDelayFeedback.toFixed(0)}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="95"
+                        step="5"
+                        value={dspDelayFeedback}
+                        onChange={(e) => {
+                          initAudioSystem();
+                          setDspDelayFeedback(parseInt(e.target.value));
+                        }}
+                        className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-950 rounded-lg appearance-none mt-1"
+                      />
+                      <div className="flex justify-between text-[8px] text-zinc-500 font-mono">
+                        <span>0% Single Delay</span>
+                        <span>50% Echo</span>
+                        <span>95% Infinite</span>
+                      </div>
+                    </div>
+
+                    {/* Control 5: Master Compressor (Threshold) */}
+                    <div className="space-y-1.5 bg-zinc-900/20 p-3 rounded-lg border border-zinc-900/40 text-left">
+                      <div className="flex justify-between font-mono text-[9.5px]">
+                        <span className="text-zinc-300 font-semibold uppercase">Master Compressor (Threshold)</span>
+                        <span className="text-brand-green-hover font-bold">{dspCompressorThreshold.toFixed(0)} dB</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="-100"
+                        max="0"
+                        step="1"
+                        value={dspCompressorThreshold}
+                        onChange={(e) => {
+                          initAudioSystem();
+                          setDspCompressorThreshold(parseInt(e.target.value));
+                        }}
+                        className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-950 rounded-lg appearance-none mt-1"
+                      />
+                      <div className="flex justify-between text-[8px] text-zinc-550 font-mono">
+                        <span>-100 dB Full Squash</span>
+                        <span>-50 dB</span>
+                        <span>0 dB Bypass</span>
+                      </div>
+                    </div>
+
+                    {/* Control 6: Sub-Bass Saturation */}
+                    <div className="space-y-1.5 bg-zinc-900/20 p-3 rounded-lg border border-zinc-900/40 text-left">
+                      <div className="flex justify-between font-mono text-[9.5px]">
+                        <span className="text-zinc-300 font-semibold uppercase">Sub-Bass Saturation</span>
+                        <span className="text-brand-green-hover font-bold">+{dspSubBassSaturation.toFixed(1)} dB</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="12"
+                        step="0.5"
+                        value={dspSubBassSaturation}
+                        onChange={(e) => {
+                          initAudioSystem();
+                          setDspSubBassSaturation(parseFloat(e.target.value));
+                        }}
+                        className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-950 rounded-lg appearance-none mt-1"
+                      />
+                      <div className="flex justify-between text-[8px] text-zinc-500 font-mono">
+                        <span>0 dB Neutral</span>
+                        <span>+6 dB Medium Boost</span>
+                        <span>+12 dB Heavy Sub Rumble</span>
+                      </div>
+                    </div>
+
+                    {/* Control 7: Stereo Balance */}
+                    <div className="space-y-1.5 bg-zinc-900/20 p-3 rounded-lg border border-zinc-900/40 text-left">
+                      <div className="flex justify-between font-mono text-[9.5px]">
+                        <span className="text-zinc-300 font-semibold uppercase">Stereo Balance</span>
+                        <span className="text-brand-green-hover font-bold">
+                          {dspStereoBalance === 0 ? 'Center' : dspStereoBalance < 0 ? `L ${Math.abs(dspStereoBalance).toFixed(2)}` : `R ${dspStereoBalance.toFixed(2)}`}
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="-1.0"
+                        max="1.0"
+                        step="0.05"
+                        value={dspStereoBalance}
+                        onChange={(e) => {
+                          initAudioSystem();
+                          setDspStereoBalance(parseFloat(e.target.value));
+                        }}
+                        className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-950 rounded-lg appearance-none mt-1"
+                      />
+                      <div className="flex justify-between text-[8px] text-zinc-500 font-mono">
+                        <span>L (Full Left)</span>
+                        <span>0.0 Center</span>
+                        <span>R (Full Right)</span>
+                      </div>
+                    </div>
+
+                    {/* Control 8: Vocal Attenuator (Toggle) */}
+                    <div className="flex items-center justify-between bg-zinc-900/20 p-3 rounded-lg border border-zinc-900/40 text-left">
+                      <div className="flex flex-col text-left">
+                        <span className="text-zinc-300 font-mono text-[9.5px] font-semibold uppercase">Vocal Attenuator</span>
+                        <span className="text-[8px] text-zinc-550 font-mono mt-0.5">Phase-cancels center frequencies</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          initAudioSystem();
+                          setDspVocalAttenuator(prev => !prev);
+                        }}
+                        className={`relative w-9 h-5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                          dspVocalAttenuator ? 'bg-brand-green shadow-[0_0_8px_rgba(184,238,2,0.4)]' : 'bg-zinc-800'
+                        }`}
+                      >
+                        <span className={`absolute top-[2.5px] left-[2px] bg-zinc-100 rounded-full h-4 w-4 transition-all ${
+                          dspVocalAttenuator ? 'translate-x-4' : 'translate-x-0'
+                        }`} />
+                      </button>
+                    </div>
+                  </div>
+                </div>
+
                 {/* Section: Pitch / Playback Speed */}
-                <div className="bg-zinc-950/40 p-4 rounded-xl border border-zinc-900/50 space-y-3">
-                  <div className="flex justify-between items-center">
+                <div className="bg-zinc-950/40 p-4 rounded-xl border border-zinc-900/50 space-y-3 relative overflow-hidden">
+                  {/* Real-time spectrum LED indicator background */}
+                  <div 
+                    id="speed-signal-peak"
+                    className="absolute bottom-0 left-0 h-[2px] bg-brand-green/30 transition-all duration-75 pointer-events-none"
+                    style={{ width: '0%' }}
+                  />
+                  <div className="flex justify-between items-center relative z-10">
                     <label className="text-[11px] font-semibold text-zinc-400 font-mono tracking-wide uppercase">
                       Playback Speed & Pitch
                     </label>
@@ -11277,9 +11681,9 @@ export default function App() {
                       initAudioSystem();
                       setSfxPlaybackRate(parseFloat(e.target.value));
                     }}
-                    className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none"
+                    className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none relative z-10"
                   />
-                  <div className="flex justify-between text-[8.5px] text-zinc-500 font-mono">
+                  <div className="flex justify-between text-[8.5px] text-zinc-500 font-mono relative z-10">
                     <span>0.5x (Slowed + Reverb)</span>
                     <span>1.0x (Normal)</span>
                     <span>2.0x (Nightcore)</span>
@@ -11287,8 +11691,14 @@ export default function App() {
                 </div>
 
                 {/* Section: Echo / Delay */}
-                <div className="bg-zinc-950/40 p-4 rounded-xl border border-zinc-900/50 space-y-4">
-                  <div className="flex justify-between items-center">
+                <div className="bg-zinc-950/40 p-4 rounded-xl border border-zinc-900/50 space-y-4 relative overflow-hidden">
+                  {/* Real-time spectrum LED indicator background */}
+                  <div 
+                    id="delay-signal-peak"
+                    className="absolute bottom-0 left-0 h-[2px] bg-brand-green/30 transition-all duration-75 pointer-events-none"
+                    style={{ width: '0%' }}
+                  />
+                  <div className="flex justify-between items-center relative z-10">
                     <div className="flex flex-col">
                       <span className="text-[11px] font-semibold text-zinc-400 font-mono tracking-wide uppercase">
                         Echo / Feedback Delay
@@ -11311,52 +11721,56 @@ export default function App() {
                     </button>
                   </div>
 
-                  {sfxEcho && (
-                    <div className="space-y-3 pt-1 border-t border-zinc-900/40">
-                      <div className="space-y-1.5">
-                        <div className="flex justify-between font-mono text-[9px]">
-                          <span className="text-zinc-500">Delay Time</span>
-                          <span className="text-zinc-450 font-bold">{(sfxDelayTime * 1000).toFixed(0)} ms</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="0.05"
-                          max="1.0"
-                          step="0.05"
-                          value={sfxDelayTime}
-                          onChange={(e) => {
-                            initAudioSystem();
-                            setSfxDelayTime(parseFloat(e.target.value));
-                          }}
-                          className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none"
-                        />
+                  <div className="space-y-3 pt-1 border-t border-zinc-900/40 relative z-10">
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between font-mono text-[9px]">
+                        <span className="text-zinc-500">Delay Time</span>
+                        <span className="text-zinc-450 font-bold">{(sfxDelayTime * 1000).toFixed(0)} ms</span>
                       </div>
-
-                      <div className="space-y-1.5">
-                        <div className="flex justify-between font-mono text-[9px]">
-                          <span className="text-zinc-500">Feedback Level</span>
-                          <span className="text-zinc-450 font-bold">{(sfxFeedback * 100).toFixed(0)}%</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="0.0"
-                          max="0.9"
-                          step="0.05"
-                          value={sfxFeedback}
-                          onChange={(e) => {
-                            initAudioSystem();
-                            setSfxFeedback(parseFloat(e.target.value));
-                          }}
-                          className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none"
-                        />
-                      </div>
+                      <input
+                        type="range"
+                        min="0.01"
+                        max="1.0"
+                        step="0.001"
+                        value={sfxDelayTime}
+                        onChange={(e) => {
+                          initAudioSystem();
+                          setSfxDelayTime(parseFloat(e.target.value));
+                        }}
+                        className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none"
+                      />
                     </div>
-                  )}
+
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between font-mono text-[9px]">
+                        <span className="text-zinc-500">Feedback Level</span>
+                        <span className="text-zinc-450 font-bold">{(sfxFeedback * 100).toFixed(0)}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0.0"
+                        max="0.9"
+                        step="0.01"
+                        value={sfxFeedback}
+                        onChange={(e) => {
+                          initAudioSystem();
+                          setSfxFeedback(parseFloat(e.target.value));
+                        }}
+                        className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none"
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 {/* Section: Ambient Reverb */}
-                <div className="bg-zinc-950/40 p-4 rounded-xl border border-zinc-900/50 space-y-4">
-                  <div className="flex justify-between items-center">
+                <div className="bg-zinc-950/40 p-4 rounded-xl border border-zinc-900/50 space-y-4 relative overflow-hidden">
+                  {/* Real-time spectrum LED indicator background */}
+                  <div 
+                    id="reverb-signal-peak"
+                    className="absolute bottom-0 left-0 h-[2px] bg-brand-green/30 transition-all duration-75 pointer-events-none"
+                    style={{ width: '0%' }}
+                  />
+                  <div className="flex justify-between items-center relative z-10">
                     <div className="flex flex-col">
                       <span className="text-[11px] font-semibold text-zinc-400 font-mono tracking-wide uppercase">
                         Ambient Reverb Space
@@ -11365,7 +11779,7 @@ export default function App() {
                     </div>
                   </div>
 
-                  <div className="grid grid-cols-4 gap-1.5">
+                  <div className="grid grid-cols-4 gap-1.5 relative z-10">
                     {(['none', 'room', 'hall', 'cosmic'] as const).map((space) => (
                       <button
                         type="button"
@@ -11373,6 +11787,10 @@ export default function App() {
                         onClick={() => {
                           initAudioSystem();
                           setSfxReverbSpace(space);
+                          if (space === 'room') setSfxReverbDecay(0.8);
+                          else if (space === 'hall') setSfxReverbDecay(2.0);
+                          else if (space === 'cosmic') setSfxReverbDecay(4.5);
+                          else if (space === 'none') setSfxReverbDecay(0.1);
                         }}
                         className={`py-1.5 px-2 text-[10px] font-mono rounded border transition-all text-center cursor-pointer uppercase ${
                           sfxReverbSpace === space
@@ -11385,17 +11803,17 @@ export default function App() {
                     ))}
                   </div>
 
-                  {sfxReverbSpace !== 'none' && (
-                    <div className="space-y-2 pt-1 border-t border-zinc-900/40">
+                  <div className="space-y-3 pt-1 border-t border-zinc-900/40 relative z-10">
+                    <div className="space-y-1.5">
                       <div className="flex justify-between font-mono text-[9px]">
                         <span className="text-zinc-500">Reverb Wet Mix</span>
                         <span className="text-brand-green-hover font-bold">{(sfxReverbMix * 100).toFixed(0)}%</span>
                       </div>
                       <input
                         type="range"
-                        min="0.05"
-                        max="0.8"
-                        step="0.05"
+                        min="0.00"
+                        max="1.0"
+                        step="0.01"
                         value={sfxReverbMix}
                         onChange={(e) => {
                           initAudioSystem();
@@ -11404,12 +11822,37 @@ export default function App() {
                         className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none"
                       />
                     </div>
-                  )}
+
+                    <div className="space-y-1.5">
+                      <div className="flex justify-between font-mono text-[9px]">
+                        <span className="text-zinc-500">Reverb Tail Length (Decay)</span>
+                        <span className="text-brand-green-hover font-bold">{sfxReverbDecay.toFixed(1)} s</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0.1"
+                        max="8.0"
+                        step="0.1"
+                        value={sfxReverbDecay}
+                        onChange={(e) => {
+                          initAudioSystem();
+                          setSfxReverbDecay(parseFloat(e.target.value));
+                        }}
+                        className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none"
+                      />
+                    </div>
+                  </div>
                 </div>
 
                 {/* Section: Surround Panner */}
-                <div className="bg-zinc-950/40 p-4 rounded-xl border border-zinc-900/50 space-y-4">
-                  <div className="flex justify-between items-center">
+                <div className="bg-zinc-950/40 p-4 rounded-xl border border-zinc-900/50 space-y-4 relative overflow-hidden">
+                  {/* Real-time spectrum LED indicator background */}
+                  <div 
+                    id="panner-signal-peak"
+                    className="absolute bottom-0 left-0 h-[2px] bg-brand-green/30 transition-all duration-75 pointer-events-none"
+                    style={{ width: '0%' }}
+                  />
+                  <div className="flex justify-between items-center relative z-10">
                     <div className="flex flex-col">
                       <span className="text-[11px] font-semibold text-zinc-400 font-mono tracking-wide uppercase">
                         Stereo Surround Panner
@@ -11435,7 +11878,7 @@ export default function App() {
                   </div>
 
                   {!sfxAutoPan ? (
-                    <div className="space-y-2">
+                    <div className="space-y-2 relative z-10">
                       <div className="flex justify-between font-mono text-[9.5px]">
                         <span className="text-zinc-500">Left Channel</span>
                         <span className="text-brand-green-hover font-bold">
@@ -11457,12 +11900,307 @@ export default function App() {
                       />
                     </div>
                   ) : (
-                    <div className="h-6 flex items-center justify-center border border-dashed border-brand-green/20 bg-brand-green/5 rounded-md px-3 py-1">
+                    <div className="h-6 flex items-center justify-center border border-dashed border-brand-green/20 bg-brand-green/5 rounded-md px-3 py-1 relative z-10">
                       <span className="text-[9.5px] font-mono text-brand-green-hover animate-pulse tracking-widest flex items-center space-x-2">
                         <span>● PING-PONG SWEEPING CHANNELS IN REAL-TIME</span>
                       </span>
                     </div>
                   )}
+                </div>
+
+                {/* Section: Voice Disguising & Vocoder Studio */}
+                <div className="bg-zinc-950/40 p-5 rounded-xl border border-zinc-900/50 space-y-5 animate-fadeIn">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-900/60 pb-3">
+                    <div className="flex items-center space-x-2">
+                      <Mic className="w-4 h-4 text-brand-green-hover animate-pulse" />
+                      <div>
+                        <span className="text-[11px] font-semibold text-zinc-300 font-mono tracking-wide uppercase block">
+                          VOICE DISGUISING & VOCODER SUITE
+                        </span>
+                        <span className="text-[9px] text-zinc-500 block">
+                          Real-time vocal transformation, ring modulation & talking synthesis
+                        </span>
+                      </div>
+                    </div>
+                    {sfxVoicePreset !== 'none' && (
+                      <button
+                        type="button"
+                        onClick={() => applyVoicePreset('none')}
+                        className="text-[9.5px] font-mono text-brand-green-hover hover:text-lime-300 transition-colors cursor-pointer border-none bg-transparent"
+                      >
+                        BYPASS ALL
+                      </button>
+                    )}
+                  </div>
+
+                  {/* Preset Selector Ribbon */}
+                  <div className="space-y-1.5">
+                    <label className="text-[9.5px] font-semibold text-zinc-400 font-mono uppercase tracking-wider block text-left">
+                      Vocal Morph Presets
+                    </label>
+                    <div className="grid grid-cols-3 sm:grid-cols-6 gap-2">
+                      {(['none', 'demon', 'robot', 'radio', 'alien', 'custom'] as const).map((preset) => (
+                        <button
+                          type="button"
+                          key={preset}
+                          onClick={() => applyVoicePreset(preset)}
+                          className={`px-2 py-1.5 rounded text-[10px] font-mono font-medium border transition-all cursor-pointer uppercase ${
+                            sfxVoicePreset === preset
+                              ? 'bg-brand-green border-brand-green text-zinc-950 font-bold shadow-[0_0_8px_rgba(184,238,2,0.3)]'
+                              : 'bg-zinc-950/40 border-zinc-900/50 text-zinc-400 hover:border-zinc-850 hover:text-zinc-200 hover:bg-zinc-950/60'
+                          }`}
+                        >
+                          {preset}
+                        </button>
+                      ))}
+                    </div>
+                  </div>
+
+                  {/* Interactive Controllers (Grid) */}
+                  <div className="grid grid-cols-1 md:grid-cols-3 gap-4 pt-1">
+                    
+                    {/* Column 1: Voice Pitch Morphing */}
+                    <div className="bg-zinc-900/20 p-3 rounded-lg border border-zinc-900/40 space-y-3 relative overflow-hidden text-left">
+                      <div className="flex justify-between items-center font-mono text-[10px]">
+                        <span className="text-zinc-300 font-bold uppercase tracking-wide flex items-center space-x-1">
+                          <Sliders className="w-3 h-3 text-brand-green-hover" />
+                          <span>1. Voice Pitch</span>
+                        </span>
+                        <span className="text-brand-green-hover font-bold">
+                          {sfxVoicePitch > 0 ? `+${sfxVoicePitch}` : sfxVoicePitch} semitones
+                        </span>
+                      </div>
+                      
+                      <div className="space-y-1">
+                        <input
+                          type="range"
+                          min="-12"
+                          max="12"
+                          step="1"
+                          value={sfxVoicePitch}
+                          onChange={(e) => {
+                            initAudioSystem();
+                            setSfxVoicePreset('custom');
+                            setSfxVoicePitch(parseInt(e.target.value));
+                          }}
+                          className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-950 rounded-lg appearance-none"
+                        />
+                        <div className="flex justify-between font-mono text-[8px] text-zinc-500">
+                          <span>-12 (DEMON)</span>
+                          <span>0 (NORMAL)</span>
+                          <span>+12 (CHIPMUNK)</span>
+                        </div>
+                      </div>
+                      <p className="text-[9px] text-zinc-500 leading-relaxed pt-1">
+                        Shifts formants and base pitch levels. Extremely powerful for deep demonic growls or high-pitched sci-fi voices.
+                      </p>
+                    </div>
+
+                    {/* Column 2: Ring Modulator (Sci-Fi / Alien) */}
+                    <div className="bg-zinc-900/20 p-3 rounded-lg border border-zinc-900/40 space-y-3 relative overflow-hidden text-left">
+                      <div className="flex justify-between items-center font-mono text-[10px]">
+                        <span className="text-zinc-300 font-bold uppercase tracking-wide flex items-center space-x-1">
+                          <Radio className="w-3 h-3 text-brand-green-hover" />
+                          <span>2. Ring Modulator</span>
+                        </span>
+                        <span className="text-brand-green-hover font-bold">
+                          {Math.round(sfxRingModMix * 100)}% MIX
+                        </span>
+                      </div>
+
+                      {/* Dry/Wet Mix */}
+                      <div className="space-y-1">
+                        <div className="flex justify-between font-mono text-[8px] text-zinc-400">
+                          <span>Effect Intensity</span>
+                          <span>{Math.round(sfxRingModMix * 100)}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0.0"
+                          max="1.0"
+                          step="0.05"
+                          value={sfxRingModMix}
+                          onChange={(e) => {
+                            initAudioSystem();
+                            setSfxVoicePreset('custom');
+                            setSfxRingModMix(parseFloat(e.target.value));
+                          }}
+                          className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-950 rounded-lg appearance-none"
+                        />
+                      </div>
+
+                      {/* Carrier Frequency */}
+                      <div className="space-y-1">
+                        <div className="flex justify-between font-mono text-[8px] text-zinc-400">
+                          <span>Carrier Frequency</span>
+                          <span>{sfxRingModFreq} Hz</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="30"
+                          max="1500"
+                          step="10"
+                          value={sfxRingModFreq}
+                          disabled={sfxRingModMix === 0}
+                          onChange={(e) => {
+                            initAudioSystem();
+                            setSfxVoicePreset('custom');
+                            setSfxRingModFreq(parseInt(e.target.value));
+                          }}
+                          className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-950 rounded-lg appearance-none disabled:opacity-30"
+                        />
+                      </div>
+
+                      {/* Waveform type */}
+                      <div className="flex justify-between items-center text-[8.5px] font-mono">
+                        <span className="text-zinc-500">Carrier Shape</span>
+                        <div className="flex space-x-1">
+                          {(['sine', 'triangle', 'sawtooth', 'square'] as const).map((sh) => (
+                            <button
+                              type="button"
+                              key={sh}
+                              disabled={sfxRingModMix === 0}
+                              onClick={() => {
+                                initAudioSystem();
+                                setSfxVoicePreset('custom');
+                                setSfxRingModWave(sh);
+                              }}
+                              className={`px-1.5 py-0.5 rounded border text-[8px] uppercase disabled:opacity-30 cursor-pointer ${
+                                sfxRingModWave === sh
+                                  ? 'bg-brand-green/20 border-brand-green text-brand-green-hover font-bold'
+                                  : 'border-zinc-800 text-zinc-500 hover:text-zinc-300'
+                              }`}
+                            >
+                              {sh}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                    {/* Column 3: Vocoder (Robotic "Talking Synth") */}
+                    <div className="bg-zinc-900/20 p-3 rounded-lg border border-zinc-900/40 space-y-3 relative overflow-hidden text-left">
+                      <div className="flex justify-between items-center font-mono text-[10px]">
+                        <span className="text-zinc-300 font-bold uppercase tracking-wide flex items-center space-x-1">
+                          <Wand2 className="w-3 h-3 text-brand-green-hover" />
+                          <span>3. Talking Vocoder</span>
+                        </span>
+                        <span className="text-brand-green-hover font-bold">
+                          {Math.round(sfxVocoderMix * 100)}% MIX
+                        </span>
+                      </div>
+
+                      {/* Dry/Wet Mix */}
+                      <div className="space-y-1">
+                        <div className="flex justify-between font-mono text-[8px] text-zinc-400">
+                          <span>Vocoder Intensity</span>
+                          <span>{Math.round(sfxVocoderMix * 100)}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0.0"
+                          max="1.0"
+                          step="0.05"
+                          value={sfxVocoderMix}
+                          onChange={(e) => {
+                            initAudioSystem();
+                            setSfxVoicePreset('custom');
+                            setSfxVocoderMix(parseFloat(e.target.value));
+                          }}
+                          className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-950 rounded-lg appearance-none"
+                        />
+                      </div>
+
+                      {/* Carrier Pitch */}
+                      <div className="space-y-1">
+                        <div className="flex justify-between font-mono text-[8px] text-zinc-400">
+                          <span>Synth Pitch (Carrier)</span>
+                          <span>{sfxVocoderCarrierFreq} Hz</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="60"
+                          max="400"
+                          step="5"
+                          value={sfxVocoderCarrierFreq}
+                          disabled={sfxVocoderMix === 0}
+                          onChange={(e) => {
+                            initAudioSystem();
+                            setSfxVoicePreset('custom');
+                            setSfxVocoderCarrierFreq(parseInt(e.target.value));
+                          }}
+                          className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-950 rounded-lg appearance-none disabled:opacity-30"
+                        />
+                      </div>
+
+                      {/* Waveform type */}
+                      <div className="flex justify-between items-center text-[8.5px] font-mono">
+                        <span className="text-zinc-500">Synth Shape</span>
+                        <div className="flex space-x-1">
+                          {(['sawtooth', 'triangle', 'square'] as const).map((sh) => (
+                            <button
+                              type="button"
+                              key={sh}
+                              disabled={sfxVocoderMix === 0}
+                              onClick={() => {
+                                initAudioSystem();
+                                setSfxVoicePreset('custom');
+                                setSfxVocoderWave(sh);
+                              }}
+                              className={`px-1.5 py-0.5 rounded border text-[8px] uppercase disabled:opacity-30 cursor-pointer ${
+                                sfxVocoderWave === sh
+                                  ? 'bg-brand-green/20 border-brand-green text-brand-green-hover font-bold'
+                                  : 'border-zinc-800 text-zinc-500 hover:text-zinc-300'
+                              }`}
+                            >
+                              {sh}
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+                    </div>
+
+                  </div>
+
+                  <div className="text-[8.5px] text-zinc-500 font-mono leading-relaxed bg-zinc-950/25 p-2.5 rounded border border-zinc-900/30 flex items-start space-x-1.5 text-left">
+                    <HelpCircle className="w-3.5 h-3.5 text-zinc-400 shrink-0 mt-0.5" />
+                    <span>
+                      <strong>Vocoder (Talking Synth)</strong> uses a high-fidelity 12Hz envelope follower and peaking formant filters to sweep the synthesizer in perfect sync with vocal signals, replicating classic Daft Punk vocoders. <strong>Ring Modulation</strong> multiplies frequencies to create metallic scifi textures. Try applying the <strong>Robot</strong> or <strong>Demon</strong> preset and play vocal-heavy songs!
+                    </span>
+                  </div>
+                </div>
+
+                {/* Section: Dynamic Bass Boost Bypass Toggle */}
+                <div className="bg-zinc-950/40 p-4 rounded-xl border border-zinc-900/50 space-y-4 animate-fadeIn">
+                  <div className="flex justify-between items-center">
+                    <div className="flex flex-col">
+                      <span className="text-[11px] font-semibold text-zinc-400 font-mono tracking-wide uppercase flex items-center space-x-1.5">
+                        <Activity className="w-3.5 h-3.5 text-brand-green-hover" />
+                        <span>Instant Bass Boost (60Hz)</span>
+                      </span>
+                      <span className="text-[9px] text-zinc-500">High-gain low-shelf resonance filter</span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        initAudioSystem();
+                        setSfxBassBoost(!sfxBassBoost);
+                      }}
+                      className={`relative inline-flex h-5 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-1 focus:ring-brand-green/50 ${
+                        sfxBassBoost ? 'bg-brand-green' : 'bg-zinc-800'
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          sfxBassBoost ? 'translate-x-5' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+                  <div className="text-[9px] text-zinc-500 font-mono leading-relaxed bg-zinc-950/25 p-2 rounded border border-zinc-900/30">
+                    Applies a professional <span className="text-brand-green-hover font-bold">+12 dB</span> low-shelf amplification centered at <span className="text-brand-green-hover font-bold">60Hz</span> to enrich sub-bass energy instantly.
+                  </div>
                 </div>
               </motion.div>
             )}
