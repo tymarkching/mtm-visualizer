@@ -1,0 +1,80 @@
+const fs = require('fs');
+let code = fs.readFileSync('src/App.tsx', 'utf8');
+
+const panelToMove = `                <div>
+                  <h3 className="text-sm font-semibold text-white uppercase tracking-wider font-grotesk">Waveform & Render Controls</h3>
+                  <p className="text-[11px] text-gray-400 mt-1">Configure audio frequency response algorithms and outline geometry.</p>
+                </div>
+
+                <div className="space-y-4">
+                  {/* Performance & Quality Options */}
+                  <div className="p-3 bg-zinc-900/40 rounded-lg border border-zinc-800/60 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <span className="font-semibold text-zinc-300 block font-sans text-[11px]">High-Resolution Rendering</span>
+                        <span className="text-[10px] text-zinc-500 block font-sans mt-0.5 font-normal">Double the internal canvas scale during live preview</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setVisuals(prev => ({ ...prev, highResolutionPreview: !prev.highResolutionPreview }))}
+                        className={\`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 \${
+                          visuals.highResolutionPreview ? 'bg-brand-green' : 'bg-zinc-800'
+                        }\`}
+                      >
+                        <span className={\`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all \${
+                          visuals.highResolutionPreview ? 'translate-x-3.5' : 'translate-x-0'
+                        }\`} />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between border-t border-zinc-800/40 pt-3">
+                      <div>
+                        <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Oscilloscope Mode</span>
+                        <span className="text-[10px] text-zinc-500 block font-sans mt-0.5 font-normal">Switch from frequency spectrum to time-domain waveforms</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setVisuals(prev => ({ ...prev, timeDomainMode: !prev.timeDomainMode }))}
+                        className={\`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 \${
+                          visuals.timeDomainMode ? 'bg-brand-green' : 'bg-zinc-800'
+                        }\`}
+                      >
+                        <span className={\`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all \${
+                          visuals.timeDomainMode ? 'translate-x-3.5' : 'translate-x-0'
+                        }\`} />
+                      </button>
+                    </div>
+
+                    <div className="flex items-center justify-between border-t border-zinc-800/40 pt-3">
+                      <div>
+                        <span className="font-semibold text-zinc-300 block font-sans text-[11px]">CRT Scanlines</span>
+                        <span className="text-[10px] text-zinc-500 block font-sans mt-0.5 font-normal">Faint horizontal moving lines for a vintage display aesthetic</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setVisuals(prev => ({ ...prev, crtScanlines: !prev.crtScanlines }))}
+                        className={\`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 \${
+                          visuals.crtScanlines ? 'bg-brand-green' : 'bg-zinc-800'
+                        }\`}
+                      >
+                        <span className={\`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all \${
+                          visuals.crtScanlines ? 'translate-x-3.5' : 'translate-x-0'
+                        }\`} />
+                      </button>
+                    </div>
+                  </div>`;
+
+const newHeader = `                <div>
+                  <h3 className="text-sm font-semibold text-white uppercase tracking-wider font-grotesk">Waveform Styles & Geometry</h3>
+                  <p className="text-[11px] text-gray-400 mt-1">Configure audio frequency representation algorithms and structural shapes.</p>
+                </div>
+
+                <div className="space-y-4">`;
+
+if (code.includes(panelToMove)) {
+  code = code.replace(panelToMove, newHeader);
+  console.log('Removed panel from top');
+} else {
+  console.log('Could not find panel to move');
+}
+fs.writeFileSync('src/App.tsx', code);

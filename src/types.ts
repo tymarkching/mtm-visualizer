@@ -113,7 +113,7 @@ export interface VisualizerSettings {
   mirrorOpacity?: number; // independent mirror transparency/opacity slider (0 to 100)
   colorInvertOnBeat?: boolean; // flip the primary/secondary spectrum colors on a beat-triggered basis for a strobe-like flashing effect
   cycleColors?: boolean; // slowly rotate the primary and secondary colors over time
-  colorCycleSpeed?: number; // speed multiplier for color hue rotation cycling over time (e.g. 0.1 to 10)
+  colorCycleInterval?: number; // interval in seconds for a full color cycle rotation
   glitchIntensity?: number; // intensity for horizontal scan-line displacement effect
   beatSensitivity?: number; // threshold sensitivity for beat detection (e.g. 1.0 to 10.0 or 0 to 1)
   reactiveTextGlow?: boolean; // link on-screen text glow to middle/high frequency audio data
@@ -219,6 +219,20 @@ export interface VisualizerSettings {
   waterColorShift?: boolean;
   waterSyncToWaveform?: boolean;
   frequencyBasedColoring?: boolean;
+  zoomPulse?: boolean;
+  zoomPulseIntensity?: number;
+  glowBloom?: boolean;
+  glowBloomIntensity?: number;
+  trebleSparkles?: boolean;
+  trebleSparklesCount?: number;
+  highResolutionPreview?: boolean;
+  timeDomainMode?: boolean;
+  crtScanlines?: boolean;
+  strobeEffect?: boolean;
+  strobeIntensity?: number;
+  beatRhythmMultiplier?: number;
+  motionBlurIntensity?: number;
+  waveformRipple?: boolean;
 }
 
 export interface ParticleSettings {
@@ -240,14 +254,17 @@ export interface ParticleSettings {
   enableParticleCollisions?: boolean; // particle-to-particle collision detection based on radius
   particleLifeBehavior?: 'none' | 'bounce' | 'merge' | 'dissolve';
   collisionDamping?: number; // coefficient of restitution damping (0.1 to 1.0)
-  emittingDirection?: 'float-up' | 'fall-down' | 'center-explosion' | 'spiral-vortex';
+  emittingDirection?: 'float-up' | 'fall-down' | 'center-explosion' | 'spiral-vortex' | 'orbital-spiral';
   enableApexAttractor?: boolean;
   movementSpeed?: number;
   beatBurst?: boolean;
   trailLength?: number;
   lifetime?: number;
   sensitivityFloor?: number;
-  audioDriveTarget?: 'sub-bass' | 'vocal' | 'high-end';
+  audioDriveTarget?: 'sub-bass' | 'kicks' | 'vocal' | 'high-end';
+  useColorPalette?: boolean;
+  particleColorPalette?: string[];
+  selectedPalettePreset?: string;
   colorInvertOnBeat?: boolean;
   colorBurstOnBeat?: boolean;
   beatReactiveColorShift?: boolean;
@@ -258,6 +275,11 @@ export interface ParticleSettings {
   particleGlitch?: boolean;
   straightMotionOverride?: boolean;
   chaoticWindDrift?: boolean;
+  spectralRainbow?: boolean;
+  alphaDissolve?: number;
+  shatterEnabled?: boolean;
+  shatterRadius?: number;
+  shatterSpeed?: number;
 }
 
 export interface TitleOverlaySettings {
@@ -266,10 +288,16 @@ export interface TitleOverlaySettings {
   artist: string;
   fontSize: number;
   color: string;
-  fontFamily: 'Inter' | 'Space Grotesk' | 'JetBrains Mono' | 'Outfit' | 'Playfair Display';
-  position: 'center' | 'top-left' | 'bottom-left' | 'top-right' | 'bottom-right';
+  fontFamily: 'Inter' | 'Space Grotesk' | 'JetBrains Mono' | 'Outfit' | 'Playfair Display' | string;
+  position: 'center' | 'top-left' | 'bottom-left' | 'top-right' | 'bottom-right' | 'custom';
   fadeIn: boolean;
   animationStyle?: 'static' | 'pulse' | 'glow-bounce' | 'float' | 'shake';
+  offsetX?: number;
+  offsetY?: number;
+  textStyle?: 'normal' | 'neon' | 'shadow' | 'stroke' | 'retro' | 'glass';
+  colorBlend?: boolean;
+  colorBlendEnd?: string;
+  colorBlendMode?: 'normal' | 'screen' | 'overlay' | 'multiply' | 'color-dodge' | 'difference';
 }
 
 export interface BackgroundSettings {
@@ -285,6 +313,9 @@ export interface BackgroundSettings {
   enableBeatReaction?: boolean;
   beatReactionType?: 'bass' | 'beat';
   vignette?: number; // 0 to 100 for cinematic vignette darken overlay
+  vignettePulse?: boolean;
+  vignettePulseIntensity?: number;
+  parallaxSway?: number;
 }
 
 export interface OverlayImage {

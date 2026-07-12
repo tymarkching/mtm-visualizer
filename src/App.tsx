@@ -70,20 +70,21 @@ import {
   RenderParticle,
 } from './utils/visualizer-renderer';
 import { injectMP4Metadata } from './utils/metadata';
+import { extractDominantColors } from './utils/color-extractor';
 
 // Pre-configured thematic style presets of premium visualizers
 const PRESETS = [
   {
     id: 'crimson-pulse',
     name: 'Crimson Symmetrical',
-    description: 'A bright neon green symmetrical waveform against a pure black canvas with slow falling stars.',
+    description: 'Symmetrical red waveform pulsing over a dark crimson linear gradient background.',
     visuals: {
-      style: 'modern-sleek' as VisualizerStyle,
-      primaryColor: '#b8ee02',
-      secondaryColor: '#a3e635',
-      glowColor: '#b8ee02',
-      glowStrength: 10,
-      lineThickness: 2,
+      style: 'symmetrical-waveform' as VisualizerStyle,
+      primaryColor: '#ff003c',
+      secondaryColor: '#ff3b3b',
+      glowColor: '#ff003c',
+      glowStrength: 15,
+      lineThickness: 3,
       sensitivity: 1.2,
       fftSize: 1024,
       barRoundness: 0,
@@ -91,10 +92,10 @@ const PRESETS = [
       placement: 'center' as const,
     },
     background: {
-      type: 'color' as const,
+      type: 'gradient' as const,
       color: '#000000',
-      gradientStart: '#000000',
-      gradientEnd: '#000000',
+      gradientStart: '#200108',
+      gradientEnd: '#050002',
       imageUrl: null,
       videoUrl: null,
       blur: 0,
@@ -104,35 +105,41 @@ const PRESETS = [
       visible: true,
       text: 'CRIMSON PULSE',
       artist: 'Audio Wave',
-      fontSize: 48,
-      color: '#ff3344',
+      fontSize: 24,
+      color: '#ff003c',
       fontFamily: 'Space Grotesk' as const,
-      position: 'bottom-right' as const,
+      position: 'top-left' as const,
       fadeIn: true,
+      offsetX: 10,
+      offsetY: 10,
+      textStyle: 'neon' as const,
+      colorBlend: false,
+      colorBlendEnd: '#ffffff',
+      colorBlendMode: 'normal' as const,
     }
   },
   {
     id: 'cyberpunk-sunset',
     name: 'Cyberpunk Sunset',
-    description: 'Neon magenta visuals, flying cyber triangles, and circular audio waveforms.',
+    description: 'A neon-glow string line wave over a cyberpunk violet and neon-blue gradient canvas.',
     visuals: {
-      style: 'circular' as VisualizerStyle,
-      primaryColor: '#ff007f', // hot pink
-      secondaryColor: '#00ffff', // neon cyan
+      style: 'neon-glow-string' as VisualizerStyle,
+      primaryColor: '#ff007f',
+      secondaryColor: '#00ffff',
       glowColor: '#ff007f',
-      glowStrength: 15,
+      glowStrength: 20,
       lineThickness: 3,
-      sensitivity: 1.2,
+      sensitivity: 1.3,
       fftSize: 1024,
-      barRoundness: 4,
-      barSpacing: 2,
+      barRoundness: 0,
+      barSpacing: 0,
       placement: 'center' as const,
     },
     background: {
       type: 'gradient' as const,
       color: '#000000',
-      gradientStart: '#1a0033',
-      gradientEnd: '#000000',
+      gradientStart: '#2d004d',
+      gradientEnd: '#00032c',
       imageUrl: null,
       videoUrl: null,
       blur: 0,
@@ -140,37 +147,43 @@ const PRESETS = [
     },
     title: {
       visible: true,
-      text: 'CYBERPUNK',
+      text: 'CYBER SUNSET',
       artist: 'Synthwave Engine',
-      fontSize: 56,
+      fontSize: 24,
       color: '#00ffff',
       fontFamily: 'Outfit' as const,
-      position: 'center' as const,
+      position: 'top-left' as const,
       fadeIn: true,
+      offsetX: 10,
+      offsetY: 10,
+      textStyle: 'normal' as const,
+      colorBlend: true,
+      colorBlendEnd: '#ff007f',
+      colorBlendMode: 'normal' as const,
     }
   },
   {
     id: 'toxic-overdrive',
     name: 'Toxic Overdrive',
-    description: 'Aggressive green and acid yellow digital bars with intense neon glow.',
+    description: 'An aggressive green area silhouette wave over an acid green to dark forest linear gradient.',
     visuals: {
-      style: 'digital-vu-blocks' as VisualizerStyle,
-      primaryColor: '#00ff00',
+      style: 'smooth-area-silhouette' as VisualizerStyle,
+      primaryColor: '#39ff14',
       secondaryColor: '#ccff00',
-      glowColor: '#00ff00',
-      glowStrength: 25,
+      glowColor: '#39ff14',
+      glowStrength: 18,
       lineThickness: 4,
-      sensitivity: 1.6,
+      sensitivity: 1.4,
       fftSize: 1024,
-      barRoundness: 2,
-      barSpacing: 4,
+      barRoundness: 0,
+      barSpacing: 0,
       placement: 'center' as const,
     },
     background: {
-      type: 'color' as const,
+      type: 'gradient' as const,
       color: '#021000',
-      gradientStart: '#001000',
-      gradientEnd: '#0a1a05',
+      gradientStart: '#0b1a03',
+      gradientEnd: '#020500',
       imageUrl: null,
       videoUrl: null,
       blur: 0,
@@ -180,25 +193,31 @@ const PRESETS = [
       visible: true,
       text: 'TOXIC OVERDRIVE',
       artist: 'Acid Injection',
-      fontSize: 54,
-      color: '#00ff00',
+      fontSize: 24,
+      color: '#39ff14',
       fontFamily: 'JetBrains Mono' as const,
       position: 'top-left' as const,
       fadeIn: true,
+      offsetX: 10,
+      offsetY: 10,
+      textStyle: 'shadow' as const,
+      colorBlend: false,
+      colorBlendEnd: '#ffffff',
+      colorBlendMode: 'normal' as const,
     }
   },
   {
     id: 'retro-80s-grid',
-    name: 'Retro 80s Grid',
-    description: 'Neon purple grid styling with ambient neon digital particles.',
+    name: 'Retro 80s Ribbon',
+    description: 'A glowing plasma ribbon waveform over a retro neon-purple and indigo linear gradient.',
     visuals: {
-      style: 'retro' as VisualizerStyle,
+      style: 'plasma-glow-ribbon' as VisualizerStyle,
       primaryColor: '#ff00ff',
       secondaryColor: '#00ffff',
       glowColor: '#ff00ff',
-      glowStrength: 20,
-      lineThickness: 3,
-      sensitivity: 1.4,
+      glowStrength: 22,
+      lineThickness: 3.5,
+      sensitivity: 1.2,
       fftSize: 2048,
       barRoundness: 0,
       barSpacing: 0,
@@ -207,8 +226,8 @@ const PRESETS = [
     background: {
       type: 'gradient' as const,
       color: '#000000',
-      gradientStart: '#2b00ff',
-      gradientEnd: '#000000',
+      gradientStart: '#1f003a',
+      gradientEnd: '#03001e',
       imageUrl: null,
       videoUrl: null,
       blur: 2,
@@ -216,19 +235,25 @@ const PRESETS = [
     },
     title: {
       visible: true,
-      text: 'RETRO 80S',
-      artist: 'Vaporwave',
-      fontSize: 60,
+      text: 'RETRO RIBBON',
+      artist: 'Vaporwave Dreams',
+      fontSize: 24,
       color: '#00ffff',
       fontFamily: 'Space Grotesk' as const,
-      position: 'top-right' as const,
+      position: 'top-left' as const,
       fadeIn: true,
+      offsetX: 10,
+      offsetY: 10,
+      textStyle: 'retro' as const,
+      colorBlend: false,
+      colorBlendEnd: '#ffffff',
+      colorBlendMode: 'normal' as const,
     }
   },
   {
     id: 'sakura-petal-breeze',
-    name: 'Sakura Petal Breeze',
-    description: 'Gentle fresnel waves with drifting sakura petals over a dark violet canvas.',
+    name: 'Sakura Fresnel',
+    description: 'Overlapping pink fresnel waves against a serene violet and deep rose linear gradient background.',
     visuals: {
       style: 'fresnel-wave' as VisualizerStyle,
       primaryColor: '#ffb7c5',
@@ -236,17 +261,17 @@ const PRESETS = [
       glowColor: '#ffb7c5',
       glowStrength: 12,
       lineThickness: 2,
-      sensitivity: 1.0,
+      sensitivity: 1.1,
       fftSize: 2048,
       barRoundness: 0,
       barSpacing: 0,
       placement: 'center' as const,
     },
     background: {
-      type: 'color' as const,
+      type: 'gradient' as const,
       color: '#1a0a1a',
-      gradientStart: '#1a0a1a',
-      gradientEnd: '#000000',
+      gradientStart: '#240e24',
+      gradientEnd: '#0d040d',
       imageUrl: null,
       videoUrl: null,
       blur: 0,
@@ -254,25 +279,31 @@ const PRESETS = [
     },
     title: {
       visible: true,
-      text: 'SAKURA BREEZE',
+      text: 'SAKURA FRESNEL',
       artist: 'Ambient Journey',
-      fontSize: 42,
+      fontSize: 24,
       color: '#ffb7c5',
       fontFamily: 'Inter' as const,
-      position: 'bottom-left' as const,
+      position: 'top-left' as const,
       fadeIn: true,
+      offsetX: 10,
+      offsetY: 10,
+      textStyle: 'glass' as const,
+      colorBlend: true,
+      colorBlendEnd: '#ffffff',
+      colorBlendMode: 'normal' as const,
     }
   },
   {
     id: 'monochromatic-wave',
     name: 'Monochromatic Wave',
-    description: 'Sleek silver flowing wavelines and subtle dust sparkles over black canvas.',
+    description: 'Sleek silver flowing waves over a stark charcoal-to-black linear gradient.',
     visuals: {
       style: 'waveform' as VisualizerStyle,
       primaryColor: '#ffffff',
-      secondaryColor: '#aaaaaa',
+      secondaryColor: '#888888',
       glowColor: '#ffffff',
-      glowStrength: 5,
+      glowStrength: 8,
       lineThickness: 2.5,
       sensitivity: 1.1,
       fftSize: 2048,
@@ -281,10 +312,10 @@ const PRESETS = [
       placement: 'center' as const,
     },
     background: {
-      type: 'color' as const,
+      type: 'gradient' as const,
       color: '#050505',
-      gradientStart: '#000000',
-      gradientEnd: '#000000',
+      gradientStart: '#1a1a1a',
+      gradientEnd: '#020202',
       imageUrl: null,
       videoUrl: null,
       blur: 0,
@@ -292,37 +323,43 @@ const PRESETS = [
     },
     title: {
       visible: true,
-      text: 'MINIMAL',
+      text: 'MINIMAL WAVE',
       artist: 'Monochrome',
-      fontSize: 40,
+      fontSize: 24,
       color: '#ffffff',
       fontFamily: 'Inter' as const,
-      position: 'center' as const,
+      position: 'top-left' as const,
       fadeIn: true,
+      offsetX: 10,
+      offsetY: 10,
+      textStyle: 'stroke' as const,
+      colorBlend: false,
+      colorBlendEnd: '#ffffff',
+      colorBlendMode: 'normal' as const,
     }
   },
   {
     id: 'nebula-mountain-matrix',
-    name: 'Nebula Mountain Matrix',
-    description: 'Cosmic purple wave matrix with stardust nebula particles.',
+    name: 'Nebula Wave Echo',
+    description: 'Deep blue floating wave echoes with ghost trails over an outer-space cosmic violet linear gradient.',
     visuals: {
-      style: 'wave-matrix' as VisualizerStyle,
-      primaryColor: '#8a2be2',
-      secondaryColor: '#4b0082',
-      glowColor: '#8a2be2',
-      glowStrength: 18,
-      lineThickness: 2,
+      style: 'floating-wave-echo' as VisualizerStyle,
+      primaryColor: '#00d2ff',
+      secondaryColor: '#9d00ff',
+      glowColor: '#00d2ff',
+      glowStrength: 15,
+      lineThickness: 2.5,
       sensitivity: 1.3,
       fftSize: 1024,
       barRoundness: 0,
-      barSpacing: 2,
+      barSpacing: 0,
       placement: 'center' as const,
     },
     background: {
       type: 'gradient' as const,
       color: '#000000',
-      gradientStart: '#000000',
-      gradientEnd: '#1a0033',
+      gradientStart: '#0d001a',
+      gradientEnd: '#010005',
       imageUrl: null,
       videoUrl: null,
       blur: 5,
@@ -330,37 +367,43 @@ const PRESETS = [
     },
     title: {
       visible: true,
-      text: 'NEBULA MATRIX',
+      text: 'NEBULA ECHO',
       artist: 'Deep Space',
-      fontSize: 50,
-      color: '#d8b4fe',
+      fontSize: 24,
+      color: '#00d2ff',
       fontFamily: 'Outfit' as const,
       position: 'top-left' as const,
       fadeIn: true,
+      offsetX: 10,
+      offsetY: 10,
+      textStyle: 'neon' as const,
+      colorBlend: true,
+      colorBlendEnd: '#9d00ff',
+      colorBlendMode: 'normal' as const,
     }
   },
   {
     id: 'synthwave-horizon',
-    name: 'Synthwave Horizon',
-    description: 'Vaporwave sunset colors intersecting with dynamic laser beams.',
+    name: 'Synthwave Reflected',
+    description: 'A reflected glow ribbon wave over a sunset-orange and warm amber linear gradient background.',
     visuals: {
-      style: 'cyber-laser-horizon' as VisualizerStyle,
-      primaryColor: '#ff0055',
-      secondaryColor: '#00d0ff',
-      glowColor: '#ff0055',
+      style: 'reflected-glow-ribbon' as VisualizerStyle,
+      primaryColor: '#ff7700',
+      secondaryColor: '#ff0055',
+      glowColor: '#ff7700',
       glowStrength: 18,
-      lineThickness: 2,
-      sensitivity: 1.5,
-      fftSize: 2048,
+      lineThickness: 3,
+      sensitivity: 1.4,
+      fftSize: 1024,
       barRoundness: 0,
-      barSpacing: 2,
+      barSpacing: 0,
       placement: 'center' as const,
     },
     background: {
       type: 'gradient' as const,
       color: '#10051a',
-      gradientStart: '#000010',
-      gradientEnd: '#2a003a',
+      gradientStart: '#3a0a00',
+      gradientEnd: '#0f0200',
       imageUrl: null,
       videoUrl: null,
       blur: 2,
@@ -368,13 +411,19 @@ const PRESETS = [
     },
     title: {
       visible: true,
-      text: 'SYNTH HORIZON',
+      text: 'SYNTH REFLECTED',
       artist: 'Neon Nostalgia',
-      fontSize: 48,
-      color: '#00d0ff',
+      fontSize: 24,
+      color: '#ff7700',
       fontFamily: 'Outfit' as const,
-      position: 'bottom-right' as const,
+      position: 'top-left' as const,
       fadeIn: true,
+      offsetX: 10,
+      offsetY: 10,
+      textStyle: 'retro' as const,
+      colorBlend: true,
+      colorBlendEnd: '#ff0055',
+      colorBlendMode: 'normal' as const,
     }
   }
 ];
@@ -575,9 +624,53 @@ export default function App() {
     beatReactive: true,
     beatThreshold: 140,
     enabled: false,
+    shatterEnabled: false,
+    shatterRadius: 150,
+    shatterSpeed: 5,
+    useColorPalette: false,
+    selectedPalettePreset: 'neon-synthwave',
+    particleColorPalette: ['#ff007f', '#7f00ff', '#00ffff', '#ffaa00'],
   }));
   const [background, setBackground] = useState<BackgroundSettings>(PRESETS[0].background);
   const [titleOverlay, setTitleOverlay] = useState<TitleOverlaySettings>(PRESETS[0].title);
+
+  const [autoSyncColors, setAutoSyncColors] = useState<boolean>(true);
+
+  const applyDominantColorsFromImage = async (imageUrl: string) => {
+    if (!imageUrl) return;
+    try {
+      const colors = await extractDominantColors(imageUrl, 4);
+      if (colors && colors.length > 0) {
+        const primary = colors[0];
+        const secondary = colors[1] || colors[0];
+        
+        // 1. Update main visualizer settings
+        setVisuals(prev => ({
+          ...prev,
+          primaryColor: primary,
+          secondaryColor: secondary,
+          glowColor: primary,
+        }));
+
+        // 2. Update particle system colors
+        setParticlesSet(prev => ({
+          ...prev,
+          color: primary,
+          particleColorPalette: colors,
+          useColorPalette: true,
+          selectedPalettePreset: 'custom',
+        }));
+      }
+    } catch (e) {
+      console.error("Error applying image dominant colors:", e);
+    }
+  };
+
+  useEffect(() => {
+    if (autoSyncColors && background.type === 'image' && background.imageUrl) {
+      applyDominantColorsFromImage(background.imageUrl);
+    }
+  }, [background.imageUrl, background.type, autoSyncColors]);
 
   const [subtitles, setSubtitles] = useState<SubtitleSettings>({
     enabled: false,
@@ -764,85 +857,6 @@ export default function App() {
       } catch (err) {}
     }
   }, [sfxPlaybackRate]);
-
-  // Real-time Visual Signal Indicators loop in FX Studio
-  useEffect(() => {
-    if (activeTab !== 'sfx') return;
-
-    let animId: number;
-    const smoothLevels = new Array(10).fill(0);
-    let overallPeakSmooth = 0;
-
-    const update = () => {
-      if (analyserRef.current) {
-        try {
-          const fftSize = analyserRef.current.fftSize;
-          const sampleRate = analyserRef.current.context.sampleRate;
-          const bufferLength = analyserRef.current.frequencyBinCount;
-          const dataArray = new Uint8Array(bufferLength);
-          analyserRef.current.getByteFrequencyData(dataArray);
-
-          // We have 10 bands: [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000]
-          const freqs = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
-
-          freqs.forEach((f, idx) => {
-            // Calculate approximate bin index
-            const bin = Math.round((f * fftSize) / sampleRate);
-            // Clamp to valid index
-            const clampedBin = Math.max(0, Math.min(bufferLength - 1, bin));
-            
-            // Get value, normalize to 0-1
-            const rawVal = dataArray[clampedBin] / 255;
-            
-            let multiplier = 1.0;
-            if (f > 1000) multiplier = 1.4;
-            if (f > 4000) multiplier = 1.8;
-            if (f > 8000) multiplier = 2.5;
-            
-            const targetVal = Math.min(1.0, rawVal * multiplier);
-
-            // Apply smoothing / decay
-            smoothLevels[idx] = smoothLevels[idx] * 0.75 + targetVal * 0.25;
-
-            const element = document.getElementById(`eq-signal-${idx}`);
-            if (element) {
-              element.style.width = `${smoothLevels[idx] * 100}%`;
-              element.style.opacity = `${0.2 + smoothLevels[idx] * 0.8}`;
-            }
-          });
-
-          // Calculate overall peak from time domain waveform data
-          const timeData = new Uint8Array(fftSize);
-          analyserRef.current.getByteTimeDomainData(timeData);
-          let maxDeviation = 0;
-          for (let i = 0; i < timeData.length; i++) {
-            const dev = Math.abs(timeData[i] - 128);
-            if (dev > maxDeviation) maxDeviation = dev;
-          }
-          const peak = maxDeviation / 128; // 0.0 to 1.0
-          
-          // Smooth the overall peak
-          overallPeakSmooth = overallPeakSmooth * 0.8 + peak * 0.2;
-
-          // Update general peak level DOM elements
-          const ids = ['delay-signal-peak', 'reverb-signal-peak', 'speed-signal-peak', 'panner-signal-peak'];
-          ids.forEach(id => {
-            const el = document.getElementById(id);
-            if (el) {
-              el.style.width = `${overallPeakSmooth * 100}%`;
-              el.style.opacity = `${0.2 + overallPeakSmooth * 0.8}`;
-            }
-          });
-        } catch (err) {}
-      }
-      animId = requestAnimationFrame(update);
-    };
-
-    animId = requestAnimationFrame(update);
-    return () => {
-      cancelAnimationFrame(animId);
-    };
-  }, [activeTab]);
 
   // DSP parameters to AudioNode synchronization
   useEffect(() => {
@@ -1119,6 +1133,7 @@ export default function App() {
   const audioRef = useRef<HTMLAudioElement | null>(null);
   const canvasRef = useRef<HTMLCanvasElement | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
+  const bloomCanvasRef = useRef<HTMLCanvasElement | null>(null);
 
   // Media loading references
   const bgImageRef = useRef<HTMLImageElement | null>(null);
@@ -1208,6 +1223,7 @@ export default function App() {
     setVisuals(preset.visuals);
     setBackground(preset.background);
     setTitleOverlay(preset.title);
+    setParticlesSet(prev => ({ ...prev, enabled: false }));
     
     // Update track names to match preset titles if no file is uploaded
     if (!audioTrack.file) {
@@ -3173,14 +3189,20 @@ export default function App() {
 
     let animationId: number;
     let lastBeatTime = 0;
+    let beatCount = 0;
     const beatCooldown = 150; // ms
     let currentShakeAmt = 0;
+    let currentZoomAmt = 0;
+    let currentVignettePulseAmt = 0;
+    let currentStrobeAmt = 0;
     let accumulatedAutoRotation = 0;
     let lastAutoRotateTime = performance.now();
 
     // Persistent interpolation arrays for motion smoothing
     let smoothAnalyser: Float32Array | null = null;
     let smoothWaveform: Float32Array | null = null;
+    let fxSmoothLevels = new Array(10).fill(0);
+    let fxOverallPeakSmooth = 0;
 
     // CFR timing variables
     let lastFrameTime = performance.now();
@@ -3211,7 +3233,8 @@ export default function App() {
       let beatIntensity = 0;
 
       const isBeatLocked = !!visualsRef.current.beatLock;
-      const bpm = visualsRef.current.beatLockBpm || 120;
+      const baseBpm = visualsRef.current.beatLockBpm || 120;
+      const bpm = baseBpm * (visualsRef.current.beatRhythmMultiplier || 1);
       const bpmInterval = 60000 / bpm;
       const timeNow = Date.now();
 
@@ -3236,35 +3259,58 @@ export default function App() {
           let targetSum = 0;
           let count = 0;
           const target = particlesSetRef.current?.audioDriveTarget || 'sub-bass';
+          const N = analyserData.length;
           
           let startIndex = 0;
-          let endIndex = Math.floor(analyserData.length * 0.12) || 4; // sub-bass default
+          let endIndex = 4;
+          let targetMultiplier = 1.0;
 
-          if (target === 'vocal') {
-            startIndex = Math.floor(analyserData.length * 0.15);
-            endIndex = Math.floor(analyserData.length * 0.45);
+          if (target === 'sub-bass') {
+            // 20 Hz to 60 Hz (deep bass vibrations)
+            startIndex = Math.floor(20 * N / 22050);
+            endIndex = Math.max(startIndex + 2, Math.ceil(60 * N / 22050));
+            targetMultiplier = 1.5;
+          } else if (target === 'kicks') {
+            // 60 Hz to 250 Hz (punchy rhythmic kick transients)
+            startIndex = Math.floor(60 * N / 22050);
+            endIndex = Math.max(startIndex + 3, Math.ceil(250 * N / 22050));
+            targetMultiplier = 1.25;
+          } else if (target === 'vocal') {
+            // 250 Hz to 3000 Hz
+            startIndex = Math.floor(250 * N / 22050);
+            endIndex = Math.max(startIndex + 5, Math.ceil(3000 * N / 22050));
+            targetMultiplier = 2.0;
           } else if (target === 'high-end') {
-            startIndex = Math.floor(analyserData.length * 0.55);
-            endIndex = Math.floor(analyserData.length * 0.95);
+            // 4000 Hz to 16000 Hz
+            startIndex = Math.floor(4000 * N / 22050);
+            endIndex = Math.max(startIndex + 10, Math.ceil(16000 * N / 22050));
+            targetMultiplier = 3.5;
           }
 
           for (let i = startIndex; i < endIndex; i++) {
-            targetSum += analyserData[i];
-            count++;
+            if (i < N) {
+              targetSum += analyserData[i];
+              count++;
+            }
           }
           let bassValRaw = targetSum / Math.max(1, count);
-          let targetMultiplier = 1.0;
-          if (target === 'vocal') targetMultiplier = 1.5;
-          if (target === 'high-end') targetMultiplier = 2.2;
           const bassVal = bassValRaw * targetMultiplier;
           
           // Dynamic threshold value depending on beatSensitivity
           const beatSens = visualsRef.current.beatSensitivity !== undefined ? visualsRef.current.beatSensitivity : 1.0;
           const threshold = Math.max(20, Math.min(240, 185 - (beatSens * 35)));
-          if (bassVal > threshold && timeNow - lastBeatTime > beatCooldown) {
-            isBeat = true;
-            beatIntensity = Math.min(1.0, (bassVal - threshold) / (255 - threshold));
-            lastBeatTime = timeNow;
+          const mult = visualsRef.current.beatRhythmMultiplier || 1;
+          const dynamicCooldown = beatCooldown / Math.max(1, mult);
+          if (bassVal > threshold && timeNow - lastBeatTime > dynamicCooldown) {
+            beatCount++;
+            if (mult < 1 && (beatCount % 2 !== 0)) {
+              // Skip this beat for 1/2x speed
+              lastBeatTime = timeNow;
+            } else {
+              isBeat = true;
+              beatIntensity = Math.min(1.0, (bassVal - threshold) / (255 - threshold));
+              lastBeatTime = timeNow;
+            }
           }
         }
       } else {
@@ -3288,6 +3334,52 @@ export default function App() {
             beatIntensity = 0.5;
           }
         }
+      }
+
+      if (activeTabRef.current === 'sfx') {
+        try {
+          const fftSize = visualsRef.current.fftSize || 512;
+          const sampleRate = audioContextRef.current?.sampleRate || 44100;
+          const bufferLength = fftSize / 2;
+          const freqs = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
+
+          freqs.forEach((f, idx) => {
+            const bin = Math.round((f * fftSize) / sampleRate);
+            const clampedBin = Math.max(0, Math.min(bufferLength - 1, bin));
+            const rawVal = analyserData[clampedBin] / 255;
+            
+            let multiplier = 1.0;
+            if (f > 1000) multiplier = 1.4;
+            if (f > 4000) multiplier = 1.8;
+            if (f > 8000) multiplier = 2.5;
+            
+            const targetVal = Math.min(1.0, rawVal * multiplier);
+            fxSmoothLevels[idx] = fxSmoothLevels[idx] * 0.75 + targetVal * 0.25;
+
+            const element = document.getElementById(`eq-signal-${idx}`);
+            if (element) {
+              element.style.width = `${fxSmoothLevels[idx] * 100}%`;
+              element.style.opacity = `${0.2 + fxSmoothLevels[idx] * 0.8}`;
+            }
+          });
+
+          let maxDeviation = 0;
+          for (let i = 0; i < waveformData.length; i++) {
+            const dev = Math.abs(waveformData[i] - 128);
+            if (dev > maxDeviation) maxDeviation = dev;
+          }
+          const peak = maxDeviation / 128;
+          fxOverallPeakSmooth = fxOverallPeakSmooth * 0.8 + peak * 0.2;
+
+          const ids = ['delay-signal-peak', 'reverb-signal-peak', 'speed-signal-peak', 'panner-signal-peak'];
+          ids.forEach(id => {
+            const el = document.getElementById(id);
+            if (el) {
+              el.style.width = `${fxOverallPeakSmooth * 100}%`;
+              el.style.opacity = `${0.2 + fxOverallPeakSmooth * 0.8}`;
+            }
+          });
+        } catch (err) {}
       }
 
       if (isBeat && typeof window !== 'undefined') {
@@ -3377,6 +3469,25 @@ export default function App() {
         ctx.translate(-canvas.width / 2, -canvas.height / 2);
       }
 
+      // Suggestion 1: Smooth Beat-Reactive Stage Zoom/Pulse (Viewport Scaling)
+      if (visualsRef.current.zoomPulse) {
+        if (isBeat) {
+          const zoomMultiplier = visualsRef.current.zoomPulseIntensity !== undefined ? visualsRef.current.zoomPulseIntensity : 0.04;
+          currentZoomAmt = beatIntensity * zoomMultiplier;
+        } else {
+          currentZoomAmt *= 0.88; // decay smoothly
+        }
+        if (currentZoomAmt < 0.001) {
+          currentZoomAmt = 0;
+        }
+        if (currentZoomAmt > 0) {
+          const scale = 1.0 + currentZoomAmt;
+          ctx.translate(canvas.width / 2, canvas.height / 2);
+          ctx.scale(scale, scale);
+          ctx.translate(-canvas.width / 2, -canvas.height / 2);
+        }
+      }
+
       let activeBgBeatPulse = 0;
       let isBgBeatReactEnabled = false;
 
@@ -3403,37 +3514,51 @@ export default function App() {
 
       // 2. Compute and Draw Particles
       if (particlesSetRef.current?.enabled) {
-        let bassIntensity = Math.min(1.0, bassReactiveFactor * 1.2); // Default to low range energy
+        let bassIntensity = 0;
+        const target = particlesSetRef.current?.audioDriveTarget || 'sub-bass';
+        const N = analyserData?.length || 0;
 
-        // Section 3: Audio Band Link (Dropdown Select)
-        // Options: 'sub-bass' (Default - tracks low range), 'vocal' (Tracks center), 'high-end' (Tracks treble)
-        if (particlesSetRef.current?.audioDriveTarget === 'vocal') {
-          if (analyserData && analyserData.length > 0) {
-            const vocalStart = Math.floor(analyserData.length * 0.15);
-            const vocalEnd = Math.floor(analyserData.length * 0.55);
-            let vocalSum = 0;
-            let vocalCount = 0;
-            for (let i = vocalStart; i < vocalEnd; i++) {
-              vocalSum += analyserData[i];
-              vocalCount++;
-            }
-            bassIntensity = Math.min(1.0, ((vocalSum / Math.max(1, vocalCount)) / 255) * 1.5);
-          } else {
-            bassIntensity = mainBeatReactiveFactor;
+        if (analyserData && N > 0) {
+          let startIndex = 0;
+          let endIndex = 4;
+          let targetMultiplier = 1.0;
+
+          if (target === 'sub-bass') {
+            startIndex = Math.floor(20 * N / 22050);
+            endIndex = Math.max(startIndex + 2, Math.ceil(60 * N / 22050));
+            targetMultiplier = 1.5;
+          } else if (target === 'kicks') {
+            startIndex = Math.floor(60 * N / 22050);
+            endIndex = Math.max(startIndex + 3, Math.ceil(250 * N / 22050));
+            targetMultiplier = 1.25;
+          } else if (target === 'vocal') {
+            startIndex = Math.floor(250 * N / 22050);
+            endIndex = Math.max(startIndex + 5, Math.ceil(3000 * N / 22050));
+            targetMultiplier = 2.0;
+          } else if (target === 'high-end') {
+            startIndex = Math.floor(4000 * N / 22050);
+            endIndex = Math.max(startIndex + 10, Math.ceil(16000 * N / 22050));
+            targetMultiplier = 3.5;
           }
-        } else if (particlesSetRef.current?.audioDriveTarget === 'high-end') {
-          if (analyserData && analyserData.length > 0) {
-            const highStart = Math.floor(analyserData.length * 0.55);
-            const highEnd = Math.floor(analyserData.length * 0.95);
-            let highSum = 0;
-            let highCount = 0;
-            for (let i = highStart; i < highEnd; i++) {
-              highSum += analyserData[i];
-              highCount++;
+
+          let sum = 0;
+          let count = 0;
+          for (let i = startIndex; i < endIndex; i++) {
+            if (i < N) {
+              sum += analyserData[i];
+              count++;
             }
-            bassIntensity = Math.min(1.0, ((highSum / Math.max(1, highCount)) / 255) * 2.2);
-          } else {
+          }
+          const avgVal = sum / Math.max(1, count);
+          bassIntensity = Math.min(1.0, (avgVal / 255) * targetMultiplier);
+        } else {
+          // Fallback if no analyzer
+          if (target === 'vocal') {
+            bassIntensity = mainBeatReactiveFactor;
+          } else if (target === 'high-end') {
             bassIntensity = 0.15;
+          } else {
+            bassIntensity = Math.min(1.0, bassReactiveFactor * 1.2);
           }
         }
         
@@ -3451,6 +3576,46 @@ export default function App() {
           overallVolume *= volumeRef.current;
         } else {
           overallVolume = 0;
+        }
+
+        // Suggestion 3: Treble-Reactive Sparkle Particles Burst
+        if (visualsRef.current.trebleSparkles && analyserData && analyserData.length > 0) {
+          const highStart = Math.floor(analyserData.length * 0.65);
+          const highEnd = Math.floor(analyserData.length * 0.95);
+          let highSum = 0;
+          let highCount = 0;
+          for (let i = highStart; i < highEnd; i++) {
+            highSum += analyserData[i];
+            highCount++;
+          }
+          const avgTreble = highSum / Math.max(1, highCount);
+          
+          // Spawn sparkle particles on high-frequency transient peaks
+          if (avgTreble > 150) {
+            const spawnCount = Math.min(8, Math.floor((avgTreble - 150) / 10) + 1);
+            for (let k = 0; k < spawnCount; k++) {
+              if (particlesPoolRef.current.length < 500) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = 2 + Math.random() * 6;
+                particlesPoolRef.current.push({
+                  x: canvas.width / 2,
+                  y: canvas.height / 2,
+                  vx: Math.cos(angle) * speed,
+                  vy: Math.sin(angle) * speed,
+                  size: 1.5 + Math.random() * 3.5,
+                  color: visualsRef.current.primaryColor || '#ffffff',
+                  alpha: 1.0,
+                  life: 1.0,
+                  maxLife: 1.0,
+                  angle: Math.random() * Math.PI,
+                  spin: (Math.random() - 0.5) * 0.1,
+                  history: [],
+                  hue: Math.random() * 360,
+                  burstFlash: 1.0
+                });
+              }
+            }
+          }
         }
 
         particlesPoolRef.current = updateParticles(
@@ -3944,16 +4109,62 @@ export default function App() {
       currentVisuals._waterReflectionAnimValue = waterReflectionAnim.get();
       currentVisuals._waterReflectionDepthAnimValue = waterDepthAnim.get();
 
+      const targetDataArray = currentVisuals.timeDomainMode ? waveformData : analyserData;
+
       // 4. Draw Audio Waveform/Spectrums
       drawVisualizer(
         ctx,
         canvas.width,
         canvas.height,
         currentVisuals,
-        analyserData,
+        targetDataArray,
         waveformData,
         beatIntensity
       );
+
+      // Suggestion 6: High-Performance Mipmap Neon Bloom Filter Overlay (Fast Double Downscale-Blur)
+      if (visualsRef.current.glowBloom) {
+        ctx.save();
+        try {
+          if (!bloomCanvasRef.current) {
+            bloomCanvasRef.current = document.createElement('canvas');
+          }
+          const bCanvas = bloomCanvasRef.current;
+          const scaleFactor = 0.25; // 4x downscale for rapid box-blur emulation
+          const bWidth = Math.floor(canvas.width * scaleFactor);
+          const bHeight = Math.floor(canvas.height * scaleFactor);
+          
+          if (bWidth > 0 && bHeight > 0) {
+            if (bCanvas.width !== bWidth || bCanvas.height !== bHeight) {
+              bCanvas.width = bWidth;
+              bCanvas.height = bHeight;
+            }
+            
+            const bCtx = bCanvas.getContext('2d');
+            if (bCtx) {
+              bCtx.clearRect(0, 0, bWidth, bHeight);
+              // snapshot the current visualizer context containing waveforms, reflections and particles
+              bCtx.drawImage(canvas, 0, 0, bWidth, bHeight);
+              
+              // Draw back on main canvas with screen composite mode
+              ctx.globalCompositeOperation = 'screen';
+              const intensity = visualsRef.current.glowBloomIntensity !== undefined ? visualsRef.current.glowBloomIntensity : 0.6;
+              ctx.globalAlpha = intensity;
+              ctx.drawImage(bCanvas, 0, 0, canvas.width, canvas.height);
+              
+              // Double blur pass: a smaller snap for a wider background glow aura
+              if (intensity > 0.3) {
+                ctx.globalAlpha = intensity * 0.4;
+                ctx.drawImage(bCanvas, 4, 4, canvas.width - 8, canvas.height - 8);
+              }
+            }
+          }
+        } catch (err) {
+          console.warn("Failsafe: error drawing Neon Bloom Filter:", err);
+        } finally {
+          ctx.restore();
+        }
+      }
 
       // 4. Overlaid titles (with potential reactive text glows/pulses)
       drawTitleOverlay(
@@ -4532,22 +4743,77 @@ export default function App() {
         watermarkImageRef.current
       );
 
-      // 7. Draw Cinematic Vignette Filter Overlay if enabled
+      // 7. Draw Cinematic Vignette Filter Overlay if enabled (with Suggestion 2: Beat Vignette Pulse)
       const vignetteVal = backgroundRef.current?.vignette ?? 0;
       if (vignetteVal > 0) {
         ctx.save();
         const halfW = canvas.width / 2;
         const halfH = canvas.height / 2;
         const maxRadius = Math.sqrt(halfW * halfW + halfH * halfH);
+        
+        let dynamicPulse = 0;
+        if (backgroundRef.current?.vignettePulse) {
+          if (isBeat) {
+            const pulseIntensity = backgroundRef.current?.vignettePulseIntensity !== undefined ? backgroundRef.current.vignettePulseIntensity : 15;
+            currentVignettePulseAmt = beatIntensity * pulseIntensity;
+          } else {
+            currentVignettePulseAmt *= 0.90; // smooth decay
+          }
+          if (currentVignettePulseAmt < 0.05) {
+            currentVignettePulseAmt = 0;
+          }
+          dynamicPulse = currentVignettePulseAmt;
+        }
+
+        // Scale vignette radius and opacity on beat
+        const pulseRadiusMultiplier = Math.max(0.15, 0.4 - (dynamicPulse / 100));
+        const pulseOpacityMultiplier = Math.min(1.2, 1.0 + (dynamicPulse / 100));
+
         const grad = ctx.createRadialGradient(
-          halfW, halfH, maxRadius * 0.4,
+          halfW, halfH, maxRadius * pulseRadiusMultiplier,
           halfW, halfH, maxRadius
         );
-        const alpha = (vignetteVal / 100) * 0.85; // cap at 0.85 opacity for optimal visual aesthetics
+        const baseAlpha = (vignetteVal / 100) * 0.85;
+        const alpha = Math.min(0.95, baseAlpha * pulseOpacityMultiplier);
         grad.addColorStop(0, 'rgba(0, 0, 0, 0)');
         grad.addColorStop(1, `rgba(0, 0, 0, ${alpha})`);
         ctx.fillStyle = grad;
         ctx.fillRect(0, 0, canvas.width, canvas.height);
+        ctx.restore();
+      }
+
+      // 7.5. Strobe Effect and CRT Scanlines
+      if (visualsRef.current?.strobeEffect) {
+        if (isBeat) {
+          const intensity = visualsRef.current?.strobeIntensity !== undefined ? visualsRef.current.strobeIntensity : 0.8;
+          currentStrobeAmt = beatIntensity * intensity;
+        } else {
+          currentStrobeAmt *= 0.85; // fast decay
+        }
+        if (currentStrobeAmt > 0.05) {
+          ctx.save();
+          ctx.fillStyle = `rgba(255, 255, 255, ${currentStrobeAmt})`;
+          ctx.globalCompositeOperation = 'screen';
+          ctx.fillRect(0, 0, canvas.width, canvas.height);
+          ctx.restore();
+        } else {
+          currentStrobeAmt = 0;
+        }
+      }
+
+      if (visualsRef.current?.crtScanlines) {
+        ctx.save();
+        const scanlineCount = canvas.height / 3;
+        const timeOffset = (performance.now() / 1000) % 1; // slow scroll effect
+        ctx.lineWidth = 1;
+        ctx.strokeStyle = 'rgba(0, 0, 0, 0.15)'; // faint dark lines
+        ctx.beginPath();
+        for (let i = 0; i < scanlineCount; i++) {
+          const y = (i + timeOffset) * 3;
+          ctx.moveTo(0, y);
+          ctx.lineTo(canvas.width, y);
+        }
+        ctx.stroke();
         ctx.restore();
       }
 
@@ -4716,12 +4982,23 @@ export default function App() {
       scale = 1280 / 1920; // 720p scaling (1280x720)
     }
 
+    // Performance Optimization: Scale down internal canvas resolution by 50% during live preview
+    // to keep rendering completely smooth and prevent any main-thread lag or jitter.
+    // Full resolution is dynamically restored when active exporting is running!
+    if (!isExporting) {
+      if (visuals.highResolutionPreview) {
+        scale *= 1.0; // Suggestion 1: High-resolution rendering toggle (doubles the default 0.5 preview scale)
+      } else {
+        scale *= 0.5;
+      }
+    }
+
     canvas.width = baseWidth * scale;
     canvas.height = baseHeight * scale;
 
     // Refresh particle pool mapping coordinates on canvas resize
     particlesPoolRef.current = initParticles(particlesSet, canvas.width, canvas.height);
-  }, [exportSettings.aspectRatio, exportSettings.resolution]);
+  }, [exportSettings.aspectRatio, exportSettings.resolution, isExporting, particlesSet, visuals.highResolutionPreview]);
 
   // Helper to generate beautifully simulated electronic music audio spectrum and waveform when synth or no file is loaded
   const generateRhythmicSimulatedData = (currentTime: number, fftSize: number) => {
@@ -6105,6 +6382,15 @@ export default function App() {
                             <option value="JetBrains Mono">Retro Mono</option>
                             <option value="Outfit">Outfit Bold</option>
                             <option value="Playfair Display">Serif Editorial</option>
+                            <option value="Roboto">Roboto Modern</option>
+                            <option value="Montserrat">Montserrat Heavy</option>
+                            <option value="Poppins">Poppins Rounded</option>
+                            <option value="Bebas Neue">Bebas Neue Block</option>
+                            <option value="Oswald">Oswald Sharp</option>
+                            <option value="Anton">Anton Display</option>
+                            <option value="Pacifico">Pacifico Handwriting</option>
+                            <option value="Great Vibes">Great Vibes Script</option>
+                            <option value="Satisfy">Satisfy Elegant</option>
                           </select>
                         </div>
 
@@ -6127,8 +6413,8 @@ export default function App() {
                           <label className="block text-zinc-550 mb-1 text-[10px] font-mono">Text size ({titleOverlay.fontSize}px)</label>
                           <input
                             type="range"
-                            min="24"
-                            max="72"
+                            min="10"
+                            max="120"
                             value={titleOverlay.fontSize}
                             onChange={(e) => setTitleOverlay(prev => ({ ...prev, fontSize: parseInt(e.target.value) }))}
                             className="w-full accent-brand-green"
@@ -6136,7 +6422,7 @@ export default function App() {
                         </div>
 
                         <div>
-                          <label className="block text-zinc-550 mb-1 text-[10px] font-mono">Layout Align</label>
+                          <label className="block text-zinc-550 mb-1 text-[10px] font-mono">Layout Position</label>
                           <select
                             value={titleOverlay.position}
                             onChange={(e: any) => setTitleOverlay(prev => ({ ...prev, position: e.target.value }))}
@@ -6147,6 +6433,108 @@ export default function App() {
                             <option value="top-right">Top Right</option>
                             <option value="bottom-left">Bottom Left</option>
                             <option value="bottom-right">Bottom Right</option>
+                            <option value="custom">Custom (Coordinate Sliders)</option>
+                          </select>
+                        </div>
+                      </div>
+
+                      {/* Horizontal and Vertical Alignment Coordinate Sliders */}
+                      <div className="p-3 bg-zinc-950 border border-zinc-850 rounded-lg space-y-3">
+                        <span className="block text-[9px] text-zinc-400 font-mono uppercase tracking-wider">Layout Coordinate Align</span>
+                        
+                        <div className="space-y-1">
+                          <div className="flex justify-between text-[10px] text-zinc-500 font-mono">
+                            <span>Horizontal (X)</span>
+                            <span className="text-zinc-300">{titleOverlay.offsetX !== undefined ? titleOverlay.offsetX : 50}%</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0"
+                            max="100"
+                            value={titleOverlay.offsetX !== undefined ? titleOverlay.offsetX : 50}
+                            onChange={(e) => setTitleOverlay(prev => ({ ...prev, position: 'custom', offsetX: parseInt(e.target.value) }))}
+                            className="w-full accent-brand-green"
+                          />
+                        </div>
+
+                        <div className="space-y-1">
+                          <div className="flex justify-between text-[10px] text-zinc-500 font-mono">
+                            <span>Vertical (Y)</span>
+                            <span className="text-zinc-300">{titleOverlay.offsetY !== undefined ? titleOverlay.offsetY : 50}%</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0"
+                            max="100"
+                            value={titleOverlay.offsetY !== undefined ? titleOverlay.offsetY : 50}
+                            onChange={(e) => setTitleOverlay(prev => ({ ...prev, position: 'custom', offsetY: parseInt(e.target.value) }))}
+                            className="w-full accent-brand-green"
+                          />
+                        </div>
+                      </div>
+
+                      {/* Text Style Effect */}
+                      <div>
+                        <label className="block text-zinc-550 mb-1 text-[10px] font-mono">Text Rendering Style</label>
+                        <select
+                          value={titleOverlay.textStyle || 'normal'}
+                          onChange={(e) => setTitleOverlay(prev => ({ ...prev, textStyle: e.target.value as any }))}
+                          className="w-full bg-zinc-950 border border-zinc-800 rounded px-2.5 py-1.5 text-white focus:outline-none text-[11px]"
+                        >
+                          <option value="normal">Normal (Standard Flat Fill)</option>
+                          <option value="neon">Intense Neon Glow Aura</option>
+                          <option value="shadow">Deep Dramatic Drop Shadow</option>
+                          <option value="stroke">Hollow Vector Outline</option>
+                          <option value="retro">Retro 3D Extruded Layers</option>
+                          <option value="glass">Frosted Glass Outline Overlay</option>
+                        </select>
+                      </div>
+
+                      {/* Color Blend / Text Gradients */}
+                      <div className="bg-zinc-950 border border-zinc-850 p-3 rounded-lg space-y-3.5">
+                        <div className="flex items-center justify-between">
+                          <span className="text-[10px] text-zinc-400 font-mono uppercase tracking-wider">Enable Color Gradient Blend</span>
+                          <button
+                            type="button"
+                            onClick={() => setTitleOverlay(prev => ({ ...prev, colorBlend: !prev.colorBlend }))}
+                            className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                              titleOverlay.colorBlend ? 'bg-brand-green' : 'bg-zinc-800'
+                            }`}
+                          >
+                            <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                              titleOverlay.colorBlend ? 'translate-x-3.5' : 'translate-x-0'
+                            }`} />
+                          </button>
+                        </div>
+
+                        {titleOverlay.colorBlend && (
+                          <div>
+                            <label className="block text-zinc-550 mb-1 text-[10px] font-mono">Gradient End Color</label>
+                            <div className="flex items-center space-x-2 bg-zinc-900 border border-zinc-800 rounded p-1">
+                              <input
+                                type="color"
+                                value={titleOverlay.colorBlendEnd || '#ffffff'}
+                                onChange={(e) => setTitleOverlay(prev => ({ ...prev, colorBlendEnd: e.target.value }))}
+                                className="w-7 h-6 rounded border-0 bg-transparent cursor-pointer"
+                              />
+                              <span className="font-mono text-[9px] text-zinc-400">{(titleOverlay.colorBlendEnd || '#ffffff').toUpperCase()}</span>
+                            </div>
+                          </div>
+                        )}
+
+                        <div>
+                          <label className="block text-zinc-550 mb-1 text-[10px] font-mono">Composite Blend Mode</label>
+                          <select
+                            value={titleOverlay.colorBlendMode || 'normal'}
+                            onChange={(e: any) => setTitleOverlay(prev => ({ ...prev, colorBlendMode: e.target.value }))}
+                            className="w-full bg-zinc-900 border border-zinc-800 rounded px-2 py-1.5 text-white focus:outline-none text-[11px]"
+                          >
+                            <option value="normal">Normal (Opaque Layer)</option>
+                            <option value="screen">Screen (Lighten Background)</option>
+                            <option value="overlay">Overlay (High Contrast)</option>
+                            <option value="multiply">Multiply (Darken Underlying)</option>
+                            <option value="color-dodge">Color Dodge (Intense Glow)</option>
+                            <option value="difference">Difference (Invert Contrast)</option>
                           </select>
                         </div>
                       </div>
@@ -6168,11 +6556,12 @@ export default function App() {
                 className="space-y-6"
               >
                 <div>
-                  <h3 className="text-sm font-semibold text-white uppercase tracking-wider font-grotesk">Waveform & Render Controls</h3>
-                  <p className="text-[11px] text-gray-400 mt-1">Configure audio frequency response algorithms and outline geometry.</p>
+                  <h3 className="text-sm font-semibold text-white uppercase tracking-wider font-grotesk">Waveform Styles & Geometry</h3>
+                  <p className="text-[11px] text-gray-400 mt-1">Configure audio frequency representation algorithms and structural shapes.</p>
                 </div>
 
                 <div className="space-y-4">
+
                   {/* Visual Structure Style */}
                   <div>
                     <label className="block text-xs font-semibold text-gray-300 mb-1.5 font-mono uppercase">Wave representation Style</label>
@@ -7597,16 +7986,16 @@ export default function App() {
                     {visuals.cycleColors && (
                       <div className="space-y-1 p-2.5 bg-[#07070a]/40 rounded border border-zinc-950/40 mt-1 animate-in fade-in duration-200">
                         <div className="flex justify-between font-mono text-[9px] text-zinc-400 font-bold">
-                          <span>COLOR CYCLE SPEED</span>
-                          <span className="text-white font-semibold">{(visuals.colorCycleSpeed !== undefined ? visuals.colorCycleSpeed : 1.0).toFixed(1)}x</span>
+                          <span>COLOR CYCLE INTERVAL (SEC)</span>
+                          <span className="text-white font-semibold">{(visuals.colorCycleInterval !== undefined ? visuals.colorCycleInterval : 15.0).toFixed(1)}s</span>
                         </div>
                         <input
                           type="range"
-                          min="0.1"
-                          max="8.0"
-                          step="0.1"
-                          value={visuals.colorCycleSpeed !== undefined ? visuals.colorCycleSpeed : 1.0}
-                          onChange={(e) => setVisuals(prev => ({ ...prev, colorCycleSpeed: parseFloat(e.target.value) }))}
+                          min="1.0"
+                          max="60.0"
+                          step="1.0"
+                          value={visuals.colorCycleInterval !== undefined ? visuals.colorCycleInterval : 15.0}
+                          onChange={(e) => setVisuals(prev => ({ ...prev, colorCycleInterval: parseFloat(e.target.value) }))}
                           className="w-full accent-brand-green cursor-pointer"
                         />
                       </div>
@@ -7807,7 +8196,7 @@ export default function App() {
                       {/* Camera Shake Intensity Slider */}
                       <div className="border-t border-zinc-800/60 pt-3.5 space-y-1.5 animate-fade-in">
                         <div className="flex justify-between font-mono text-[9px] text-zinc-400">
-                          <span>BASS CAMERA SHAKE INTENSITY</span>
+                          <span>CAMERA SHAKE MAGNITUDE</span>
                           <span className="text-brand-green-hover font-mono font-semibold">
                             {visuals.cameraShake ? `${visuals.cameraShake.toFixed(1)} px` : 'DISABLED'}
                           </span>
@@ -7980,6 +8369,116 @@ export default function App() {
                             className="w-full accent-brand-green cursor-pointer"
                           />
                         </div>
+
+                        {/* Suggestion 1: Beat-Reactive Stage Zoom/Pulse */}
+                        <div className="flex items-center justify-between p-2.5 bg-[#07070a]/80 rounded border border-zinc-950/60 mt-2">
+                          <div className="text-left max-w-[78%]">
+                            <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Smooth Stage Zoom Pulse</span>
+                            <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Smoothly zoom/scale the entire stage on heavy bass beats</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setVisuals(prev => ({ ...prev, zoomPulse: !prev.zoomPulse }))}
+                            className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                              visuals.zoomPulse ? 'bg-brand-green' : 'bg-zinc-800'
+                            }`}
+                          >
+                            <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                              visuals.zoomPulse ? 'translate-x-3.5' : 'translate-x-0'
+                            }`} />
+                          </button>
+                        </div>
+                        {visuals.zoomPulse && (
+                          <div className="space-y-1 p-2.5 bg-[#07070a]/40 rounded border border-zinc-950/40 mt-1">
+                            <div className="flex justify-between font-mono text-[9px] text-zinc-400 font-bold">
+                              <span>ZOOM INTENSITY</span>
+                              <span className="text-white font-semibold">{((visuals.zoomPulseIntensity ?? 0.04) * 100).toFixed(1)}%</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="0.01"
+                              max="0.15"
+                              step="0.01"
+                              value={visuals.zoomPulseIntensity ?? 0.04}
+                              onChange={(e) => setVisuals(prev => ({ ...prev, zoomPulseIntensity: parseFloat(e.target.value) }))}
+                              className="w-full accent-brand-green cursor-pointer"
+                            />
+                          </div>
+                        )}
+
+                        {/* Suggestion 3: Treble-Reactive Sparkle Particles */}
+                        <div className="flex items-center justify-between p-2.5 bg-[#07070a]/80 rounded border border-zinc-950/60 mt-2">
+                          <div className="text-left max-w-[78%]">
+                            <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Treble Sparkle Bursts</span>
+                            <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Spawn starry sparkles specifically matching snare/high-frequency peaks</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setVisuals(prev => ({ ...prev, trebleSparkles: !prev.trebleSparkles }))}
+                            className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                              visuals.trebleSparkles ? 'bg-brand-green' : 'bg-zinc-800'
+                            }`}
+                          >
+                            <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                              visuals.trebleSparkles ? 'translate-x-3.5' : 'translate-x-0'
+                            }`} />
+                          </button>
+                        </div>
+
+                        {/* Suggestion 6: Neon Bloom Glow Filter Overlay */}
+                        <div className="flex items-center justify-between p-2.5 bg-[#07070a]/80 rounded border border-zinc-950/60 mt-2">
+                          <div className="text-left max-w-[78%]">
+                            <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Neon Bloom Filter</span>
+                            <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">High-performance double blurred bloom overlay simulating neon glow</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setVisuals(prev => ({ ...prev, glowBloom: !prev.glowBloom }))}
+                            className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                              visuals.glowBloom ? 'bg-brand-green' : 'bg-zinc-800'
+                            }`}
+                          >
+                            <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                              visuals.glowBloom ? 'translate-x-3.5' : 'translate-x-0'
+                            }`} />
+                          </button>
+                        </div>
+                        {visuals.glowBloom && (
+                          <div className="space-y-1 p-2.5 bg-[#07070a]/40 rounded border border-zinc-950/40 mt-1">
+                            <div className="flex justify-between font-mono text-[9px] text-zinc-400 font-bold">
+                              <span>BLOOM INTENSITY</span>
+                              <span className="text-white font-semibold">{((visuals.glowBloomIntensity ?? 0.6) * 100).toFixed(0)}%</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="0.1"
+                              max="1.5"
+                              step="0.05"
+                              value={visuals.glowBloomIntensity ?? 0.6}
+                              onChange={(e) => setVisuals(prev => ({ ...prev, glowBloomIntensity: parseFloat(e.target.value) }))}
+                              className="w-full accent-brand-green cursor-pointer"
+                            />
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Audio-Reactive Waveform Ripple */}
+                      <div className="flex items-center justify-between p-2.5 bg-zinc-950/60 rounded border border-zinc-850 mt-4">
+                        <div className="text-left max-w-[78%]">
+                          <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Audio-Reactive Waveform Ripple</span>
+                          <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Causes the canvas background to gently ripple outward from the waveform center based on low-frequency bass energy.</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setVisuals(prev => ({ ...prev, waveformRipple: !prev.waveformRipple }))}
+                          className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                            visuals.waveformRipple ? 'bg-brand-green' : 'bg-zinc-800'
+                          }`}
+                        >
+                          <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                            visuals.waveformRipple ? 'translate-x-3.5' : 'translate-x-0'
+                          }`} />
+                        </button>
                       </div>
 
                       {/* Video Asset Overlays Section */}
@@ -8555,6 +9054,106 @@ export default function App() {
 
                     </div>
 
+                  {/* Waveform & Render Controls (Moved) */}
+                  <div className="border-t border-zinc-800/60 pt-5 mt-5 space-y-4">
+                    <div>
+                      <h4 className="text-xs font-semibold text-zinc-300 font-mono uppercase tracking-wider text-left">Waveform & Render Controls</h4>
+                      <p className="text-[10px] text-zinc-500 mt-0.5 text-left">Performance, synchronization, and final render options</p>
+                    </div>
+
+                    <div className="p-3 bg-zinc-900/40 rounded-lg border border-zinc-800/60 space-y-3">
+                      <div className="flex items-center justify-between">
+                        <div>
+                          <span className="font-semibold text-zinc-300 block font-sans text-[11px]">High-Resolution Rendering</span>
+                          <span className="text-[10px] text-zinc-500 block font-sans mt-0.5 font-normal">Double the internal canvas scale during live preview</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setVisuals(prev => ({ ...prev, highResolutionPreview: !prev.highResolutionPreview }))}
+                          className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                            visuals.highResolutionPreview ? 'bg-brand-green' : 'bg-zinc-800'
+                          }`}
+                        >
+                          <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                            visuals.highResolutionPreview ? 'translate-x-3.5' : 'translate-x-0'
+                          }`} />
+                        </button>
+                      </div>
+
+                      <div className="flex items-center justify-between border-t border-zinc-800/40 pt-3">
+                        <div>
+                          <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Oscilloscope Mode</span>
+                          <span className="text-[10px] text-zinc-500 block font-sans mt-0.5 font-normal">Switch from frequency spectrum to time-domain waveforms</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setVisuals(prev => ({ ...prev, timeDomainMode: !prev.timeDomainMode }))}
+                          className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                            visuals.timeDomainMode ? 'bg-brand-green' : 'bg-zinc-800'
+                          }`}
+                        >
+                          <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                            visuals.timeDomainMode ? 'translate-x-3.5' : 'translate-x-0'
+                          }`} />
+                        </button>
+                      </div>
+
+                      <div className="flex items-center justify-between border-t border-zinc-800/40 pt-3">
+                        <div>
+                          <span className="font-semibold text-zinc-300 block font-sans text-[11px]">CRT Scanlines</span>
+                          <span className="text-[10px] text-zinc-500 block font-sans mt-0.5 font-normal">Faint horizontal moving lines for a vintage display aesthetic</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setVisuals(prev => ({ ...prev, crtScanlines: !prev.crtScanlines }))}
+                          className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                            visuals.crtScanlines ? 'bg-brand-green' : 'bg-zinc-800'
+                          }`}
+                        >
+                          <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                            visuals.crtScanlines ? 'translate-x-3.5' : 'translate-x-0'
+                          }`} />
+                        </button>
+                      </div>
+                    </div>
+                    
+                    {/* Beat Rhythm Multiplier */}
+                    <div className="space-y-1 p-2.5 bg-[#07070a]/40 rounded border border-zinc-950/40 mt-1">
+                      <div className="flex justify-between font-mono text-[9px] text-zinc-400 font-bold mb-1">
+                        <span>BEAT RHYTHM MULTIPLIER</span>
+                        <span className="text-white font-semibold">{visuals.beatRhythmMultiplier === 0.5 ? '1/2x' : visuals.beatRhythmMultiplier === 2 ? '2x' : '1x'}</span>
+                      </div>
+                      <select
+                        value={visuals.beatRhythmMultiplier || 1}
+                        onChange={(e) => setVisuals(prev => ({ ...prev, beatRhythmMultiplier: parseFloat(e.target.value) }))}
+                        className="w-full bg-[#0a0a0f] border border-zinc-800 rounded p-1.5 text-zinc-350 text-[10px] focus:outline-none focus:border-brand-green cursor-pointer"
+                      >
+                        <option value="0.5">1/2x (Half-Speed)</option>
+                        <option value="1">1x (Standard)</option>
+                        <option value="2">2x (Double-Time)</option>
+                      </select>
+                      <p className="text-[9px] text-zinc-500 mt-1 font-sans">Controls the tempo and synchronization pace of effects relative to the track's BPM.</p>
+                    </div>
+
+                    {/* Motion Blur Intensity */}
+                    <div className="space-y-1 p-2.5 bg-[#07070a]/40 rounded border border-zinc-950/40 mt-1">
+                      <div className="flex justify-between font-mono text-[9px] text-zinc-400 font-bold mb-1">
+                        <span>MOTION BLUR INTENSITY</span>
+                        <span className="text-white font-semibold">{((visuals.motionBlurIntensity || 0) * 100).toFixed(0)}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="0.95"
+                        step="0.05"
+                        value={visuals.motionBlurIntensity || 0}
+                        onChange={(e) => setVisuals(prev => ({ ...prev, motionBlurIntensity: parseFloat(e.target.value) }))}
+                        className="w-full accent-brand-green cursor-pointer"
+                      />
+                      <p className="text-[9px] text-zinc-500 mt-1 font-sans">Dynamically adjusts trail length of moving segments, enhancing cinematic fluidity.</p>
+                    </div>
+
+                  </div>
                   </div>
                 </div>
               </motion.div>
@@ -8585,7 +9184,15 @@ export default function App() {
                     <button
                       type="button"
                       id="toggle-particle-engine-master"
-                      onClick={() => setParticlesSet(prev => ({ ...prev, enabled: !prev.enabled }))}
+                      onClick={() => setParticlesSet(prev => {
+                        const nextEnabled = !prev.enabled;
+                        return {
+                          ...prev,
+                          enabled: nextEnabled,
+                          // If particles engine is turned on, automatically turn on Beat-Reactive Pulse and Audio-Reactive Particle Burst
+                          ...(nextEnabled ? { beatReactive: true, beatBurst: true } : {})
+                        };
+                      })}
                       className={`relative w-9 h-5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
                         particlesSet.enabled ? 'bg-brand-green' : 'bg-zinc-800'
                       }`}
@@ -8650,6 +9257,7 @@ export default function App() {
                       <option value="fall-down">Fall Down</option>
                       <option value="center-explosion">Center Explosion</option>
                       <option value="spiral-vortex">Spiral Vortex</option>
+                      <option value="orbital-spiral">Orbital Spiral</option>
                     </select>
                   </div>
 
@@ -8874,9 +9482,10 @@ export default function App() {
                         onChange={(e) => setParticlesSet(prev => ({ ...prev, audioDriveTarget: e.target.value as any }))}
                         className="w-full bg-zinc-950 border border-zinc-850 rounded px-2 py-1 text-zinc-300 font-sans text-[11px] cursor-pointer focus:outline-none focus:ring-1 focus:ring-brand-green"
                       >
-                        <option value="sub-bass">Sub-Bass & Kicks</option>
-                        <option value="vocal">Vocal Midrange</option>
-                        <option value="high-end">High-End Sparkle</option>
+                        <option value="sub-bass">Sub-Bass (20 - 60 Hz)</option>
+                        <option value="kicks">Kicks & Bass (60 - 250 Hz)</option>
+                        <option value="vocal">Vocal Midrange (250 - 3 kHz)</option>
+                        <option value="high-end">High-End Sparkle (4 - 16 kHz)</option>
                       </select>
                     </div>
 
@@ -8914,6 +9523,45 @@ export default function App() {
                           particlesSet.chaoticWindDrift ? 'translate-x-3.5' : 'translate-x-0'
                         }`} />
                       </button>
+                    </div>
+
+                    {/* Suggestion 2: Neon Trail Spectral Rainbow Color Cycle */}
+                    <div className="flex items-center justify-between p-2.5 bg-zinc-950/60 rounded border border-zinc-850">
+                      <div>
+                        <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Spectral Rainbow Trail</span>
+                        <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Cycle colors over lifespan creating a neon trail effect</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setParticlesSet(prev => ({ ...prev, spectralRainbow: !prev.spectralRainbow }))}
+                        className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                          particlesSet.spectralRainbow ? 'bg-brand-green' : 'bg-zinc-800'
+                        }`}
+                      >
+                        <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                          particlesSet.spectralRainbow ? 'translate-x-3.5' : 'translate-x-0'
+                        }`} />
+                      </button>
+                    </div>
+
+                    {/* Alpha Dissolve Slider */}
+                    <div className="space-y-1 p-2.5 bg-[#07070a]/40 rounded border border-zinc-950/40">
+                      <div className="flex justify-between font-mono text-[9px] text-zinc-400 font-bold">
+                        <span>ALPHA DISSOLVE RATE</span>
+                        <span className="text-white font-semibold">{(particlesSet.alphaDissolve !== undefined ? particlesSet.alphaDissolve : 1.0).toFixed(2)}x</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0.1"
+                        max="5.0"
+                        step="0.1"
+                        value={particlesSet.alphaDissolve !== undefined ? particlesSet.alphaDissolve : 1.0}
+                        onChange={(e) => setParticlesSet(prev => ({ ...prev, alphaDissolve: parseFloat(e.target.value) }))}
+                        className="w-full accent-brand-green cursor-pointer"
+                      />
+                      <p className="text-[9px] text-zinc-500 font-sans">
+                        Controls how rapidly particles fade out near the end of their lifetime.
+                      </p>
                     </div>
 
                     <div className="flex items-center justify-between p-2.5 bg-zinc-950/60 rounded border border-zinc-850">
@@ -9087,36 +9735,184 @@ export default function App() {
                       </span>
                     </div>
 
-                    <div className="flex items-center justify-between mt-4">
-                      <span className="text-[10px] text-zinc-400 font-mono">Particle Glow Tint</span>
-                      <div className="flex items-center space-x-2">
-                        <button
-                          type="button"
-                          onClick={() => {
-                            const neonPalette = [
-                              '#00ffff', '#ff00ff', '#00ff00', '#ff007f',
-                              '#ffaa00', '#00ffcc', '#7a22ff', '#ff3300',
-                              '#ffff00', '#00ff66', '#4d4dff', '#ff0055'
-                            ];
-                            const randomColor = neonPalette[Math.floor(Math.random() * neonPalette.length)];
-                            setParticlesSet(prev => ({ ...prev, color: randomColor }));
-                          }}
-                          className="flex items-center gap-1 px-1.5 py-1 text-[9px] font-medium font-sans border border-zinc-800 rounded bg-[#030305] text-zinc-400 hover:text-white hover:border-zinc-700 transition-all cursor-pointer"
-                          title="Generate a random neon color"
-                        >
-                          <Shuffle className="w-2.5 h-2.5 text-brand-green-hover" />
-                          <span>Randomize</span>
-                        </button>
-                        <div className="flex items-center space-x-1.5 bg-zinc-950 border border-zinc-800 rounded px-1.5 py-1">
-                          <input
-                            type="color"
-                            value={particlesSet.color}
-                            onChange={(e) => setParticlesSet(prev => ({ ...prev, color: e.target.value }))}
-                            className="w-5 h-5 border-0 bg-transparent cursor-pointer"
-                          />
-                          <span className="font-mono text-[9px] text-zinc-400">{particlesSet.color.toUpperCase()}</span>
+                    {/* PARTICLE COLOR MODE CONTROL (SOLID vs PALETTE) */}
+                    <div className="space-y-3 bg-zinc-950/30 p-2.5 rounded border border-zinc-900 mt-2.5 text-left">
+                      <div className="flex items-center justify-between">
+                        <span className="text-[10px] text-zinc-400 font-mono">Color Mode</span>
+                        <div className="flex bg-zinc-950 p-0.5 rounded border border-zinc-800">
+                          <button
+                            type="button"
+                            onClick={() => setParticlesSet(prev => ({ ...prev, useColorPalette: false }))}
+                            className={`px-2 py-0.5 rounded text-[9px] font-sans font-medium transition-all cursor-pointer ${
+                              !particlesSet.useColorPalette 
+                                ? 'bg-brand-green text-black font-semibold' 
+                                : 'text-zinc-500 hover:text-zinc-300'
+                            }`}
+                          >
+                            Solid Color
+                          </button>
+                          <button
+                            type="button"
+                            onClick={() => setParticlesSet(prev => ({ ...prev, useColorPalette: true }))}
+                            className={`px-2 py-0.5 rounded text-[9px] font-sans font-medium transition-all cursor-pointer ${
+                              particlesSet.useColorPalette 
+                                ? 'bg-brand-green text-black font-semibold' 
+                                : 'text-zinc-500 hover:text-zinc-300'
+                            }`}
+                          >
+                            Palette / Gradient
+                          </button>
                         </div>
                       </div>
+
+                      {!particlesSet.useColorPalette ? (
+                        /* SOLID COLOR UI */
+                        <div className="flex items-center justify-between pt-1">
+                          <span className="text-[10px] text-zinc-500 font-sans">Particle Glow Tint</span>
+                          <div className="flex items-center space-x-2">
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const neonPalette = [
+                                  '#00ffff', '#ff00ff', '#00ff00', '#ff007f',
+                                  '#ffaa00', '#00ffcc', '#7a22ff', '#ff3300',
+                                  '#ffff00', '#00ff66', '#4d4dff', '#ff0055'
+                                ];
+                                const randomColor = neonPalette[Math.floor(Math.random() * neonPalette.length)];
+                                setParticlesSet(prev => ({ ...prev, color: randomColor }));
+                              }}
+                              className="flex items-center gap-1 px-1.5 py-1 text-[9px] font-medium font-sans border border-zinc-800 rounded bg-[#030305] text-zinc-400 hover:text-white hover:border-zinc-700 transition-all cursor-pointer"
+                              title="Generate a random neon color"
+                            >
+                              <Shuffle className="w-2.5 h-2.5 text-brand-green-hover" />
+                              <span>Randomize</span>
+                            </button>
+                            <div className="flex items-center space-x-1.5 bg-zinc-950 border border-zinc-800 rounded px-1.5 py-1">
+                              <input
+                                type="color"
+                                value={particlesSet.color}
+                                onChange={(e) => setParticlesSet(prev => ({ ...prev, color: e.target.value }))}
+                                className="w-5 h-5 border-0 bg-transparent cursor-pointer"
+                              />
+                              <span className="font-mono text-[9px] text-zinc-400">{particlesSet.color.toUpperCase()}</span>
+                            </div>
+                          </div>
+                        </div>
+                      ) : (
+                        /* PALETTE / GRADIENT UI */
+                        <div className="space-y-3.5 pt-1 border-t border-zinc-900/60 transition-all animate-in fade-in duration-200">
+                          {/* Preset Selection Dropdown */}
+                          <div className="space-y-1">
+                            <span className="text-[9px] text-zinc-500 uppercase font-bold block font-mono">Palette Presets</span>
+                            <select
+                              value={particlesSet.selectedPalettePreset || 'neon-synthwave'}
+                              onChange={(e) => {
+                                const presetKey = e.target.value;
+                                const presets: Record<string, { name: string; colors: string[] }> = {
+                                  'neon-synthwave': {
+                                    name: 'Neon Synthwave 🌌',
+                                    colors: ['#ff007f', '#7f00ff', '#00ffff', '#ffaa00']
+                                  },
+                                  'cyberpunk': {
+                                    name: 'Cyberpunk Grid ⚡',
+                                    colors: ['#ff0055', '#00ffcc', '#ffff00', '#3300ff']
+                                  },
+                                  'nebula': {
+                                    name: 'Cosmic Nebula ⚛️',
+                                    colors: ['#4d0099', '#9900cc', '#ff00ff', '#00ccff']
+                                  },
+                                  'forest': {
+                                    name: 'Forest Pixies 🍃',
+                                    colors: ['#00ff66', '#a3e635', '#22c55e', '#10b981']
+                                  },
+                                  'sunset': {
+                                    name: 'Sunset Warmth 🌅',
+                                    colors: ['#ff4500', '#ff8c00', '#ff007f', '#ffd700']
+                                  },
+                                  'ice-fire': {
+                                    name: 'Ice & Fire ❄️🔥',
+                                    colors: ['#ff3300', '#ff9900', '#33ccff', '#0066ff']
+                                  },
+                                  'custom': {
+                                    name: 'Custom Palette 🎨',
+                                    colors: particlesSet.particleColorPalette && particlesSet.particleColorPalette.length >= 4 
+                                      ? particlesSet.particleColorPalette 
+                                      : ['#ff0055', '#00ffcc', '#ffff00', '#3300ff']
+                                  }
+                                };
+                                const chosen = presets[presetKey];
+                                setParticlesSet(prev => ({
+                                  ...prev,
+                                  selectedPalettePreset: presetKey,
+                                  particleColorPalette: [...chosen.colors]
+                                }));
+                              }}
+                              className="w-full bg-zinc-950 border border-zinc-850 rounded px-2 py-1 text-zinc-300 font-sans text-[11px] cursor-pointer focus:outline-none focus:ring-1 focus:ring-brand-green"
+                            >
+                              <option value="neon-synthwave">Neon Synthwave 🌌</option>
+                              <option value="cyberpunk">Cyberpunk Grid ⚡</option>
+                              <option value="nebula">Cosmic Nebula ⚛️</option>
+                              <option value="forest">Forest Pixies 🍃</option>
+                              <option value="sunset">Sunset Warmth 🌅</option>
+                              <option value="ice-fire">Ice & Fire ❄️🔥</option>
+                              <option value="custom">Custom Palette 🎨</option>
+                            </select>
+                          </div>
+
+                          {/* 4 Interactive Palette Swatch Pickers */}
+                          <div className="space-y-1.5">
+                            <span className="text-[9px] text-zinc-500 uppercase font-bold block font-mono">Customize Palette Colors</span>
+                            <div className="grid grid-cols-4 gap-2">
+                              {Array.from({ length: 4 }).map((_, idx) => {
+                                const paletteColors = particlesSet.particleColorPalette || ['#ff007f', '#7f00ff', '#00ffff', '#ffaa00'];
+                                const currentColor = paletteColors[idx] || '#ffffff';
+                                return (
+                                  <div 
+                                    key={idx} 
+                                    className="flex flex-col items-center gap-1 bg-zinc-950 border border-zinc-900 rounded p-1.5 hover:border-zinc-700 transition-all"
+                                  >
+                                    <input
+                                      type="color"
+                                      value={currentColor}
+                                      onChange={(e) => {
+                                        const nextColors = [...paletteColors];
+                                        nextColors[idx] = e.target.value;
+                                        setParticlesSet(prev => ({
+                                          ...prev,
+                                          selectedPalettePreset: 'custom',
+                                          particleColorPalette: nextColors
+                                        }));
+                                      }}
+                                      className="w-6 h-6 border-0 bg-transparent cursor-pointer rounded overflow-hidden"
+                                    />
+                                    <span className="font-mono text-[7px] text-zinc-500">{currentColor.toUpperCase()}</span>
+                                  </div>
+                                );
+                              })}
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Backdrop Palette Sync option */}
+                      {background.type === 'image' && background.imageUrl && (
+                        <div className="mt-3 pt-2.5 border-t border-zinc-900/60 flex flex-col gap-1.5">
+                          <div className="flex items-center justify-between">
+                            <span className="text-[10px] text-zinc-500 font-sans">Backdrop Palette Sync</span>
+                            <button
+                              type="button"
+                              onClick={() => applyDominantColorsFromImage(background.imageUrl!)}
+                              className="px-2 py-1 bg-brand-green/10 hover:bg-brand-green/20 text-brand-green-hover border border-brand-green/20 font-semibold text-[9px] rounded flex items-center gap-1 transition-all cursor-pointer"
+                            >
+                              <Sparkles className="w-2.5 h-2.5" />
+                              <span>Sync to Backdrop</span>
+                            </button>
+                          </div>
+                          <p className="text-[9px] text-zinc-500 leading-normal">
+                            Analyzes the backdrop image and applies the top 4 extracted colors directly to the visualizer and particle palette.
+                          </p>
+                        </div>
+                      )}
                     </div>
 
                     {/* SUB-GROUP: PARTICLE BEAT-REACTIVE COLOR MODULE */}
@@ -9382,6 +10178,77 @@ export default function App() {
                       )}
                     </div>
 
+                    {/* CLUSTER SHATTER EFFECT CONTROLS */}
+                    <div className="pt-4 border-t border-zinc-900 space-y-3.5 text-left">
+                      <div className="flex items-center justify-between pb-1">
+                        <div>
+                          <span className="font-semibold text-zinc-300 block font-sans text-xs">Cluster Shatter Effect</span>
+                          <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Shatters particles into radial, gravity-arced sub-fragments on peaks</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setParticlesSet(prev => ({ ...prev, shatterEnabled: !prev.shatterEnabled }))}
+                          className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                            particlesSet.shatterEnabled ? 'bg-brand-green' : 'bg-zinc-800'
+                          }`}
+                        >
+                          <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                            particlesSet.shatterEnabled ? 'translate-x-3.5' : 'translate-x-0'
+                          }`} />
+                        </button>
+                      </div>
+
+                      {particlesSet.shatterEnabled && (
+                        <div className="space-y-3 bg-[#0a0a0f]/40 p-2.5 rounded-lg border border-zinc-900/60 transition-all animate-in fade-in duration-200">
+                          {/* Shatter Radius Slider */}
+                          <div className="space-y-1">
+                            <div className="flex justify-between items-center text-[10px] font-mono">
+                              <span className="text-zinc-400 uppercase font-bold">Shatter Radius</span>
+                              <span className="text-brand-green-hover font-semibold">{(particlesSet.shatterRadius ?? 150)}px</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="50"
+                              max="300"
+                              step="10"
+                              value={particlesSet.shatterRadius ?? 150}
+                              onChange={(e) => {
+                                const val = parseInt(e.target.value);
+                                setParticlesSet(prev => ({ ...prev, shatterRadius: val }));
+                              }}
+                              className="w-full h-1 bg-zinc-950 rounded appearance-none cursor-pointer accent-brand-green"
+                            />
+                            <p className="text-[9px] text-zinc-500 font-sans">
+                              Maximum distance or lifetime expansion limit of the fragment particles.
+                            </p>
+                          </div>
+
+                          {/* Shatter Speed Slider */}
+                          <div className="space-y-1">
+                            <div className="flex justify-between items-center text-[10px] font-mono">
+                              <span className="text-zinc-400 uppercase font-bold">Shatter Speed</span>
+                              <span className="text-brand-green-hover font-semibold">{(particlesSet.shatterSpeed ?? 5.0).toFixed(1)} px/s</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="1.0"
+                              max="12.0"
+                              step="0.5"
+                              value={particlesSet.shatterSpeed ?? 5.0}
+                              onChange={(e) => {
+                                const val = parseFloat(e.target.value);
+                                setParticlesSet(prev => ({ ...prev, shatterSpeed: val }));
+                              }}
+                              className="w-full h-1 bg-zinc-950 rounded appearance-none cursor-pointer accent-brand-green"
+                            />
+                            <p className="text-[9px] text-zinc-500 font-sans">
+                              Initial velocity speed at which fragments burst outward radially.
+                            </p>
+                          </div>
+                        </div>
+                      )}
+                    </div>
+
                   </div>
                   {/* Closing tag for the opacity/interaction container */}
                   </div>
@@ -9571,6 +10438,41 @@ export default function App() {
                         </div>
                       )}
 
+                      {/* Image Dominant Color extraction controls */}
+                      {background.type === 'image' && background.imageUrl && (
+                        <div className="bg-zinc-950/40 border border-zinc-800 p-3.5 rounded-lg space-y-3.5 text-left transition-all duration-205">
+                          <div className="flex items-center justify-between pb-1">
+                            <div className="max-w-[78%]">
+                              <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Auto-Match Backdrop Colors</span>
+                              <span className="text-[10px]/[14px] text-zinc-500 block font-sans mt-0.5">Automatically extract & match colors when a backdrop photo is loaded</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setAutoSyncColors(!autoSyncColors)}
+                              className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                                autoSyncColors ? 'bg-brand-green' : 'bg-zinc-800'
+                              }`}
+                            >
+                              <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                                autoSyncColors ? 'translate-x-3.5' : 'translate-x-0'
+                              }`} />
+                            </button>
+                          </div>
+
+                          <div className="flex items-center justify-between pt-2 border-t border-zinc-900/60">
+                            <span className="text-[10px] text-zinc-400 font-mono">Dynamic Extraction</span>
+                            <button
+                              type="button"
+                              onClick={() => applyDominantColorsFromImage(background.imageUrl!)}
+                              className="px-2.5 py-1 bg-brand-green/10 hover:bg-brand-green/20 text-brand-green-hover border border-brand-green/20 font-semibold text-[10px] rounded flex items-center gap-1 transition-all cursor-pointer"
+                            >
+                              <Sparkles className="w-2.5 h-2.5" />
+                              <span>Extract & Match Colors</span>
+                            </button>
+                          </div>
+                        </div>
+                      )}
+
                       {/* Display Uploaded Video Asset Status */}
                       {background.videoUrl && (
                         <div className={`p-3 rounded-lg flex items-center justify-between text-xs border ${
@@ -9660,6 +10562,26 @@ export default function App() {
                         Draws a moody radial gradient overlay on top of the canvas that darkens outer corners
                       </p>
                     </div>
+                    
+                    {/* Background Parallax Sway */}
+                    <div className="space-y-1">
+                      <div className="flex justify-between font-mono text-[9px] text-zinc-400 font-bold">
+                        <span>BACKGROUND PARALLAX SWAY</span>
+                        <span className="text-white font-semibold">{(background.parallaxSway ?? 0).toFixed(1)}x</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="10"
+                        step="0.1"
+                        value={background.parallaxSway ?? 0}
+                        onChange={(e) => setBackground(prev => ({ ...prev, parallaxSway: parseFloat(e.target.value) }))}
+                        className="w-full accent-brand-green cursor-pointer"
+                      />
+                      <p className="text-[9px] text-zinc-500 font-sans leading-relaxed text-left">
+                        Creates a slow-moving translational shift of the background based on the current audio amplitude.
+                      </p>
+                    </div>
                   </div>
 
                   {/* Audio Beat-Reactive Toggles for Background */}
@@ -9693,6 +10615,42 @@ export default function App() {
                           <option value="bass">React to Bass (Low Frequencies)</option>
                           <option value="beat">React to Main Beat (Mid-High Frequencies)</option>
                         </select>
+                      </div>
+                    )}
+
+                    <div className="flex items-center justify-between pt-3 border-t border-zinc-800/50">
+                      <div>
+                        <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Dynamic Vignette Pulse</span>
+                        <span className="text-[10px] text-zinc-500 block font-sans mt-0.5 font-normal">Pulse vignette density and radius on music beats</span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setBackground(prev => ({ ...prev, vignettePulse: !prev.vignettePulse }))}
+                        className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                          background.vignettePulse ? 'bg-brand-green' : 'bg-zinc-800'
+                        }`}
+                      >
+                        <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                          background.vignettePulse ? 'translate-x-3.5' : 'translate-x-0'
+                        }`} />
+                      </button>
+                    </div>
+
+                    {background.vignettePulse && (
+                      <div className="space-y-1.5 pt-2 border-t border-zinc-800/50">
+                        <div className="flex justify-between text-[10px] text-zinc-400 font-mono uppercase font-semibold">
+                          <span>Pulse Strength</span>
+                          <span className="text-white">{(background.vignettePulseIntensity ?? 15)}</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="5"
+                          max="40"
+                          step="1"
+                          value={background.vignettePulseIntensity ?? 15}
+                          onChange={(e) => setBackground(prev => ({ ...prev, vignettePulseIntensity: parseInt(e.target.value) }))}
+                          className="w-full accent-brand-green cursor-pointer"
+                        />
                       </div>
                     )}
                   </div>
@@ -11349,6 +12307,47 @@ export default function App() {
                   <p className="text-[11px] text-zinc-500 mt-1 font-sans">
                     Flesh out track atmospheres with serial DSP processing nodes connected directly to the real-time analyzer context.
                   </p>
+                </div>
+
+                {/* Strobe Effect (Visual FX) */}
+                <div className="bg-zinc-950/40 p-4 rounded-xl border border-zinc-900/50 space-y-4">
+                  <div className="flex items-center justify-between">
+                    <div className="flex flex-col">
+                      <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider font-mono flex items-center space-x-2">
+                        <Wand2 className="w-3.5 h-3.5 text-white" />
+                        <span className="text-white">BEAT STROBE FLASH</span>
+                      </span>
+                      <span className="text-[10px] text-zinc-500 mt-1">Flashes a full-screen white overlay synchronized to heavy audio beats</span>
+                    </div>
+                    <button
+                      type="button"
+                      onClick={() => setVisuals(prev => ({ ...prev, strobeEffect: !prev.strobeEffect }))}
+                      className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                        visuals.strobeEffect ? 'bg-white' : 'bg-zinc-800'
+                      }`}
+                    >
+                      <span className={`absolute top-[2px] left-[2px] bg-zinc-900 rounded-full h-3.5 w-3.5 transition-all ${
+                        visuals.strobeEffect ? 'translate-x-3.5' : 'translate-x-0'
+                      }`} />
+                    </button>
+                  </div>
+                  {visuals.strobeEffect && (
+                    <div className="space-y-1.5 pt-2 border-t border-zinc-800/50">
+                      <div className="flex justify-between text-[10px] text-zinc-400 font-mono uppercase font-semibold">
+                        <span>Intensity</span>
+                        <span className="text-white">{((visuals.strobeIntensity ?? 0.8) * 100).toFixed(0)}%</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0.1"
+                        max="1.0"
+                        step="0.05"
+                        value={visuals.strobeIntensity ?? 0.8}
+                        onChange={(e) => setVisuals(prev => ({ ...prev, strobeIntensity: parseFloat(e.target.value) }))}
+                        className="w-full accent-white cursor-pointer"
+                      />
+                    </div>
+                  )}
                 </div>
 
                 {/* Core 10-Band Equalizer Deck */}

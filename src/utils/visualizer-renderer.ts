@@ -46,6 +46,18 @@ interface Shockwave {
 }
 export const activeShockwaves: Shockwave[] = [];
 let lastShockwaveTime = 0;
+let lastShatterTime = 0;
+
+interface WaveRipple {
+  x: number;
+  y: number;
+  radius: number;
+  maxRadius: number;
+  speed: number;
+  alpha: number;
+  color: string;
+}
+export const activeWaveRipples: WaveRipple[] = [];
 
 interface BouncingCircleState {
   currentY: number;
@@ -81,6 +93,10 @@ export interface RenderParticle {
   radius?: number;
   velocityOffset?: number;
   speed?: number;
+  isFragment?: boolean;
+  shatterRadiusMax?: number;
+  startX?: number;
+  startY?: number;
 }
 
 // Color conversion helpers
@@ -264,8 +280,8 @@ export function createParticle(
   const centerX = width / 2;
   const centerY = height / 2;
   
-  if (dir === 'spiral-vortex') {
-    radiusVal = randomY ? Math.random() * (Math.min(width, height) * 0.45) : 0;
+  if (dir === 'spiral-vortex' || dir === 'orbital-spiral') {
+    radiusVal = randomY ? Math.random() * (Math.min(width, height) * 0.45) : (dir === 'orbital-spiral' ? 10 + Math.random() * 20 : 0);
     x = centerX + Math.cos(angle) * radiusVal;
     y = centerY + Math.sin(angle) * radiusVal;
   } else if (randomY) {
@@ -295,9 +311,9 @@ export function createParticle(
     const explosionSpeed = (0.3 + Math.random() * 0.8) * baseSpeed;
     vx = Math.cos(angle) * explosionSpeed + settings.wind;
     vy = Math.sin(angle) * explosionSpeed + settings.gravity;
-  } else if (dir === 'spiral-vortex') {
-    vx = 0;
-    vy = 0;
+  } else if (dir === 'spiral-vortex' || dir === 'orbital-spiral') {
+    vx = Math.random() > 0.5 ? 1 : -1;
+    vy = Math.random() > 0.5 ? 1 : -1;
   }
 
   // Preserve legacy types' special speeds if direction is default/implicit
@@ -317,6 +333,10 @@ export function createParticle(
     : (50 + Math.random() * 100);
 
   let targetBaseColor = settings.color || '#b8ee02';
+  if (settings.useColorPalette && settings.particleColorPalette && settings.particleColorPalette.length > 0) {
+    const idx = Math.floor(Math.random() * settings.particleColorPalette.length);
+    targetBaseColor = settings.particleColorPalette[idx];
+  }
   let pColor = targetBaseColor;
 
   if (settings.particleColorRandomness && settings.particleColorRandomness > 0) {
@@ -339,7 +359,7 @@ export function createParticle(
     alpha: 0.1 + Math.random() * 0.8,
     life: initialLife,
     maxLife,
-    angle: dir === 'spiral-vortex' ? angle : Math.random() * Math.PI * 2,
+    angle: (dir === 'spiral-vortex' || dir === 'orbital-spiral') ? angle : Math.random() * Math.PI * 2,
     spin: (Math.random() - 0.5) * 0.05,
     history: [],
     baseVx: vx,
@@ -409,7 +429,82 @@ export function updateParticles(
     }
   }
 
+  // Trigger Cluster Shatter Effect if enabled and a beat is detected with enough intensity
+  const now = Date.now();
+  let parentsToShatter: RenderParticle[] = [];
+  if (settings.shatterEnabled && isBeat && bassIntensity > 0.45 && (now - lastShatterTime > 800)) {
+    lastShatterTime = now;
+    const nonFragments = particles.filter(p => !p.isFragment);
+    if (nonFragments.length > 0) {
+      const numParents = Math.min(nonFragments.length, 3 + Math.floor(Math.random() * 3)); // 3 to 5 parents
+      const shuffled = [...nonFragments].sort(() => 0.5 - Math.random());
+      parentsToShatter = shuffled.slice(0, numParents);
+    }
+  }
+
   for (let p of particles) {
+    if (p.isFragment) {
+      // Apply constant downward gravity vector to fragments (0.18 factor)
+      p.vy += 0.18;
+      
+      p.x += p.vx;
+      p.y += p.vy;
+      
+      const dx = p.x - (p.startX ?? p.x);
+      const dy = p.y - (p.startY ?? p.y);
+      const dist = Math.sqrt(dx * dx + dy * dy);
+      const maxD = p.shatterRadiusMax || 150;
+      
+      const distRatio = Math.min(1.0, dist / maxD);
+      p.life = 1.0 - distRatio;
+      p.alpha = Math.max(0, 1.0 - distRatio) * 0.9; // decay opacity
+      
+      p.angle += p.spin;
+      
+      const isOffScreen = p.x < -100 || p.x > width + 100 || p.y < -100 || p.y > height + 100;
+      if (p.life > 0.01 && p.alpha > 0.01 && !isOffScreen) {
+        result.push(p);
+      }
+      continue;
+    }
+
+    if (parentsToShatter.includes(p)) {
+      const numFragments = 3 + Math.floor(Math.random() * 4); // 3 to 6 tiny fragment particles
+      const shatterSpeedVal = settings.shatterSpeed !== undefined ? settings.shatterSpeed : 5;
+      const shatterRadiusVal = settings.shatterRadius !== undefined ? settings.shatterRadius : 150;
+      
+      for (let f = 0; f < numFragments; f++) {
+        const angle = (f / numFragments) * Math.PI * 2 + (Math.random() - 0.5) * 0.5;
+        const speed = (0.6 + Math.random() * 0.8) * shatterSpeedVal;
+        const fvx = Math.cos(angle) * speed;
+        const fvy = Math.sin(angle) * speed;
+        
+        result.push({
+          x: p.x,
+          y: p.y,
+          vx: fvx,
+          vy: fvy,
+          size: Math.max(1.0, p.size * 0.35 + Math.random() * 1.5),
+          color: p.color,
+          alpha: 1.0,
+          life: 1.0,
+          maxLife: 1.0,
+          angle: Math.random() * Math.PI * 2,
+          spin: (Math.random() - 0.5) * 0.1,
+          isFragment: true,
+          startX: p.x,
+          startY: p.y,
+          shatterRadiusMax: shatterRadiusVal,
+          baseVx: fvx,
+          baseVy: fvy,
+          hue: p.hue || Math.random() * 360
+        });
+      }
+      // Instantly despawn this parent particle (replace with new normal particle)
+      result.push(createParticle(settings, width, height, false));
+      continue;
+    }
+
     // Decrement life proportionally to the movement speed multiplier so particles travel the full distance before fading out
     p.life -= Math.max(0.005, dynamicVolume);
 
@@ -617,11 +712,22 @@ export function updateParticles(
     // (Or gracefully slide at the Sensitivity Floor baseline if configured).
     const dynamicBaseSpeedMultiplier = scaleMultiplier * dynamicVolume;
 
-    if (settings.emittingDirection === 'spiral-vortex') {
-      const angleStep = (p.speed || settings.speed || 1) * 0.02 * dynamicBaseSpeedMultiplier * burstSpeedMult;
-      p.angle += angleStep;
-      const radStep = (p.velocityOffset || 1) * dynamicBaseSpeedMultiplier * burstSpeedMult;
-      p.radius = (p.radius ?? 0) + radStep;
+    if (settings.emittingDirection === 'spiral-vortex' || settings.emittingDirection === 'orbital-spiral') {
+      const rotDir = (p.baseVx && p.baseVx > 0) ? 1 : -1;
+      const angleStep = rotDir * (p.speed || settings.speed || 1) * 0.02 * dynamicBaseSpeedMultiplier * burstSpeedMult;
+      
+      if (settings.emittingDirection === 'orbital-spiral') {
+        p.angle += angleStep * (1.0 + bassIntensity * 2.5);
+        const spiralDir = 1; // Always spiral outward to prevent clumping
+        const growth = spiralDir * (0.006 + bassIntensity * 0.03);
+        p.radius = (p.radius ?? 10) * (1.0 + growth * dynamicBaseSpeedMultiplier * burstSpeedMult);
+        if (p.radius < 2) p.radius = 2;
+      } else {
+        p.angle += angleStep;
+        const radStep = (p.velocityOffset || 1) * dynamicBaseSpeedMultiplier * burstSpeedMult;
+        p.radius = (p.radius ?? 0) + radStep;
+      }
+      
       p.x = width / 2 + Math.cos(p.angle) * p.radius;
       p.y = height / 2 + Math.sin(p.angle) * p.radius;
     } else {
@@ -704,7 +810,8 @@ export function updateParticles(
     }
 
     // Fade out as life ends
-    p.alpha = Math.max(0, (p.life / p.maxLife) * 0.8);
+    const dissolveFactor = settings.alphaDissolve !== undefined ? settings.alphaDissolve : 1.0;
+    p.alpha = Math.max(0, Math.pow(p.life / p.maxLife, dissolveFactor) * 0.8);
 
     // Filter out dead or off-screen particles, spawn replacements
     const isOffScreen =
@@ -745,12 +852,15 @@ export function updateParticles(
           
           let dx = p2.x - p1.x;
           let dy = p2.y - p1.y;
-          let dist = Math.sqrt(dx * dx + dy * dy);
-          let radius1 = p1.radius || p1.size || 4;
-          let radius2 = p2.radius || p2.size || 4;
-          let minDist = radius1 + radius2;
+          const distSq = dx * dx + dy * dy;
+          const radius1 = p1.radius || p1.size || 4;
+          const radius2 = p2.radius || p2.size || 4;
+          const minDist = radius1 + radius2;
+          const minDistSq = minDist * minDist;
 
-          if (dist < minDist && dist > 0.0001) {
+          if (distSq < minDistSq) {
+            const dist = Math.sqrt(distSq);
+            if (dist > 0.0001) {
             if (lifeBehavior === 'bounce') {
               // 1. Instantly push apart to separate physical mesh overlap coordinates
               let overlap = minDist - dist;
@@ -787,6 +897,7 @@ export function updateParticles(
               p2.life = 0;
               break; // p1 is dead, stop checking collisions for it
             }
+            }
           }
         }
       }
@@ -820,6 +931,18 @@ export function drawBackground(
   enableBeatPulse?: boolean
 ) {
   ctx.save();
+
+  if (settings.parallaxSway && settings.parallaxSway > 0 && (settings.type === 'image' || settings.type === 'video')) {
+    const time = Date.now() * 0.0005;
+    const amp = settings.parallaxSway * 10 * (1 + (beatIntensity || 0));
+    const swayX = Math.sin(time) * amp;
+    const swayY = Math.cos(time * 0.8) * amp;
+    const swayScale = 1 + (settings.parallaxSway * 0.05); // ensure borders aren't revealed
+    
+    ctx.translate(width / 2 + swayX, height / 2 + swayY);
+    ctx.scale(swayScale, swayScale);
+    ctx.translate(-width / 2, -height / 2);
+  }
 
   if (enableBeatPulse && beatIntensity && beatIntensity > 0) {
     const scaleMultiplier = 1.0 + 0.03 * beatIntensity;
@@ -950,7 +1073,12 @@ export function drawParticles(
     // SECTION 2: LINKING PARTICLE FIELD TO GLOBAL COLOR MODES
     let baseColor = p.color || settings.color || '#b8ee02';
 
-    if (globalVisuals) {
+    if (settings.spectralRainbow) {
+      // Suggestion 2: Spectral Rainbow Color Cycle over lifespan
+      const lifeRatio = Math.max(0, p.life / Math.max(0.1, p.maxLife || 1.0));
+      const cycleHue = ((1.0 - lifeRatio) * 360 + (p.hue || 0)) % 360;
+      baseColor = `hsl(${cycleHue}, 100%, 60%)`;
+    } else if (globalVisuals) {
       const mode = globalVisuals.colorMode || 'solid';
       if (mode === 'rainbow') {
         baseColor = `hsl(${p.hue || 0}, 100%, 60%)`;
@@ -1459,7 +1587,7 @@ export function drawVisualizer(
   }
   const ctx = visualizerWavesCanvas.getContext('2d')!;
   
-  const trails = incomingSettings.phosphorTrails || 0;
+  const trails = Math.max(incomingSettings.phosphorTrails || 0, incomingSettings.motionBlurIntensity || 0);
   if (trails > 0) {
     ctx.globalCompositeOperation = 'destination-out';
     // The alpha here represents how much we erase. 1 means erase completely. (1 - trails) means erase partially.
@@ -1468,6 +1596,43 @@ export function drawVisualizer(
     ctx.globalCompositeOperation = 'source-over';
   } else {
     ctx.clearRect(0, 0, width, height);
+  }
+
+  // Audio-Reactive Waveform Ripple Background Effect
+  if (incomingSettings.waveformRipple && beatIntensity > 0.6) {
+    if (!visualizerWavesCanvas.dataset.lastRipple || Date.now() - parseInt(visualizerWavesCanvas.dataset.lastRipple) > 300) {
+      visualizerWavesCanvas.dataset.lastRipple = Date.now().toString();
+      activeWaveRipples.push({
+        x: width / 2,
+        y: height / 2, // Centered locally; waveform offset applies later globally when copying to main canvas
+        radius: 50,
+        maxRadius: Math.max(width, height) * 1.5,
+        speed: 15 + beatIntensity * 10,
+        alpha: 0.5,
+        color: incomingSettings.primaryColor || '#b8ee02'
+      });
+    }
+  }
+
+  if (activeWaveRipples.length > 0) {
+    ctx.save();
+    ctx.lineWidth = 4;
+    for (let i = activeWaveRipples.length - 1; i >= 0; i--) {
+      const ripple = activeWaveRipples[i];
+      ripple.radius += ripple.speed;
+      ripple.alpha *= 0.95;
+      
+      ctx.beginPath();
+      ctx.arc(ripple.x, ripple.y, ripple.radius, 0, Math.PI * 2);
+      ctx.strokeStyle = ripple.color;
+      ctx.globalAlpha = ripple.alpha;
+      ctx.stroke();
+
+      if (ripple.alpha < 0.01 || ripple.radius > ripple.maxRadius) {
+        activeWaveRipples.splice(i, 1);
+      }
+    }
+    ctx.restore();
   }
 
   let settings = { ...incomingSettings };
@@ -1624,9 +1789,10 @@ export function drawVisualizer(
     }
     lastTimeColorCycle = now;
 
-    // Default speed is 1.0 (corresponds to shifting 25 degrees/sec)
-    const speed = settings.colorCycleSpeed !== undefined ? settings.colorCycleSpeed : 1.0;
-    hueRotation = (hueRotation + delta * 25 * speed) % 360;
+    // If an interval is provided, calculate exact degrees per second, default 15s
+    const interval = settings.colorCycleInterval !== undefined ? settings.colorCycleInterval : 15.0;
+    const degreesPerSec = 360 / interval;
+    hueRotation = (hueRotation + delta * degreesPerSec) % 360;
     appliedHueShift = true;
   } else {
     lastTimeColorCycle = Date.now();
@@ -4710,6 +4876,7 @@ export function drawVisualizer(
 }
 
 // DRAW TEXT OVERLAYS
+// DRAW TEXT OVERLAYS
 export function drawTitleOverlay(
   ctx: CanvasRenderingContext2D,
   width: number,
@@ -4723,7 +4890,6 @@ export function drawTitleOverlay(
   if (!settings.visible || (!settings.text && !settings.artist)) return;
 
   ctx.save();
-  ctx.fillStyle = settings.color;
   
   // Font select setup
   const fontObj: Record<string, string> = {
@@ -4731,20 +4897,41 @@ export function drawTitleOverlay(
     'Space Grotesk': '"Space Grotesk", sans-serif',
     'JetBrains Mono': '"JetBrains Mono", monospace',
     'Outfit': 'Outfit, sans-serif',
-    'Playfair Display': '"Playfair Display", serif'
+    'Playfair Display': '"Playfair Display", serif',
+    'Roboto': 'Roboto, sans-serif',
+    'Montserrat': 'Montserrat, sans-serif',
+    'Poppins': 'Poppins, sans-serif',
+    'Bebas Neue': '"Bebas Neue", sans-serif',
+    'Oswald': 'Oswald, sans-serif',
+    'Anton': 'Anton, sans-serif',
+    'Pacifico': '"Pacifico", cursive',
+    'Great Vibes': '"Great Vibes", cursive',
+    'Satisfy': '"Satisfy", cursive'
   };
 
   const selectedFont = fontObj[settings.fontFamily] || 'Inter, sans-serif';
 
   // Title Size
   const mainSize = settings.fontSize;
-  const subtitleSize = Math.max(14, mainSize * 0.45);
+  const subtitleSize = Math.max(12, mainSize * 0.45);
 
   let x = width / 2;
   let y = height / 2;
   let align: CanvasTextAlign = 'center';
 
-  if (settings.position === 'center') {
+  if (settings.position === 'custom') {
+    const hPct = settings.offsetX !== undefined ? settings.offsetX : 50;
+    const vPct = settings.offsetY !== undefined ? settings.offsetY : 50;
+    x = width * (hPct / 100);
+    y = height * (vPct / 100);
+    if (hPct < 35) {
+      align = 'left';
+    } else if (hPct > 65) {
+      align = 'right';
+    } else {
+      align = 'center';
+    }
+  } else if (settings.position === 'center') {
     align = 'center';
     x = width / 2;
     y = height / 2 - mainSize * 0.2;
@@ -4769,7 +4956,6 @@ export function drawTitleOverlay(
   // Reactive text transformation/scaling
   let glowMultiplier = 0;
   if (visualsSettings?.reactiveTextGlow && analyserData && analyserData.length > 0) {
-    // Look at middle/high frequencies (indices from 30% to 90% of spectrum)
     const startIdx = Math.floor(analyserData.length * 0.3);
     const endIdx = Math.floor(analyserData.length * 0.9);
     let sum = 0;
@@ -4789,30 +4975,113 @@ export function drawTitleOverlay(
     ctx.translate(-x, -y);
   }
 
+  // Set Blend Mode
+  if (settings.colorBlendMode && settings.colorBlendMode !== 'normal') {
+    ctx.globalCompositeOperation = settings.colorBlendMode;
+  }
+
+  // Determine core fill style
+  let fillStyleToUse: string | CanvasGradient = settings.color;
+  if (settings.colorBlend && settings.colorBlendEnd) {
+    const textGrad = ctx.createLinearGradient(x - mainSize * 4, y - mainSize, x + mainSize * 4, y + mainSize);
+    textGrad.addColorStop(0, settings.color);
+    textGrad.addColorStop(1, settings.colorBlendEnd);
+    fillStyleToUse = textGrad;
+  }
+
+  // Setup styling
+  const style = settings.textStyle || 'normal';
+
+  if (style === 'neon') {
+    ctx.shadowColor = settings.color;
+    ctx.shadowBlur = 15 + glowMultiplier * 20;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+  } else if (style === 'shadow') {
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.9)';
+    ctx.shadowBlur = 10;
+    ctx.shadowOffsetX = 4;
+    ctx.shadowOffsetY = 4;
+  } else if (style === 'stroke') {
+    ctx.strokeStyle = settings.color;
+    ctx.lineWidth = Math.max(1, mainSize * 0.05);
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.5)';
+    ctx.shadowBlur = 4;
+    ctx.shadowOffsetX = 1;
+    ctx.shadowOffsetY = 1;
+  } else if (style === 'retro') {
+    ctx.shadowColor = 'transparent';
+    ctx.shadowBlur = 0;
+    ctx.shadowOffsetX = 0;
+    ctx.shadowOffsetY = 0;
+  } else if (style === 'glass') {
+    ctx.shadowColor = 'rgba(0, 0, 0, 0.3)';
+    ctx.shadowBlur = 6;
+    ctx.shadowOffsetX = 1;
+    ctx.shadowOffsetY = 1;
+  } else {
+    if (glowMultiplier > 0) {
+      ctx.shadowColor = settings.color;
+      ctx.shadowBlur = 8 + glowMultiplier * 25;
+    } else {
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
+      ctx.shadowBlur = 8;
+    }
+    ctx.shadowOffsetX = 2;
+    ctx.shadowOffsetY = 2;
+  }
+
   // Draw Title Text
   ctx.textAlign = align;
   ctx.font = `600 ${mainSize}px ${selectedFont}`;
-  
-  // Shadows for maximum overlay legibility over complex background art
-  if (glowMultiplier > 0) {
-    ctx.shadowColor = settings.color;
-    ctx.shadowBlur = 8 + glowMultiplier * 25;
-  } else {
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
-    ctx.shadowBlur = 8;
-  }
-  ctx.shadowOffsetX = 2;
-  ctx.shadowOffsetY = 2;
+  ctx.fillStyle = fillStyleToUse;
 
   if (settings.text) {
-    ctx.fillText(settings.text.toUpperCase(), x, y);
+    const textUpper = settings.text.toUpperCase();
+    if (style === 'stroke') {
+      ctx.strokeText(textUpper, x, y);
+    } else if (style === 'retro') {
+      const depth = Math.max(3, mainSize * 0.08);
+      ctx.fillStyle = '#ff0055'; // Pink extrusion shadow
+      for (let d = depth; d > 0; d--) {
+        ctx.fillText(textUpper, x - d, y + d);
+      }
+      ctx.fillStyle = fillStyleToUse;
+      ctx.fillText(textUpper, x, y);
+    } else if (style === 'glass') {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.25)';
+      ctx.fillText(textUpper, x, y);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.6)';
+      ctx.lineWidth = 1.5;
+      ctx.strokeText(textUpper, x, y);
+    } else {
+      ctx.fillText(textUpper, x, y);
+    }
   }
 
   // Draw Artist Text
   if (settings.artist) {
     ctx.font = `400 ${subtitleSize}px ${selectedFont}`;
-    ctx.fillStyle = `rgba(${hexToRgb(settings.color)?.r || 255}, ${hexToRgb(settings.color)?.g || 255}, ${hexToRgb(settings.color)?.b || 255}, 0.8)`;
-    ctx.fillText(settings.artist, x, y + mainSize * 0.9);
+    
+    if (style === 'retro') {
+      ctx.fillStyle = '#00ffff'; // cyan shadow for retro subline
+      ctx.fillText(settings.artist, x - 2, y + mainSize * 0.9 + 2);
+      ctx.fillStyle = fillStyleToUse;
+      ctx.fillText(settings.artist, x, y + mainSize * 0.9);
+    } else if (style === 'stroke') {
+      ctx.strokeStyle = settings.color;
+      ctx.lineWidth = Math.max(1, subtitleSize * 0.05);
+      ctx.strokeText(settings.artist, x, y + mainSize * 0.9);
+    } else if (style === 'glass') {
+      ctx.fillStyle = 'rgba(255, 255, 255, 0.2)';
+      ctx.fillText(settings.artist, x, y + mainSize * 0.9);
+      ctx.strokeStyle = 'rgba(255, 255, 255, 0.5)';
+      ctx.lineWidth = 1;
+      ctx.strokeText(settings.artist, x, y + mainSize * 0.9);
+    } else {
+      ctx.fillStyle = `rgba(${hexToRgb(settings.color)?.r || 255}, ${hexToRgb(settings.color)?.g || 255}, ${hexToRgb(settings.color)?.b || 255}, 0.8)`;
+      ctx.fillText(settings.artist, x, y + mainSize * 0.9);
+    }
   }
 
   // Draw dynamic progress clock below center text if duration is parsed
