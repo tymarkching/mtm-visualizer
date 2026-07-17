@@ -36,7 +36,7 @@ import {
   ArrowRight,
   ArrowDownRight,
   ArrowUpRight,
-  Share2, ChevronDown, Mic, Radio, HelpCircle
+  Share2, ChevronDown, Mic, Radio, HelpCircle, Undo, Redo
 } from 'lucide-react';
 import localforage from 'localforage';
 import { guess } from 'web-audio-beat-detector';
@@ -593,6 +593,13 @@ const parseSubtitles = (text: string): LyricLine[] => {
   return lyrics.map(l => ({time: l.time, text: (l as any).parsedText})).sort((a, b) => a.time - b.time);
 };
 
+interface SettingsSnapshot {
+  visuals: VisualizerSettings;
+  particlesSet: ParticleSettings;
+  background: BackgroundSettings;
+  titleOverlay: TitleOverlaySettings;
+}
+
 export default function App() {
   // Navigation Tabs state
   const [activeTab, setActiveTab] = useState<'track' | 'background' | 'visuals' | 'particles' | 'overlay' | 'text' | 'export' | 'sfx'>('track');
@@ -627,6 +634,8 @@ export default function App() {
     shatterEnabled: false,
     shatterRadius: 150,
     shatterSpeed: 5,
+    forwardVelocityRamp: 1.0,
+    forwardSpeedMultiplier: 1.0,
     useColorPalette: false,
     selectedPalettePreset: 'neon-synthwave',
     particleColorPalette: ['#ff007f', '#7f00ff', '#00ffff', '#ffaa00'],
@@ -634,7 +643,150 @@ export default function App() {
   const [background, setBackground] = useState<BackgroundSettings>(PRESETS[0].background);
   const [titleOverlay, setTitleOverlay] = useState<TitleOverlaySettings>(PRESETS[0].title);
 
-  const [autoSyncColors, setAutoSyncColors] = useState<boolean>(true);
+  const [autoSyncColors, setAutoSyncColors] = useState<boolean>(false);
+
+  // State History Management for Undo/Redo
+  const [past, setPast] = useState<SettingsSnapshot[]>([]);
+  const [future, setFuture] = useState<SettingsSnapshot[]>([]);
+  const isUndoingRedoingRef = useRef<boolean>(false);
+  const lastSavedStateRef = useRef<SettingsSnapshot | null>(null);
+
+  // Initialize lastSavedStateRef once states are stable on start
+  useEffect(() => {
+    if (!lastSavedStateRef.current) {
+      lastSavedStateRef.current = {
+        visuals,
+        particlesSet,
+        background,
+        titleOverlay
+      };
+    }
+  }, []);
+
+  // Debounced history snapshot saver to group rapid/continuous edits (like slider drags)
+  useEffect(() => {
+    if (isUndoingRedoingRef.current) {
+      isUndoingRedoingRef.current = false;
+      return;
+    }
+
+    const handler = setTimeout(() => {
+      const currentState: SettingsSnapshot = {
+        visuals,
+        particlesSet,
+        background,
+        titleOverlay
+      };
+
+      if (lastSavedStateRef.current) {
+        const isDifferent = 
+          JSON.stringify(lastSavedStateRef.current.visuals) !== JSON.stringify(currentState.visuals) ||
+          JSON.stringify(lastSavedStateRef.current.particlesSet) !== JSON.stringify(currentState.particlesSet) ||
+          JSON.stringify(lastSavedStateRef.current.background) !== JSON.stringify(currentState.background) ||
+          JSON.stringify(lastSavedStateRef.current.titleOverlay) !== JSON.stringify(currentState.titleOverlay);
+
+        if (isDifferent) {
+          // Push previous stable state to history stack
+          setPast(prev => {
+            const next = [...prev, lastSavedStateRef.current!];
+            if (next.length > 50) next.shift(); // Bound memory to 50 entries
+            return next;
+          });
+          // Clear redo stack on new action
+          setFuture([]);
+          // Update last saved
+          lastSavedStateRef.current = currentState;
+        }
+      } else {
+        lastSavedStateRef.current = currentState;
+      }
+    }, 800);
+
+    return () => clearTimeout(handler);
+  }, [visuals, particlesSet, background, titleOverlay]);
+
+  const undo = () => {
+    if (past.length === 0) return;
+    
+    isUndoingRedoingRef.current = true;
+    const previous = past[past.length - 1];
+    const newPast = past.slice(0, past.length - 1);
+    
+    const current: SettingsSnapshot = {
+      visuals,
+      particlesSet,
+      background,
+      titleOverlay
+    };
+    
+    setFuture(prev => [current, ...prev]);
+    setPast(newPast);
+
+    setVisuals(previous.visuals);
+    setParticlesSet(previous.particlesSet);
+    setBackground(previous.background);
+    setTitleOverlay(previous.titleOverlay);
+    
+    lastSavedStateRef.current = previous;
+  };
+
+  const redo = () => {
+    if (future.length === 0) return;
+
+    isUndoingRedoingRef.current = true;
+    const next = future[0];
+    const newFuture = future.slice(1);
+
+    const current: SettingsSnapshot = {
+      visuals,
+      particlesSet,
+      background,
+      titleOverlay
+    };
+
+    setPast(prev => [...prev, current]);
+    setFuture(newFuture);
+
+    setVisuals(next.visuals);
+    setParticlesSet(next.particlesSet);
+    setBackground(next.background);
+    setTitleOverlay(next.titleOverlay);
+
+    lastSavedStateRef.current = next;
+  };
+
+  // Keyboard Shortcuts for Undo/Redo (Ctrl+Z / Ctrl+Y / Cmd+Z / Cmd+Shift+Z)
+  useEffect(() => {
+    const handleKeyDown = (e: KeyboardEvent) => {
+      // Ignore keypresses inside inputs/textareas to avoid breaking text typing
+      const activeEl = document.activeElement;
+      if (activeEl && (
+        activeEl.tagName === 'INPUT' || 
+        activeEl.tagName === 'TEXTAREA' || 
+        activeEl.getAttribute('contenteditable') === 'true'
+      )) {
+        return;
+      }
+
+      const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
+      const isCmdOrCtrl = isMac ? e.metaKey : e.ctrlKey;
+
+      if (isCmdOrCtrl && e.key.toLowerCase() === 'z') {
+        e.preventDefault();
+        if (e.shiftKey) {
+          redo();
+        } else {
+          undo();
+        }
+      } else if (isCmdOrCtrl && e.key.toLowerCase() === 'y') {
+        e.preventDefault();
+        redo();
+      }
+    };
+
+    window.addEventListener('keydown', handleKeyDown);
+    return () => window.removeEventListener('keydown', handleKeyDown);
+  }, [past, future, visuals, particlesSet, background, titleOverlay]);
 
   const applyDominantColorsFromImage = async (imageUrl: string) => {
     if (!imageUrl) return;
@@ -1296,7 +1448,7 @@ export default function App() {
     };
     
     const waveStyles: VisualizerStyle[] = ['waveform', 'bars', 'circular', 'radial-bars', 'retro', 'neon-tunnel', 'laser-orbit', 'wave-matrix', 'heartbeat-ekg', 'fresnel-wave', 'dna-helix', 'double-mirror-bars', 'circular-orbit', 'radial-inside-out', 'digital-vu-blocks', 'dna-helix-thread', 'smooth-area-silhouette', 'floating-matrix-particles', 'symmetrical-waveform', 'rounded-pill-bars', 'neon-glow-string', 'floating-bubble-particles', 'mirrored-wave-silhouette', 'retro-arcade-dot-grid'];
-    const partTypes: ParticleType[] = ['stars', 'bubbles', 'sparks', 'sakura', 'dust', 'digital', 'hearts', 'glow-circles', 'spark-stars', 'snowflakes'];
+    const partTypes: ParticleType[] = ['stars', 'bubbles', 'sparks', 'sakura', 'dust', 'digital', 'hearts', 'glow-circles', 'spark-stars', 'snowflakes', 'cosmic-starfield-3d', 'raindrops-on-glass', 'ambient-bokeh-bubbles'];
     const bgTypes = ['color', 'gradient'];
     
     setVisuals(prev => ({
@@ -2060,7 +2212,9 @@ export default function App() {
     } else {
       try {
         if (audioRef.current) {
-          audioRef.current.currentTime = 0;
+          if (audioRef.current.ended || audioRef.current.currentTime >= (audioRef.current.duration || 30) - 0.5) {
+            audioRef.current.currentTime = 0;
+          }
           if (audioTrack.file) {
             await audioRef.current.play();
           }
@@ -2167,7 +2321,7 @@ export default function App() {
         });
       }, 100);
     } else if (!isPlaying && !audioTrack.file) {
-      setCurrentTime(0);
+      // Do not reset currentTime on pause, so the user can pause and resume the simulated timeline!
     }
     return () => clearInterval(dummyInterval);
   }, [isPlaying, audioTrack.file, audioTrack.duration]);
@@ -2943,6 +3097,144 @@ export default function App() {
     }
   };
 
+  // Dedicated Individual Tab Reset Handlers
+  const handleResetTrackTab = () => {
+    setVolume(0.8);
+    setIsMuted(false);
+    setVisuals(prev => ({
+      ...prev,
+      fadeInDuration: 0,
+      fadeOutDuration: 0
+    }));
+    setTitleOverlay(PRESETS[0].title);
+  };
+
+  const handleResetBackgroundTab = () => {
+    setBackground(PRESETS[0].background);
+    setAutoSyncColors(false);
+  };
+
+  const handleResetVisualsTab = () => {
+    setVisuals(PRESETS[0].visuals);
+    setAutoSyncColors(false);
+    setIsPaletteDropdownOpen(false);
+  };
+
+  const handleResetParticlesTab = () => {
+    setParticlesSet({
+      type: 'stars' as ParticleType,
+      count: 100,
+      minSize: 3,
+      maxSize: 6,
+      speed: 0.5,
+      color: '#ff3333',
+      gravity: 0.5,
+      wind: 0.1,
+      beatReactive: true,
+      beatThreshold: 140,
+      enabled: false,
+      shatterEnabled: false,
+      shatterRadius: 150,
+      shatterSpeed: 5,
+      forwardVelocityRamp: 1.0,
+      forwardSpeedMultiplier: 1.0,
+      useColorPalette: false,
+      selectedPalettePreset: 'neon-synthwave',
+      particleColorPalette: ['#ff007f', '#7f00ff', '#00ffff', '#ffaa00'],
+    });
+  };
+
+  const handleResetOverlayTab = () => {
+    setVisuals(prev => ({
+      ...prev,
+      overlayVideoUrl: null,
+      overlayOpacity: 100,
+      overlayScaleMode: 'fit',
+      overlayScale: 50,
+      overlayX: 50,
+      overlayY: 50,
+      overlayVolume: 100,
+      overlayMuted: false,
+      overlayBlendMode: 'normal',
+      overlayBeatPulse: false,
+      overlayPulseIntensity: 1.0
+    }));
+    setOverlayImages([]);
+    setSelectedOverlayImageId(null);
+  };
+
+  const handleResetTextTab = () => {
+    setSubtitles({
+      enabled: false,
+      lyrics: [],
+      lrcString: '',
+      fontSize: 32,
+      color: '#ffffff',
+      glowColor: '#ff007f',
+      glowIntensity: 15,
+      fontFamily: 'Inter',
+      effect: 'static',
+      yOffset: 85,
+      backgroundOpacity: 0,
+      shadowOffset: 0,
+      transition: 'none',
+      outlineEnabled: false,
+      outlineColor: '#000000',
+      outlineThickness: 2,
+      align: 'center',
+      karaokeFillColor: '#ffff00',
+    });
+    setCustomText('');
+    setCustomTextColor('#00f3ff');
+    setCustomTextFontSize(44);
+    setCustomTextFontFamily('Inter');
+    setCustomTextX(50);
+    setCustomTextY(25);
+    setActiveStickers([]);
+  };
+
+  const handleResetSfxTab = () => {
+    setSfxEcho(false);
+    setSfxBassBoost(false);
+    setSfxDelayTime(0.3);
+    setSfxFeedback(0.4);
+    setSfxReverbSpace('none');
+    setSfxReverbMix(0.3);
+    setSfxReverbDecay(2.0);
+    setSfxPan(0.0);
+    setSfxAutoPan(false);
+    setSfxPlaybackRate(1.0);
+    setSfxVoicePreset('none');
+    setSfxVoicePitch(0);
+    setSfxRingModMix(0.0);
+    setSfxRingModFreq(100);
+    setSfxRingModWave('sine');
+    setSfxVocoderMix(0.0);
+    setSfxVocoderCarrierFreq(110);
+    setSfxVocoderWave('sawtooth');
+    setDspPlaybackSpeed(1.0);
+    setDspPitchShift(0);
+    setDspDelayTime(0.0);
+    setDspDelayFeedback(0.0);
+    setDspCompressorThreshold(0.0);
+    setDspSubBassSaturation(0.0);
+    setDspStereoBalance(0.0);
+    setDspVocalAttenuator(false);
+    setEqBass(0);
+    setEqMid(0);
+    setEqTreble(0);
+    setEqBands([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+  };
+
+  const handleResetExportTab = () => {
+    setExportSettings({
+      format: 'mp4',
+      aspectRatio: '16:9',
+      resolution: '1080p',
+      fps: 60
+    });
+  };
+
   // Traditional manual file picker triggers
   const handleManualAudioUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
@@ -3135,9 +3427,18 @@ export default function App() {
     };
   }, []);
 
-  // Sync foreground video playing state with track isPlaying state
+  // Sync background and foreground video playing states with track isPlaying state
   useEffect(() => {
     const shouldPlay = isPlaying;
+    if (bgVideoRef.current) {
+      if (shouldPlay) {
+        bgVideoRef.current.play().catch(e => {
+          console.warn("Background video play failed or blocked:", e);
+        });
+      } else {
+        bgVideoRef.current.pause();
+      }
+    }
     if (overlayVideoRef.current && visuals.overlayVideoUrl) {
       if (shouldPlay) {
         overlayVideoRef.current.play().catch(e => {
@@ -3147,7 +3448,7 @@ export default function App() {
         overlayVideoRef.current.pause();
       }
     }
-  }, [isPlaying, visuals.overlayVideoUrl]);
+  }, [isPlaying, visuals.overlayVideoUrl, background.videoUrl]);
 
   // Keep overlay volume & mute aligned with overlayGainNode
   useEffect(() => {
@@ -5719,6 +6020,39 @@ export default function App() {
           </div>
 
           <div className="flex items-center space-x-2.5">
+            {/* History Undo / Redo controls */}
+            <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded-lg p-0.5 space-x-0.5">
+              <button
+                type="button"
+                onClick={undo}
+                disabled={past.length === 0}
+                className={`p-1.5 rounded transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                  past.length > 0
+                    ? 'text-zinc-300 hover:text-brand-green-hover hover:bg-zinc-800'
+                    : 'text-zinc-600 cursor-not-allowed opacity-40'
+                }`}
+                title="Undo changes (Ctrl+Z)"
+              >
+                <Undo className="w-3.5 h-3.5" />
+                <span className="text-[10px] hidden lg:inline font-sans font-medium px-0.5">Undo</span>
+              </button>
+              <div className="w-[1px] h-3.5 bg-zinc-800" />
+              <button
+                type="button"
+                onClick={redo}
+                disabled={future.length === 0}
+                className={`p-1.5 rounded transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                  future.length > 0
+                    ? 'text-zinc-300 hover:text-brand-green-hover hover:bg-zinc-800'
+                    : 'text-zinc-600 cursor-not-allowed opacity-40'
+                }`}
+                title="Redo changes (Ctrl+Y)"
+              >
+                <Redo className="w-3.5 h-3.5" />
+                <span className="text-[10px] hidden lg:inline font-sans font-medium px-0.5">Redo</span>
+              </button>
+            </div>
+
             {/* Invisible project importer input element */}
             <input
               type="file"
@@ -6117,9 +6451,20 @@ export default function App() {
                 transition={{ duration: 0.2, ease: 'easeOut' }}
                 className="space-y-6"
               >
-                <div>
-                  <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider font-mono">Audio Source Config</h3>
-                  <p className="text-[11px] text-zinc-500 mt-1">Upload custom MP3 audio files or play live-synthesized demo streams.</p>
+                <div className="flex items-start justify-between border-b border-zinc-900 pb-4 mb-4">
+                  <div className="space-y-1">
+                    <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider font-mono">Audio Source Config</h3>
+                    <p className="text-[11px] text-zinc-500 mt-1">Upload custom MP3 audio files or play live-synthesized demo streams.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleResetTrackTab}
+                    className="flex items-center space-x-1.5 px-2.5 py-1.5 text-[10px] font-mono font-medium text-zinc-400 hover:text-white bg-zinc-900/60 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 rounded transition-all cursor-pointer shadow-sm shrink-0 mt-0.5"
+                    title="Reset Audio Config and Text Overlays"
+                  >
+                    <RefreshCw className="w-3 h-3 text-brand-green" />
+                    <span>Reset</span>
+                  </button>
                 </div>
 
                 {/* Upload Deck File zone */}
@@ -6555,9 +6900,20 @@ export default function App() {
                 transition={{ duration: 0.2, ease: 'easeOut' }}
                 className="space-y-6"
               >
-                <div>
-                  <h3 className="text-sm font-semibold text-white uppercase tracking-wider font-grotesk">Waveform Styles & Geometry</h3>
-                  <p className="text-[11px] text-gray-400 mt-1">Configure audio frequency representation algorithms and structural shapes.</p>
+                <div className="flex items-start justify-between border-b border-zinc-900 pb-4 mb-4">
+                  <div className="space-y-1">
+                    <h3 className="text-sm font-semibold text-white uppercase tracking-wider font-grotesk">Waveform Styles & Geometry</h3>
+                    <p className="text-[11px] text-gray-400 mt-1">Configure audio frequency representation algorithms and structural shapes.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleResetVisualsTab}
+                    className="flex items-center space-x-1.5 px-2.5 py-1.5 text-[10px] font-mono font-medium text-zinc-400 hover:text-white bg-zinc-900/60 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 rounded transition-all cursor-pointer shadow-sm shrink-0 mt-0.5"
+                    title="Reset Waveform Styles and Geometry"
+                  >
+                    <RefreshCw className="w-3 h-3 text-brand-green" />
+                    <span>Reset</span>
+                  </button>
                 </div>
 
                 <div className="space-y-4">
@@ -7789,7 +8145,7 @@ export default function App() {
                           type="button"
                           id="mirror-mode-toggle"
                           onClick={() => setVisuals(prev => ({ ...prev, mirrorMode: !prev.mirrorMode }))}
-                          className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                          className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 hover:shadow-[0_0_8px_#b8ee02] hover:scale-105 ${
                             visuals.mirrorMode ? 'bg-brand-green' : 'bg-zinc-800'
                           }`}
                         >
@@ -9169,9 +9525,20 @@ export default function App() {
                 transition={{ duration: 0.2, ease: 'easeOut' }}
                 className="space-y-6"
               >
-                <div>
-                  <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider font-mono">Particle Physics Vector</h3>
-                  <p className="text-[11px] text-zinc-500 mt-1 font-sans">Configure live floating elements reactive to dynamic waveform peaks.</p>
+                <div className="flex items-start justify-between border-b border-zinc-900 pb-4 mb-4">
+                  <div className="space-y-1">
+                    <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider font-mono">Particle Physics Vector</h3>
+                    <p className="text-[11px] text-zinc-500 mt-1 font-sans">Configure live floating elements reactive to dynamic waveform peaks.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleResetParticlesTab}
+                    className="flex items-center space-x-1.5 px-2.5 py-1.5 text-[10px] font-mono font-medium text-zinc-400 hover:text-white bg-zinc-900/60 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 rounded transition-all cursor-pointer shadow-sm shrink-0 mt-0.5"
+                    title="Reset Particles physics vectors"
+                  >
+                    <RefreshCw className="w-3 h-3 text-brand-green" />
+                    <span>Reset</span>
+                  </button>
                 </div>
 
                 <div className="space-y-4">
@@ -9228,7 +9595,10 @@ export default function App() {
                         { id: 'dnb-neuro', name: 'DnB Neuro' },
                         { id: 'speedcore-glitch', name: 'Speedcore Glitch' },
                         { id: 'hardcore-pulse', name: 'Hardcore Pulse' },
-                        { id: 'frenchcore-spark', name: 'Frenchcore Spark' }
+                        { id: 'frenchcore-spark', name: 'Frenchcore Spark' },
+                        { id: 'cosmic-starfield-3d', name: 'Starfield 3D' },
+                        { id: 'raindrops-on-glass', name: 'Raindrops Glass' },
+                        { id: 'ambient-bokeh-bubbles', name: 'Bokeh Bubbles' }
                       ].map((item) => (
                         <button
                           key={item.id}
@@ -9258,8 +9628,52 @@ export default function App() {
                       <option value="center-explosion">Center Explosion</option>
                       <option value="spiral-vortex">Spiral Vortex</option>
                       <option value="orbital-spiral">Orbital Spiral</option>
+                      <option value="forward-movement">Forward Movement</option>
+                      <option value="backward-movement">Backward Movement</option>
                     </select>
                   </div>
+
+                  {particlesSet.emittingDirection === 'forward-movement' && (
+                    <div className="space-y-3 p-3 bg-brand-green/5 border border-brand-green/10 rounded-md animate-in fade-in duration-200">
+                      <div className="text-[10px] font-bold text-brand-green uppercase tracking-wider font-mono">
+                        Forward Movement Options
+                      </div>
+                      
+                      {/* Forward Speed Multiplier Slider */}
+                      <div className="space-y-1">
+                        <div className="flex justify-between font-mono text-[9px] text-zinc-400">
+                          <span>Forward Speed Multiplier</span>
+                          <span className="text-white font-semibold">{(particlesSet.forwardSpeedMultiplier ?? 1.0).toFixed(1)}x</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0.1"
+                          max="5.0"
+                          step="0.1"
+                          value={particlesSet.forwardSpeedMultiplier ?? 1.0}
+                          onChange={(e) => setParticlesSet(prev => ({ ...prev, forwardSpeedMultiplier: parseFloat(e.target.value) }))}
+                          className="w-full accent-brand-green cursor-pointer"
+                        />
+                      </div>
+
+                      {/* Velocity Ramp Slider */}
+                      <div className="space-y-1">
+                        <div className="flex justify-between font-mono text-[9px] text-zinc-400">
+                          <span>Velocity Ramp (Acceleration)</span>
+                          <span className="text-white font-semibold">{(particlesSet.forwardVelocityRamp ?? 1.0).toFixed(1)}x</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0.0"
+                          max="5.0"
+                          step="0.1"
+                          value={particlesSet.forwardVelocityRamp ?? 1.0}
+                          onChange={(e) => setParticlesSet(prev => ({ ...prev, forwardVelocityRamp: parseFloat(e.target.value) }))}
+                          className="w-full accent-brand-green cursor-pointer"
+                        />
+                      </div>
+                    </div>
+                  )}
 
                   <hr className="border-zinc-900" />
 
@@ -10266,9 +10680,20 @@ export default function App() {
                 transition={{ duration: 0.2, ease: 'easeOut' }}
                 className="space-y-6"
               >
-                <div>
-                  <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider font-mono">Background Backdrop</h3>
-                  <p className="text-[11px] text-zinc-500 mt-1 font-sans">Configure vector wallpaper backing or custom video elements.</p>
+                <div className="flex items-start justify-between border-b border-zinc-900 pb-4 mb-4">
+                  <div className="space-y-1">
+                    <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider font-mono">Background Backdrop</h3>
+                    <p className="text-[11px] text-zinc-500 mt-1 font-sans">Configure vector wallpaper backing or custom video elements.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleResetBackgroundTab}
+                    className="flex items-center space-x-1.5 px-2.5 py-1.5 text-[10px] font-mono font-medium text-zinc-400 hover:text-white bg-zinc-900/60 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 rounded transition-all cursor-pointer shadow-sm shrink-0 mt-0.5"
+                    title="Reset Background settings and overlays"
+                  >
+                    <RefreshCw className="w-3 h-3 text-brand-green" />
+                    <span>Reset</span>
+                  </button>
                 </div>
 
                 <div className="space-y-4">
@@ -10655,6 +11080,45 @@ export default function App() {
                     )}
                   </div>
 
+                  {/* Backdrop Visual Effects Overlays Panel */}
+                  <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-lg text-xs space-y-4 text-left">
+                    <div>
+                      <h4 className="text-xs font-semibold text-zinc-300 font-mono uppercase tracking-wider">Backdrop Visual Effects Overlays</h4>
+                      <p className="text-[10px] text-zinc-500 mt-0.5">Layer interactive animation overlay graphics directly over your backdrop</p>
+                    </div>
+
+                    <div className="grid grid-cols-1 gap-3">
+                      {[
+                        { key: 'overlayMatrixRain', label: 'Matrix Digital Rain', desc: 'Falling green digital matrix code stream synced to beats' },
+                        { key: 'overlayStarfield', label: 'Cosmic Starfield 3D', desc: 'Traverse 3D star space, velocity accelerated on heavy peaks' },
+                        { key: 'overlayScanlines', label: 'Retro CRT Scanlines', desc: 'Faint CRT monitor grid lines with scanning horizon sweeps' },
+                        { key: 'overlaySnowfall', label: 'Cozy Snowfall Drift', desc: 'Soft white snow crystals drifting downwards, swaying with the audio' },
+                        { key: 'overlayFilmGrain', label: 'Dusty Film Grain', desc: 'Vintage film dust particles, noise, and static movie scratches' },
+                        { key: 'overlayRaindrops', label: 'Raindrops on Glass', desc: 'Falling vertical rain lines that splash into ripples at the bottom' },
+                        { key: 'overlayBokeh', label: 'Ambient Bokeh Bubbles', desc: 'Large slow-floating fuzzy neon circles that scale on audio beats' },
+                        { key: 'overlayVhsGlitch', label: 'VHS Tracking Glitches', desc: 'Transient retro video tape tracking glitches and color line splits' }
+                      ].map((eff) => (
+                        <div key={eff.key} className="flex items-center justify-between p-2.5 bg-zinc-950/40 border border-zinc-850 rounded">
+                          <div className="text-left max-w-[78%]">
+                            <span className="font-semibold text-zinc-300 block font-sans text-[11px]">{eff.label}</span>
+                            <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">{eff.desc}</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setBackground(prev => ({ ...prev, [eff.key]: !(prev as any)[eff.key] }))}
+                            className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                              (background as any)[eff.key] ? 'bg-brand-green' : 'bg-zinc-800'
+                            }`}
+                          >
+                            <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                              (background as any)[eff.key] ? 'translate-x-3.5' : 'translate-x-0'
+                            }`} />
+                          </button>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+
                 </div>
               </motion.div>
             )}
@@ -10669,14 +11133,25 @@ export default function App() {
                 transition={{ duration: 0.2, ease: 'easeOut' }}
                 className="space-y-6"
               >
-                <div>
-                  <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider font-mono flex items-center space-x-1.5">
-                    <FileVideo className="w-4 h-4 text-brand-green" />
-                    <span>Foreground Video Overlay</span>
-                  </h3>
-                  <p className="text-[11px] text-zinc-500 mt-1 font-sans">
-                    Overlay an elegant foreground video track. Its audio is routed to the analyser so waveform heights reactive-bounce to its frequencies.
-                  </p>
+                <div className="flex items-start justify-between border-b border-zinc-900 pb-4 mb-4">
+                  <div className="space-y-1">
+                    <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider font-mono flex items-center space-x-1.5">
+                      <FileVideo className="w-4 h-4 text-brand-green" />
+                      <span>Foreground Video Overlay</span>
+                    </h3>
+                    <p className="text-[11px] text-zinc-500 mt-1 font-sans">
+                      Overlay an elegant foreground video track. Its audio is routed to the analyser so waveform heights reactive-bounce to its frequencies.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleResetOverlayTab}
+                    className="flex items-center space-x-1.5 px-2.5 py-1.5 text-[10px] font-mono font-medium text-zinc-400 hover:text-white bg-zinc-900/60 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 rounded transition-all cursor-pointer shadow-sm shrink-0 mt-0.5"
+                    title="Reset Video and Image Overlays"
+                  >
+                    <RefreshCw className="w-3 h-3 text-brand-green" />
+                    <span>Reset</span>
+                  </button>
                 </div>
 
                 <div className="space-y-4">
@@ -11178,12 +11653,23 @@ export default function App() {
                 transition={{ duration: 0.2, ease: 'easeOut' }}
                 className="space-y-6"
               >
-                <div>
-                  <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider font-mono flex items-center space-x-1.5">
-                    <Type className="w-4 h-4 text-brand-green-hover" />
-                    <span>Creative Custom Text & Emojis</span>
-                  </h3>
-                  <p className="text-[11px] text-zinc-500 mt-1 font-sans">Overlay customizable vector typography and responsive stickers directly onto your render canvas.</p>
+                <div className="flex items-start justify-between border-b border-zinc-900 pb-4 mb-4">
+                  <div className="space-y-1">
+                    <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider font-mono flex items-center space-x-1.5">
+                      <Type className="w-4 h-4 text-brand-green-hover" />
+                      <span>Creative Custom Text & Emojis</span>
+                    </h3>
+                    <p className="text-[11px] text-zinc-500 mt-1 font-sans">Overlay customizable vector typography and responsive stickers directly onto your render canvas.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleResetTextTab}
+                    className="flex items-center space-x-1.5 px-2.5 py-1.5 text-[10px] font-mono font-medium text-zinc-400 hover:text-white bg-zinc-900/60 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 rounded transition-all cursor-pointer shadow-sm shrink-0 mt-0.5"
+                    title="Reset Lyrics and Custom Texts"
+                  >
+                    <RefreshCw className="w-3 h-3 text-brand-green" />
+                    <span>Reset</span>
+                  </button>
                 </div>
 
                 <div className="space-y-5">
@@ -12299,14 +12785,25 @@ export default function App() {
                 transition={{ duration: 0.2, ease: 'easeOut' }}
                 className="space-y-6"
               >
-                <div>
-                  <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider font-mono flex items-center space-x-1.5">
-                    <Wand2 className="w-4 h-4 text-brand-green-hover animate-pulse" />
-                    <span>FX Studio & DSP Processor Chain</span>
-                  </h3>
-                  <p className="text-[11px] text-zinc-500 mt-1 font-sans">
-                    Flesh out track atmospheres with serial DSP processing nodes connected directly to the real-time analyzer context.
-                  </p>
+                <div className="flex items-start justify-between border-b border-zinc-900 pb-4 mb-4">
+                  <div className="space-y-1">
+                    <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider font-mono flex items-center space-x-1.5">
+                      <Wand2 className="w-4 h-4 text-brand-green-hover animate-pulse" />
+                      <span>FX Studio & DSP Processor Chain</span>
+                    </h3>
+                    <p className="text-[11px] text-zinc-500 mt-1 font-sans">
+                      Flesh out track atmospheres with serial DSP processing nodes connected directly to the real-time analyzer context.
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleResetSfxTab}
+                    className="flex items-center space-x-1.5 px-2.5 py-1.5 text-[10px] font-mono font-medium text-zinc-400 hover:text-white bg-zinc-900/60 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 rounded transition-all cursor-pointer shadow-sm shrink-0 mt-0.5"
+                    title="Reset Sound Effects and Equalizers"
+                  >
+                    <RefreshCw className="w-3 h-3 text-brand-green" />
+                    <span>Reset</span>
+                  </button>
                 </div>
 
                 {/* Strobe Effect (Visual FX) */}
@@ -13214,12 +13711,23 @@ export default function App() {
                 transition={{ duration: 0.2, ease: 'easeOut' }}
                 className="space-y-6"
               >
-                <div>
-                  <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider font-mono flex items-center space-x-1.5">
-                    <FileVideo className="w-4 h-4 text-brand-green" />
-                    <span>Real-Time Export Engine</span>
-                  </h3>
-                  <p className="text-[11px] text-zinc-550 mt-1 font-sans">Render interactive canvas sequences with synchronized direct audio outputs.</p>
+                <div className="flex items-start justify-between border-b border-zinc-900 pb-4 mb-4">
+                  <div className="space-y-1">
+                    <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider font-mono flex items-center space-x-1.5">
+                      <FileVideo className="w-4 h-4 text-brand-green" />
+                      <span>Real-Time Export Engine</span>
+                    </h3>
+                    <p className="text-[11px] text-zinc-550 mt-1 font-sans">Render interactive canvas sequences with synchronized direct audio outputs.</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={handleResetExportTab}
+                    className="flex items-center space-x-1.5 px-2.5 py-1.5 text-[10px] font-mono font-medium text-zinc-400 hover:text-white bg-zinc-900/60 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 rounded transition-all cursor-pointer shadow-sm shrink-0 mt-0.5"
+                    title="Reset Export Settings"
+                  >
+                    <RefreshCw className="w-3 h-3 text-brand-green" />
+                    <span>Reset</span>
+                  </button>
                 </div>
 
                 <div className="space-y-4">

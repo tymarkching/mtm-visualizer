@@ -66,7 +66,10 @@ export type ParticleType =
   | 'dnb-neuro'
   | 'speedcore-glitch'
   | 'hardcore-pulse'
-  | 'frenchcore-spark';
+  | 'frenchcore-spark'
+  | 'cosmic-starfield-3d'
+  | 'raindrops-on-glass'
+  | 'ambient-bokeh-bubbles';
 
 export interface VisualizerSettings {
   style: VisualizerStyle;
@@ -254,7 +257,7 @@ export interface ParticleSettings {
   enableParticleCollisions?: boolean; // particle-to-particle collision detection based on radius
   particleLifeBehavior?: 'none' | 'bounce' | 'merge' | 'dissolve';
   collisionDamping?: number; // coefficient of restitution damping (0.1 to 1.0)
-  emittingDirection?: 'float-up' | 'fall-down' | 'center-explosion' | 'spiral-vortex' | 'orbital-spiral';
+  emittingDirection?: 'float-up' | 'fall-down' | 'center-explosion' | 'spiral-vortex' | 'orbital-spiral' | 'forward-movement' | 'backward-movement';
   enableApexAttractor?: boolean;
   movementSpeed?: number;
   beatBurst?: boolean;
@@ -280,6 +283,8 @@ export interface ParticleSettings {
   shatterEnabled?: boolean;
   shatterRadius?: number;
   shatterSpeed?: number;
+  forwardVelocityRamp?: number;
+  forwardSpeedMultiplier?: number;
 }
 
 export interface TitleOverlaySettings {
@@ -316,6 +321,15 @@ export interface BackgroundSettings {
   vignettePulse?: boolean;
   vignettePulseIntensity?: number;
   parallaxSway?: number;
+  // Visual Effects Overlays
+  overlayMatrixRain?: boolean;
+  overlayStarfield?: boolean;
+  overlayScanlines?: boolean;
+  overlaySnowfall?: boolean;
+  overlayFilmGrain?: boolean;
+  overlayRaindrops?: boolean;
+  overlayBokeh?: boolean;
+  overlayVhsGlitch?: boolean;
 }
 
 export interface OverlayImage {

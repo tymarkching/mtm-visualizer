@@ -59,6 +59,50 @@ interface WaveRipple {
 }
 export const activeWaveRipples: WaveRipple[] = [];
 
+// Module level state for Background Visual Effects Overlays
+interface Star {
+  x: number;
+  y: number;
+  z: number;
+  color: string;
+  size: number;
+}
+interface SnowFlake {
+  x: number;
+  y: number;
+  speedY: number;
+  speedX: number;
+  size: number;
+  opacity: number;
+}
+interface RainDrop {
+  x: number;
+  y: number;
+  speed: number;
+  length: number;
+  opacity: number;
+  splash: boolean;
+  splashRadius: number;
+  maxSplashRadius: number;
+}
+interface BokehBubble {
+  x: number;
+  y: number;
+  size: number;
+  color: string;
+  speedX: number;
+  speedY: number;
+  alpha: number;
+  pulseSpeed: number;
+  pulseDir: number;
+}
+
+let matrixColumns: number[] = [];
+let starfieldStars: Star[] = [];
+let snowflakeParticles: SnowFlake[] = [];
+let raindropParticles: RainDrop[] = [];
+let bokehBubbles: BokehBubble[] = [];
+
 interface BouncingCircleState {
   currentY: number;
   velocity: number;
@@ -97,6 +141,7 @@ export interface RenderParticle {
   shatterRadiusMax?: number;
   startX?: number;
   startY?: number;
+  z?: number;
 }
 
 // Color conversion helpers
@@ -280,7 +325,22 @@ export function createParticle(
   const centerX = width / 2;
   const centerY = height / 2;
   
-  if (dir === 'spiral-vortex' || dir === 'orbital-spiral') {
+  let zVal: number | undefined = undefined;
+  let startXVal: number | undefined = undefined;
+  let startYVal: number | undefined = undefined;
+  
+  if (dir === 'forward-movement' || dir === 'backward-movement') {
+    startXVal = (Math.random() - 0.5) * width;
+    startYVal = (Math.random() - 0.5) * height;
+    if (dir === 'forward-movement') {
+      zVal = randomY ? Math.random() * width : width;
+    } else {
+      zVal = randomY ? Math.random() * width : 10;
+    }
+    const k = 128 / Math.max(1, zVal);
+    x = startXVal * k + centerX;
+    y = startYVal * k + centerY;
+  } else if (dir === 'spiral-vortex' || dir === 'orbital-spiral') {
     radiusVal = randomY ? Math.random() * (Math.min(width, height) * 0.45) : (dir === 'orbital-spiral' ? 10 + Math.random() * 20 : 0);
     x = centerX + Math.cos(angle) * radiusVal;
     y = centerY + Math.sin(angle) * radiusVal;
@@ -303,7 +363,10 @@ export function createParticle(
   let vy = Math.sin(angle) * (baseSpeed * 0.5) + settings.gravity;
 
   // Let direction steer velocity
-  if (dir === 'fall-down') {
+  if (dir === 'forward-movement' || dir === 'backward-movement') {
+    vx = 0;
+    vy = 0;
+  } else if (dir === 'fall-down') {
     vy = Math.abs(vy) || (baseSpeed * 0.5);
   } else if (dir === 'float-up') {
     vy = -Math.abs(vy) || (-baseSpeed * 0.5);
@@ -369,7 +432,10 @@ export function createParticle(
     burstFlash: 0,
     radius: radiusVal,
     velocityOffset: (0.4 + Math.random() * 0.8) * Math.max(0.5, baseSpeed),
-    speed: baseSpeed
+    speed: baseSpeed,
+    z: zVal,
+    startX: startXVal,
+    startY: startYVal
   };
 }
 
@@ -623,7 +689,7 @@ export function updateParticles(
       if (settings.type === 'sakura') {
         // Wind-swept sway
         p.vx += Math.sin(p.life * 0.05) * 0.05;
-      } else if (settings.type === 'bubbles' || settings.type === 'floating-bubbles') {
+      } else if (settings.type === 'bubbles' || settings.type === 'floating-bubbles' || settings.type === 'ambient-bokeh-bubbles') {
         // Bobbing wobble
         p.vx += Math.sin(p.life * 0.1) * 0.08;
       }
@@ -712,7 +778,56 @@ export function updateParticles(
     // (Or gracefully slide at the Sensitivity Floor baseline if configured).
     const dynamicBaseSpeedMultiplier = scaleMultiplier * dynamicVolume;
 
-    if (settings.emittingDirection === 'spiral-vortex' || settings.emittingDirection === 'orbital-spiral') {
+    if (settings.emittingDirection === 'forward-movement' || settings.emittingDirection === 'backward-movement') {
+      const isForward = settings.emittingDirection === 'forward-movement';
+      if (p.z === undefined) {
+        p.z = Math.random() * width;
+        p.startX = (Math.random() - 0.5) * width;
+        p.startY = (Math.random() - 0.5) * height;
+      }
+      
+      const baseSpeed = p.speed || settings.speed || 2;
+      const forwardSpeedMult = (isForward && settings.forwardSpeedMultiplier !== undefined) ? settings.forwardSpeedMultiplier : 1.0;
+      const speed = baseSpeed * (1 + bassIntensity * 8) * dynamicBaseSpeedMultiplier * burstSpeedMult * forwardSpeedMult;
+      
+      if (isForward) {
+        // Enforce a minimum speed floor so particles never completely stop or freeze in the center waveform.
+        // Also use a non-linear depth-scaled speed so particles accelerate outward elegantly (piercing the waveform).
+        const speedScale = Math.max(1.2, speed);
+        const forwardRamp = settings.forwardVelocityRamp !== undefined ? settings.forwardVelocityRamp : 1.0;
+        
+        // Normalize progress from 0 (at width) to 1 (at 0)
+        const progress = Math.max(0, Math.min(1, (width - p.z) / width));
+        const rampFactor = 1 + progress * forwardRamp * 4;
+        
+        // Instantaneous beat boost when isBeat is detected (based on the chosen Audio Drive Target)
+        const beatBoost = isBeat ? (1.5 + bassIntensity * 2.0) : 1.0;
+        
+        const zSpeed = speedScale * (p.z / 120 + 0.5) * rampFactor * beatBoost;
+        p.z -= zSpeed;
+        if (p.z <= 0) {
+          p.z = width;
+          p.startX = (Math.random() - 0.5) * width;
+          p.startY = (Math.random() - 0.5) * height;
+          p.life = p.maxLife;
+        }
+      } else {
+        p.z += speed;
+        if (p.z >= width) {
+          p.z = 10;
+          p.startX = (Math.random() - 0.5) * width;
+          p.startY = (Math.random() - 0.5) * height;
+          p.life = p.maxLife;
+        }
+      }
+      
+      const k = 128 / Math.max(1, p.z);
+      p.x = (p.startX ?? 0) * k + width / 2;
+      p.y = (p.startY ?? 0) * k + height / 2;
+      
+      const baseS = p.baseSize || settings.minSize || 2;
+      p.size = Math.max(0.5, Math.min(50, baseS * k * 0.15));
+    } else if (settings.emittingDirection === 'spiral-vortex' || settings.emittingDirection === 'orbital-spiral') {
       const rotDir = (p.baseVx && p.baseVx > 0) ? 1 : -1;
       const angleStep = rotDir * (p.speed || settings.speed || 1) * 0.02 * dynamicBaseSpeedMultiplier * burstSpeedMult;
       
@@ -1026,6 +1141,293 @@ export function drawBackground(
     ctx.fillRect(0, 0, width, height);
   }
 
+  // --- BACKGROUND VISUAL EFFECTS OVERLAYS ---
+  const bIntensity = beatIntensity || 0;
+
+  // 1. Matrix digital rain overlay
+  if (settings.overlayMatrixRain) {
+    ctx.save();
+    const fontSize = 14;
+    const columns = Math.ceil(width / fontSize);
+    if (matrixColumns.length !== columns) {
+      matrixColumns = Array.from({ length: columns }, () => (Math.random() * -height));
+    }
+    ctx.font = `${fontSize}px monospace`;
+    for (let i = 0; i < matrixColumns.length; i++) {
+      const x = i * fontSize;
+      const y = matrixColumns[i];
+      const trailLen = 12;
+      for (let j = 0; j < trailLen; j++) {
+        const trailY = y - (j * fontSize);
+        if (trailY > -20 && trailY < height + 20) {
+          const alpha = (1 - (j / trailLen)) * (0.45 + bIntensity * 0.4);
+          ctx.fillStyle = j === 0 
+            ? 'rgba(255, 255, 255, 0.95)' 
+            : `rgba(0, 255, 128, ${alpha})`;
+          const chars = "10ABCDEFGHIJKLMNOPQRSTUVWXYZ<>!?#@$%&*";
+          const char = chars[Math.floor((y + j) % chars.length)];
+          ctx.fillText(char, x, trailY);
+        }
+      }
+      matrixColumns[i] += (2 + bIntensity * 10 + Math.random() * 2);
+      if (matrixColumns[i] - (trailLen * fontSize) > height) {
+        matrixColumns[i] = Math.random() * -100;
+      }
+    }
+    ctx.restore();
+  }
+
+  // 2. Cosmic starfield overlay
+  if (settings.overlayStarfield) {
+    ctx.save();
+    const starCount = 150;
+    if (starfieldStars.length < starCount) {
+      starfieldStars = [];
+      for (let i = 0; i < starCount; i++) {
+        starfieldStars.push({
+          x: (Math.random() - 0.5) * width,
+          y: (Math.random() - 0.5) * height,
+          z: Math.random() * width,
+          color: `hsl(${(Math.random() * 60 + 190) % 360}, 100%, 85%)`,
+          size: 0.8 + Math.random() * 1.8
+        });
+      }
+    }
+    const starSpeed = 2 + bIntensity * 20;
+    for (let i = 0; i < starfieldStars.length; i++) {
+      const s = starfieldStars[i];
+      s.z -= starSpeed;
+      if (s.z <= 0) {
+        s.z = width;
+        s.x = (Math.random() - 0.5) * width;
+        s.y = (Math.random() - 0.5) * height;
+      }
+      const k = 128 / s.z;
+      const px = s.x * k + width / 2;
+      const py = s.y * k + height / 2;
+      if (px >= 0 && px < width && py >= 0 && py < height) {
+        const radius = Math.max(0.1, s.size * (1 - s.z / width) * 2);
+        ctx.beginPath();
+        ctx.arc(px, py, radius, 0, Math.PI * 2);
+        ctx.fillStyle = s.color;
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+
+  // 3. Scanlines CRT horizontal grid overlay
+  if (settings.overlayScanlines) {
+    ctx.save();
+    ctx.strokeStyle = 'rgba(255, 255, 255, 0.04)';
+    ctx.lineWidth = 1;
+    const scanSpacing = 4;
+    const scanOffset = (Date.now() * 0.05) % scanSpacing;
+    for (let y = scanOffset; y < height; y += scanSpacing) {
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      ctx.lineTo(width, y);
+      ctx.stroke();
+    }
+    const sweepY = (Date.now() * 0.1) % (height * 1.5);
+    const grad = ctx.createLinearGradient(0, sweepY - 150, 0, sweepY);
+    grad.addColorStop(0, 'rgba(255, 255, 255, 0)');
+    grad.addColorStop(0.5, `rgba(184, 238, 2, ${0.03 + bIntensity * 0.08})`);
+    grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, sweepY - 150, width, 150);
+    ctx.restore();
+  }
+
+  // 4. Cozy snowfall overlay
+  if (settings.overlaySnowfall) {
+    ctx.save();
+    const snowCount = 100;
+    if (snowflakeParticles.length < snowCount) {
+      snowflakeParticles = [];
+      for (let i = 0; i < snowCount; i++) {
+        snowflakeParticles.push({
+          x: Math.random() * width,
+          y: Math.random() * height,
+          speedY: 0.5 + Math.random() * 1.5,
+          speedX: (Math.random() - 0.5) * 0.5,
+          size: 1 + Math.random() * 3,
+          opacity: 0.15 + Math.random() * 0.6
+        });
+      }
+    }
+    for (let i = 0; i < snowflakeParticles.length; i++) {
+      const p = snowflakeParticles[i];
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+      ctx.fillStyle = `rgba(255, 255, 255, ${p.opacity})`;
+      ctx.fill();
+      p.y += p.speedY + bIntensity * 3;
+      p.x += p.speedX + Math.sin(Date.now() * 0.001 + i) * 0.15;
+      if (p.y > height) {
+        p.y = -10;
+        p.x = Math.random() * width;
+      }
+    }
+    ctx.restore();
+  }
+
+  // 5. Retro dusty film grain overlay
+  if (settings.overlayFilmGrain) {
+    ctx.save();
+    const dustCount = 3 + Math.floor(Math.random() * 5);
+    for (let i = 0; i < dustCount; i++) {
+      const gx = Math.random() * width;
+      const gy = Math.random() * height;
+      if (Math.random() > 0.7) {
+        ctx.strokeStyle = `rgba(255, 255, 255, ${0.05 + Math.random() * 0.1})`;
+        ctx.lineWidth = 0.5 + Math.random() * 0.5;
+        ctx.beginPath();
+        ctx.moveTo(gx, gy);
+        ctx.lineTo(gx + (Math.random() - 0.5) * 30, gy + (Math.random() - 0.5) * 30);
+        ctx.stroke();
+      } else {
+        ctx.beginPath();
+        ctx.arc(gx, gy, 0.5 + Math.random() * 1.2, 0, Math.PI * 2);
+        ctx.fillStyle = Math.random() > 0.5 ? 'rgba(0, 0, 0, 0.2)' : 'rgba(255, 255, 255, 0.2)';
+        ctx.fill();
+      }
+    }
+    ctx.restore();
+  }
+
+  // 6. Raindrops on glass window overlay
+  if (settings.overlayRaindrops) {
+    ctx.save();
+    const dropCount = 60;
+    if (raindropParticles.length < dropCount) {
+      raindropParticles = [];
+      for (let i = 0; i < dropCount; i++) {
+        raindropParticles.push({
+          x: Math.random() * width,
+          y: Math.random() * height,
+          speed: 1 + Math.random() * 2,
+          length: 6 + Math.random() * 12,
+          opacity: 0.15 + Math.random() * 0.35,
+          splash: false,
+          splashRadius: 0,
+          maxSplashRadius: 4 + Math.random() * 6
+        });
+      }
+    }
+    for (let i = 0; i < raindropParticles.length; i++) {
+      const d = raindropParticles[i];
+      if (!d.splash) {
+        ctx.strokeStyle = `rgba(180, 220, 255, ${d.opacity})`;
+        ctx.lineWidth = 1.2;
+        ctx.beginPath();
+        ctx.moveTo(d.x, d.y);
+        ctx.lineTo(d.x, d.y + d.length);
+        ctx.stroke();
+        d.y += d.speed + bIntensity * 8;
+        if (d.y > height - d.length - 10) {
+          if (Math.random() > 0.5) {
+            d.splash = true;
+            d.splashRadius = 1;
+          } else {
+            d.y = -d.length;
+            d.x = Math.random() * width;
+          }
+        }
+      } else {
+        ctx.strokeStyle = `rgba(180, 220, 255, ${d.opacity * (1 - d.splashRadius / d.maxSplashRadius)})`;
+        ctx.lineWidth = 0.8;
+        ctx.beginPath();
+        ctx.ellipse(d.x, height - 10, d.splashRadius, d.splashRadius * 0.35, 0, 0, Math.PI * 2);
+        ctx.stroke();
+        d.splashRadius += 0.6;
+        if (d.splashRadius > d.maxSplashRadius) {
+          d.splash = false;
+          d.y = -d.length;
+          d.x = Math.random() * width;
+        }
+      }
+    }
+    ctx.restore();
+  }
+
+  // 7. Ambient floating bokeh bubble overlay
+  if (settings.overlayBokeh) {
+    ctx.save();
+    ctx.globalCompositeOperation = 'screen';
+    const bokehCount = 35;
+    if (bokehBubbles.length < bokehCount) {
+      bokehBubbles = [];
+      for (let i = 0; i < bokehCount; i++) {
+        const size = 15 + Math.random() * 50;
+        const colors = ['#b8ee02', '#ff007f', '#00ffff', '#7f00ff', '#ffaa00'];
+        const color = colors[Math.floor(Math.random() * colors.length)];
+        bokehBubbles.push({
+          x: Math.random() * width,
+          y: Math.random() * height,
+          size,
+          color,
+          speedX: (Math.random() - 0.5) * 0.3,
+          speedY: -(0.2 + Math.random() * 0.6),
+          alpha: 0.04 + Math.random() * 0.12,
+          pulseSpeed: 0.008 + Math.random() * 0.015,
+          pulseDir: Math.random() > 0.5 ? 1 : -1
+        });
+      }
+    }
+    for (let i = 0; i < bokehBubbles.length; i++) {
+      const b = bokehBubbles[i];
+      b.y += b.speedY * (1 + bIntensity * 1.5);
+      b.x += b.speedX;
+      b.alpha += b.pulseSpeed * b.pulseDir;
+      if (b.alpha > 0.3) {
+        b.alpha = 0.3;
+        b.pulseDir = -1;
+      } else if (b.alpha < 0.02) {
+        b.alpha = 0.02;
+        b.pulseDir = 1;
+      }
+      if (b.y < -b.size) {
+        b.y = height + b.size;
+        b.x = Math.random() * width;
+      }
+      if (b.x < -b.size) b.x = width + b.size;
+      if (b.x > width + b.size) b.x = -b.size;
+      const activeSize = b.size * (1 + bIntensity * 0.2);
+      const gradient = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, activeSize);
+      gradient.addColorStop(0, b.color);
+      gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      ctx.fillStyle = gradient;
+      ctx.globalAlpha = b.alpha;
+      ctx.beginPath();
+      ctx.arc(b.x, b.y, activeSize, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+
+  // 8. VHS retro glitch overlay
+  if (settings.overlayVhsGlitch) {
+    if (Math.random() < 0.05 + bIntensity * 0.15) {
+      ctx.save();
+      ctx.globalAlpha = 0.12 + bIntensity * 0.15;
+      const numGlitches = Math.floor(Math.random() * 3) + 1;
+      for (let k = 0; k < numGlitches; k++) {
+        const gy = Math.random() * height;
+        const gh = 4 + Math.random() * 20;
+        const gShift = (Math.random() - 0.5) * 25 * (1 + bIntensity * 1.5);
+        ctx.drawImage(
+          ctx.canvas,
+          0, gy, width, gh,
+          gShift, gy, width, gh
+        );
+      }
+      ctx.fillStyle = `rgba(${(Math.random() * 255).toFixed(0)}, ${(Math.random() * 255).toFixed(0)}, ${(Math.random() * 255).toFixed(0)}, 0.06)`;
+      ctx.fillRect(0, Math.random() * height, width, 2 + Math.random() * 6);
+      ctx.restore();
+    }
+  }
+
   ctx.restore();
 }
 
@@ -1068,8 +1470,19 @@ export function drawParticles(
   ctx.save();
 
   const canvasW = ctx.canvas?.width || 800;
+  const canvasH = ctx.canvas?.height || 600;
 
-  for (const p of particles) {
+  // Implement a Z-depth sorting mechanism for the forward-moving particles in the 'forward-movement' mode
+  let displayParticles = particles;
+  if (settings.emittingDirection === 'forward-movement') {
+    displayParticles = [...particles].sort((a, b) => {
+      const az = a.z !== undefined ? a.z : 1000;
+      const bz = b.z !== undefined ? b.z : 1000;
+      return bz - az; // Farthest (larger z) first
+    });
+  }
+
+  for (const p of displayParticles) {
     // SECTION 2: LINKING PARTICLE FIELD TO GLOBAL COLOR MODES
     let baseColor = p.color || settings.color || '#b8ee02';
 
@@ -1146,6 +1559,18 @@ export function drawParticles(
       }
       finalAlpha = Math.max(p.alpha, p.burstFlash);
       glowOnBurst = true;
+    }
+
+    // Z-depth alpha fading for perspective enhancement (ensuring particles behind the waveform are rendered with appropriate alpha fading)
+    if (settings.emittingDirection === 'forward-movement' && p.z !== undefined) {
+      const waveformPlaneZ = canvasW * 0.45;
+      const range = canvasW - waveformPlaneZ;
+      if (p.z > waveformPlaneZ) {
+        // Far away (behind waveform): smooth fade out towards the distance
+        const ratio = Math.max(0, 1 - (p.z - waveformPlaneZ) / range);
+        const depthAlphaMultiplier = Math.pow(ratio, 1.5);
+        finalAlpha *= depthAlphaMultiplier;
+      }
     }
 
     const trailLenValue = settings.trailLength !== undefined ? settings.trailLength : 0;
@@ -1366,7 +1791,7 @@ export function drawParticles(
       ctx.translate(p.x, p.y);
       ctx.rotate(p.angle || 0);
       ctx.beginPath();
-      ctx.ellipse(-p.size * 0.3, p.size * 0.5, p.size * 0.45, p.size * 0.3, -Math.PI / 6, 0, Math.PI * 2);
+      ctx.ellipse(-p.size * 0.3, p.size * 0.5, Math.max(0.1, Math.abs(p.size * 0.45)), Math.max(0.1, Math.abs(p.size * 0.3)), -Math.PI / 6, 0, Math.PI * 2);
       ctx.fill();
       ctx.fillRect(0, -p.size * 0.8, p.size * 0.12, p.size * 1.3);
       ctx.beginPath();
@@ -1495,8 +1920,10 @@ export function drawParticles(
       }
       ctx.translate(p.x, p.y);
       const wobble = Math.sin(Date.now() / 50 + p.hue) * p.size;
+      const radiusX = Math.max(0.1, Math.abs(p.size + wobble));
+      const radiusY = Math.max(0.1, Math.abs(p.size - wobble * 0.5));
       ctx.beginPath();
-      ctx.ellipse(0, 0, p.size + wobble, p.size - wobble * 0.5, p.angle, 0, Math.PI * 2);
+      ctx.ellipse(0, 0, radiusX, radiusY, p.angle, 0, Math.PI * 2);
       ctx.fill();
       ctx.stroke();
       ctx.restore();
@@ -1545,6 +1972,60 @@ export function drawParticles(
       ctx.moveTo(0, -p.size * 2);
       ctx.lineTo(0, p.size * 2);
       ctx.stroke();
+      ctx.restore();
+    } else if (settings.type === 'cosmic-starfield-3d') {
+      ctx.save();
+      ctx.fillStyle = finalColor;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, Math.max(0.1, Math.abs(p.size)), 0, Math.PI * 2);
+      ctx.fill();
+      
+      if (p.size > 2.5) {
+        ctx.strokeStyle = finalColor;
+        ctx.globalAlpha = finalAlpha * 0.4;
+        ctx.lineWidth = 0.5;
+        ctx.beginPath();
+        ctx.moveTo(p.x - p.size * 3, p.y);
+        ctx.lineTo(p.x + p.size * 3, p.y);
+        ctx.moveTo(p.x, p.y - p.size * 3);
+        ctx.lineTo(p.x, p.y + p.size * 3);
+        ctx.stroke();
+      }
+      ctx.restore();
+    } else if (settings.type === 'raindrops-on-glass') {
+      ctx.save();
+      ctx.strokeStyle = finalColor;
+      ctx.lineWidth = Math.max(1, p.size * 0.25);
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(p.x, p.y);
+      ctx.lineTo(p.x, p.y + p.size * 3);
+      ctx.stroke();
+      
+      const isNearFloor = p.y > canvasH - 30;
+      if (isNearFloor) {
+        ctx.strokeStyle = finalColor;
+        ctx.lineWidth = 0.8;
+        ctx.globalAlpha = finalAlpha * 0.6;
+        ctx.beginPath();
+        ctx.ellipse(p.x, canvasH - 10, Math.max(0.1, Math.abs(p.size * 1.5)), Math.max(0.1, Math.abs(p.size * 0.5)), 0, 0, Math.PI * 2);
+        ctx.stroke();
+      }
+      ctx.restore();
+    } else if (settings.type === 'ambient-bokeh-bubbles') {
+      ctx.save();
+      ctx.globalCompositeOperation = 'screen';
+      const activeSize = Math.max(2, p.size * (1 + beatIntensity * 0.5));
+      const gradient = ctx.createRadialGradient(p.x, p.y, 0, p.x, p.y, activeSize);
+      gradient.addColorStop(0, finalColor);
+      gradient.addColorStop(0.3, finalColor);
+      gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
+      
+      ctx.fillStyle = gradient;
+      ctx.globalAlpha = finalAlpha * 0.35;
+      ctx.beginPath();
+      ctx.arc(p.x, p.y, activeSize, 0, Math.PI * 2);
+      ctx.fill();
       ctx.restore();
     }
   }
@@ -1865,7 +2346,8 @@ export function drawVisualizer(
 
     if (settings.flashOnBeat && beatIntensity > 0) {
       // Amplified dynamic shadow blur on beat, scaled by flashIntensityVal
-      ctx.shadowBlur = baseGlow + beatIntensity * 40 * flashIntensityVal;
+      const activeGlowStrength = baseGlow + beatIntensity * 40 * flashIntensityVal;
+      ctx.shadowBlur = activeGlowStrength;
 
       // Select dynamic target color
       const flashColorMode = settings.flashColorMode || 'white';
@@ -1894,10 +2376,21 @@ export function drawVisualizer(
       const g = Math.round(startRGB.g + (targetRGB.g - startRGB.g) * blendFactor);
       const b = Math.round(startRGB.b + (targetRGB.b - startRGB.b) * blendFactor);
 
-      ctx.shadowColor = `rgb(${r}, ${g}, ${b})`;
+      const activeGlowColor = `rgb(${r}, ${g}, ${b})`;
+      ctx.shadowColor = activeGlowColor;
+
+      settings = {
+        ...settings,
+        glowStrength: activeGlowStrength,
+        glowColor: activeGlowColor
+      };
     } else {
       ctx.shadowBlur = settings.glowStrength;
-      ctx.shadowColor = settings.glowColor;
+      ctx.shadowColor = settings.glowColor || settings.primaryColor || '#b8ee02';
+      settings = {
+        ...settings,
+        glowColor: settings.glowColor || settings.primaryColor || '#b8ee02'
+      };
     }
   }
 
