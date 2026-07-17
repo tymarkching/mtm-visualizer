@@ -4449,7 +4449,50 @@ export default function App() {
             const drawX = canvas.width * (xPct / 100) - targetWidth / 2;
             const drawY = canvas.height * (yPct / 100) - targetHeight / 2;
 
+            let overlayFilterStr = 'none';
+            if (visualsRef.current.overlayFilterPreset && visualsRef.current.overlayFilterPreset !== 'none') {
+              switch (visualsRef.current.overlayFilterPreset) {
+                case 'grayscale': overlayFilterStr = 'grayscale(100%)'; break;
+                case 'sepia': overlayFilterStr = 'sepia(100%)'; break;
+                case 'invert': overlayFilterStr = 'invert(100%)'; break;
+                case 'hue-rotate': overlayFilterStr = 'hue-rotate(180deg)'; break;
+                case 'contrast': overlayFilterStr = 'contrast(175%)'; break;
+              }
+            }
+
+            ctx.save();
+            if (overlayFilterStr !== 'none') {
+              ctx.filter = overlayFilterStr;
+            }
+
+            if (visualsRef.current.overlayMaskEnabled) {
+              ctx.beginPath();
+              const size = Math.min(targetWidth, targetHeight);
+              if (visualsRef.current.overlayMaskShape === 'circle') {
+                const cx = drawX + targetWidth / 2;
+                const cy = drawY + targetHeight / 2;
+                const r = size / 2;
+                ctx.arc(cx, cy, r, 0, Math.PI * 2);
+              } else if (visualsRef.current.overlayMaskShape === 'heart') {
+                const hx = drawX + (targetWidth - size) / 2;
+                const hy = drawY + (targetHeight - size) / 2;
+                ctx.moveTo(hx + size * 0.5, hy + size * 0.25);
+                ctx.bezierCurveTo(hx + size * 0.25, hy, hx, hy + size * 0.25, hx, hy + size * 0.5);
+                ctx.bezierCurveTo(hx, hy + size * 0.75, hx + size * 0.4, hy + size * 0.9, hx + size * 0.5, hy + size);
+                ctx.bezierCurveTo(hx + size * 0.6, hy + size * 0.9, hx + size, hy + size * 0.75, hx + size, hy + size * 0.5);
+                ctx.bezierCurveTo(hx + size, hy + size * 0.25, hx + size * 0.75, hy, hx + size * 0.5, hy + size * 0.25);
+              } else {
+                // 'square'
+                const sqX = drawX + (targetWidth - size) / 2;
+                const sqY = drawY + (targetHeight - size) / 2;
+                ctx.rect(sqX, sqY, size, size);
+              }
+              ctx.closePath();
+              ctx.clip();
+            }
+
             ctx.drawImage(overlayVid, drawX, drawY, targetWidth, targetHeight);
+            ctx.restore();
 
             // Draw subtle interactive borders and handles when selecting this tab
             if (activeTabRef.current === 'overlay' && !isExportingRef.current) {
@@ -9797,6 +9840,71 @@ export default function App() {
                             )}
                           </AnimatePresence>
                         </div>
+
+                        {/* MASKING CONTROLS FOR OVERLAY IN VIDEO ASSET OVERLAYS */}
+                        <div className="flex flex-col gap-2.5 p-3.5 bg-[#07070a]/80 rounded border border-zinc-950/60 mt-3 text-left">
+                          <div className="flex items-center justify-between">
+                            <div>
+                              <span className="font-semibold text-zinc-350 block font-sans text-[11px] uppercase">Overlay Video Masking</span>
+                              <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Apply a canvas clipping shape mask to the foreground video overlay</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => setVisuals(prev => ({ ...prev, overlayMaskEnabled: !prev.overlayMaskEnabled }))}
+                              className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                                visuals.overlayMaskEnabled ? 'bg-brand-green' : 'bg-zinc-800'
+                              }`}
+                            >
+                              <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                                visuals.overlayMaskEnabled ? 'translate-x-3.5' : 'translate-x-0'
+                              }`} />
+                            </button>
+                          </div>
+
+                          {visuals.overlayMaskEnabled && (
+                            <div className="space-y-2 pt-2 border-t border-zinc-900/60 animate-in fade-in duration-150">
+                              <label className="block text-[9.5px] text-zinc-400 font-mono uppercase font-bold">Mask Shape</label>
+                              <div className="grid grid-cols-3 gap-2">
+                                {['circle', 'square', 'heart'].map((shape) => (
+                                  <button
+                                    key={shape}
+                                    type="button"
+                                    onClick={() => setVisuals(prev => ({ ...prev, overlayMaskShape: shape as any }))}
+                                    className={`py-1.5 px-2 rounded font-mono text-[10px] uppercase font-bold border transition-all cursor-pointer text-center ${
+                                      (visuals.overlayMaskShape || 'circle') === shape
+                                        ? 'bg-brand-green/10 border-brand-green text-brand-green'
+                                        : 'bg-[#050508] border-zinc-850 text-zinc-400 hover:bg-zinc-850 hover:text-zinc-200'
+                                    }`}
+                                  >
+                                    {shape}
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+                        </div>
+
+                        {/* FILTER PRESETS FOR OVERLAY IN VIDEO ASSET OVERLAYS */}
+                        <div className="flex flex-col gap-2 p-3.5 bg-[#07070a]/80 rounded border border-zinc-950/60 mt-3 text-left">
+                          <div>
+                            <span className="font-semibold text-zinc-350 block font-sans text-[11px] uppercase">Overlay Video Filter</span>
+                            <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Apply an hardware-accelerated color or style filter preset</span>
+                          </div>
+                          <div className="pt-2">
+                            <select
+                              value={visuals.overlayFilterPreset || 'none'}
+                              onChange={(e) => setVisuals(prev => ({ ...prev, overlayFilterPreset: e.target.value as any }))}
+                              className="w-full bg-[#050508] border border-zinc-850 rounded-lg p-2 text-zinc-300 text-xs focus:outline-none focus:border-brand-green font-medium cursor-pointer"
+                            >
+                              <option value="none">None (Original Colors)</option>
+                              <option value="grayscale">Grayscale</option>
+                              <option value="sepia">Sepia</option>
+                              <option value="invert">Invert</option>
+                              <option value="hue-rotate">Hue-Rotate (Color Shift)</option>
+                              <option value="contrast">High Contrast</option>
+                            </select>
+                          </div>
+                        </div>
                       </div>
 
                     </div>
@@ -11358,6 +11466,26 @@ export default function App() {
                       />
                     </div>
 
+                    {/* Backdrop image/video filter presets */}
+                    <div className="space-y-1.5 pt-2 border-t border-zinc-800/50 text-left">
+                      <label className="block text-[10px] text-zinc-400 font-mono uppercase font-semibold">Backdrop Filter Preset</label>
+                      <select
+                        value={background.filterPreset || 'none'}
+                        onChange={(e) => setBackground(prev => ({ ...prev, filterPreset: e.target.value as any }))}
+                        className="w-full bg-[#0a0a0f] border border-zinc-800 rounded-lg p-2 text-zinc-300 text-xs focus:outline-none focus:border-brand-green font-medium cursor-pointer font-sans"
+                      >
+                        <option value="none">None (Original Colors)</option>
+                        <option value="grayscale">Grayscale</option>
+                        <option value="sepia">Sepia</option>
+                        <option value="invert">Invert</option>
+                        <option value="hue-rotate">Hue-Rotate (Color Shift)</option>
+                        <option value="contrast">High Contrast</option>
+                      </select>
+                      <p className="text-[9.5px] text-zinc-500 leading-normal font-sans">
+                        Applies hardware-accelerated CSS color filters directly on the backdrop image/video rendering.
+                      </p>
+                    </div>
+
                     {/* Cinematic Vignette Overlay */}
                     <div className="space-y-1">
                       <div className="flex justify-between font-mono text-[9px] text-zinc-400 font-bold">
@@ -11604,6 +11732,77 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* FOREGROUND OVERLAY VIDEO OPTIONS (SYNCHRONIZED IN BACKGROUND TAB) */}
+                  <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-lg text-xs space-y-4 text-left">
+                    <div>
+                      <h4 className="text-xs font-semibold text-zinc-300 font-mono uppercase tracking-wider flex items-center space-x-1.5">
+                        <FileVideo className="w-3.5 h-3.5 text-brand-green" />
+                        <span>Foreground Video Overlay Effects</span>
+                      </h4>
+                      <p className="text-[10px] text-zinc-500 mt-0.5">Configure shape masks and rendering filters on your active video overlay</p>
+                    </div>
+
+                    <div className="space-y-3.5">
+                      {/* Foreground Masking Toggle & Shape */}
+                      <div className="flex items-center justify-between p-2.5 bg-zinc-950/40 border border-zinc-850 rounded">
+                        <div className="text-left max-w-[78%]">
+                          <span className="font-semibold text-zinc-350 block font-sans text-[11px]">Apply Overlay Shape Mask</span>
+                          <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Crop the active foreground video overlay inside a canvas mask shape</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setVisuals(prev => ({ ...prev, overlayMaskEnabled: !prev.overlayMaskEnabled }))}
+                          className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                            visuals.overlayMaskEnabled ? 'bg-brand-green' : 'bg-zinc-800'
+                          }`}
+                        >
+                          <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                            visuals.overlayMaskEnabled ? 'translate-x-3.5' : 'translate-x-0'
+                          }`} />
+                        </button>
+                      </div>
+
+                      {visuals.overlayMaskEnabled && (
+                        <div className="p-3 bg-zinc-950/45 border border-zinc-850 rounded space-y-2 animate-in fade-in duration-150">
+                          <label className="block text-[9.5px] text-zinc-400 font-mono uppercase font-bold">Mask Shape Selection</label>
+                          <div className="grid grid-cols-3 gap-2">
+                            {['circle', 'square', 'heart'].map((shape) => (
+                              <button
+                                key={shape}
+                                type="button"
+                                onClick={() => setVisuals(prev => ({ ...prev, overlayMaskShape: shape as any }))}
+                                className={`py-1.5 px-2 rounded font-mono text-[10px] uppercase font-bold border transition-all cursor-pointer text-center ${
+                                  (visuals.overlayMaskShape || 'circle') === shape
+                                    ? 'bg-brand-green/10 border-brand-green text-brand-green'
+                                    : 'bg-[#050508] border-zinc-850 text-zinc-400 hover:bg-zinc-850 hover:text-zinc-200'
+                                }`}
+                              >
+                                {shape}
+                              </button>
+                            ))}
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Foreground Color Filters */}
+                      <div className="space-y-1.5 p-3 bg-zinc-950/45 border border-zinc-850 rounded">
+                        <label className="block text-[10px] text-zinc-400 font-mono uppercase font-semibold">Overlay Filter Preset</label>
+                        <select
+                          value={visuals.overlayFilterPreset || 'none'}
+                          onChange={(e) => setVisuals(prev => ({ ...prev, overlayFilterPreset: e.target.value as any }))}
+                          className="w-full bg-[#0a0a0f] border border-zinc-800 rounded-lg p-2 text-zinc-300 text-xs focus:outline-none focus:border-brand-green font-medium cursor-pointer"
+                        >
+                          <option value="none">None (Original Colors)</option>
+                          <option value="grayscale">Grayscale</option>
+                          <option value="sepia">Sepia</option>
+                          <option value="invert">Invert</option>
+                          <option value="hue-rotate">Hue-Rotate (Color Shift)</option>
+                          <option value="contrast">High Contrast</option>
+                        </select>
+                      </div>
+                    </div>
+                  </div>
+
                 </div>
               </motion.div>
             )}
@@ -11840,6 +12039,68 @@ export default function App() {
                         )}
                       </div>
 
+                      {/* FOREGROUND MASK SHAPE SELECTION */}
+                      <div className="space-y-3 pt-3.5 border-t border-zinc-850/50">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="font-semibold text-zinc-350 block font-sans text-[10px] uppercase text-left">Overlay Masking</span>
+                            <span className="text-[9px] text-zinc-500 block font-sans mt-0.5 text-left">Apply a custom canvas mask shape to the video overlay</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setVisuals(prev => ({ ...prev, overlayMaskEnabled: !prev.overlayMaskEnabled }))}
+                            className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                              visuals.overlayMaskEnabled ? 'bg-brand-green' : 'bg-zinc-800'
+                            }`}
+                          >
+                            <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                              visuals.overlayMaskEnabled ? 'translate-x-3.5' : 'translate-x-0'
+                            }`} />
+                          </button>
+                        </div>
+
+                        {visuals.overlayMaskEnabled && (
+                          <div className="space-y-1.5 text-left border-l-2 border-brand-green/30 pl-2 animate-in fade-in slide-in-from-left-1 duration-150">
+                            <label className="block text-[9px] text-zinc-400 font-mono uppercase font-semibold">Mask Shape</label>
+                            <div className="grid grid-cols-3 gap-2">
+                              {['circle', 'square', 'heart'].map((shape) => (
+                                <button
+                                  key={shape}
+                                  type="button"
+                                  onClick={() => setVisuals(prev => ({ ...prev, overlayMaskShape: shape as any }))}
+                                  className={`py-1.5 px-2 rounded font-mono text-[9.5px] uppercase font-semibold border transition-all cursor-pointer text-center ${
+                                    (visuals.overlayMaskShape || 'circle') === shape
+                                      ? 'bg-brand-green/10 border-brand-green text-brand-green'
+                                      : 'bg-[#0a0a0f] border-zinc-800 text-zinc-400 hover:bg-zinc-850 hover:text-zinc-200'
+                                  }`}
+                                >
+                                  {shape}
+                                </button>
+                              ))}
+                            </div>
+                          </div>
+                        )}
+                      </div>
+
+                      {/* IMAGE FILTER PRESETS */}
+                      <div className="space-y-1.5 pt-3.5 border-t border-zinc-850/50 text-left">
+                        <label className="block text-[10px] text-zinc-400 font-mono uppercase font-semibold">Overlay Filter Preset</label>
+                        <select
+                          value={visuals.overlayFilterPreset || 'none'}
+                          onChange={(e) => setVisuals(prev => ({ ...prev, overlayFilterPreset: e.target.value as any }))}
+                          className="w-full bg-[#0a0a0f] border border-zinc-800 rounded-lg p-2 text-zinc-350 text-xs focus:outline-none focus:border-brand-green font-medium cursor-pointer"
+                        >
+                          <option value="none">None (Original Colors)</option>
+                          <option value="grayscale">Grayscale</option>
+                          <option value="sepia">Sepia</option>
+                          <option value="invert">Invert</option>
+                          <option value="hue-rotate">Hue-Rotate (Color Shift)</option>
+                          <option value="contrast">High Contrast</option>
+                        </select>
+                        <p className="text-[9.5px] text-zinc-500 leading-normal font-sans">
+                          Applies hardware-accelerated CSS filters directly on the foreground video overlay canvas rendering.
+                        </p>
+                      </div>
                     </div>
                   )}
                                   {/* Dedicated audio controls inside the overlay track */}

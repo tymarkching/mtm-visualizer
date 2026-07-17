@@ -150,6 +150,9 @@ export interface VisualizerSettings {
   overlayBlendMode?: 'normal' | 'screen' | 'multiply' | 'color-dodge' | 'difference';
   overlayBeatPulse?: boolean;
   overlayPulseIntensity?: number;
+  overlayMaskEnabled?: boolean;
+  overlayMaskShape?: 'circle' | 'square' | 'heart';
+  overlayFilterPreset?: 'none' | 'grayscale' | 'sepia' | 'invert' | 'hue-rotate' | 'contrast';
   stickerFloatRotate?: boolean;
   stickerFloatSpeed?: number;
   stickerSize?: number; // independent sticker size 10 to 200 (default 40)
@@ -321,6 +324,7 @@ export interface BackgroundSettings {
   vignettePulse?: boolean;
   vignettePulseIntensity?: number;
   parallaxSway?: number;
+  filterPreset?: 'none' | 'grayscale' | 'sepia' | 'invert' | 'hue-rotate' | 'contrast';
   // Visual Effects Overlays
   overlayMatrixRain?: boolean;
   overlayStarfield?: boolean;

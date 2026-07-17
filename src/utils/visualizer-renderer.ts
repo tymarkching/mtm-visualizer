@@ -791,9 +791,15 @@ export function updateParticles(
       const speed = baseSpeed * (1 + bassIntensity * 8) * dynamicBaseSpeedMultiplier * burstSpeedMult * forwardSpeedMult;
       
       if (isForward) {
-        // Enforce a minimum speed floor so particles never completely stop or freeze in the center waveform.
-        // Also use a non-linear depth-scaled speed so particles accelerate outward elegantly (piercing the waveform).
-        const speedScale = Math.max(1.2, speed);
+        // For forward-movement, we allow the speed to go completely to 0 if configured, rather than using the hardcoded default fallback.
+        // This makes the speed fully controllable and responsive to the "Average Velocity" and "Particle Movement Speed" sliders.
+        const actualBaseSpeed = settings.speed !== undefined ? settings.speed : baseSpeed;
+        const actualSpeed = actualBaseSpeed * (1 + bassIntensity * 8) * dynamicBaseSpeedMultiplier * burstSpeedMult * forwardSpeedMult;
+        
+        // Enforce a minimum speed floor that scales proportionally with speed settings so it can decay all the way to 0.
+        // The original 1.2 floor is scaled by base speed and movement speed multiplier.
+        const scaledMinFloor = 1.2 * (actualBaseSpeed / 2) * dynamicBaseSpeedMultiplier;
+        const speedScale = Math.max(scaledMinFloor, actualSpeed);
         const forwardRamp = settings.forwardVelocityRamp !== undefined ? settings.forwardVelocityRamp : 1.0;
         
         // Normalize progress from 0 (at width) to 1 (at 0)
@@ -1092,9 +1098,21 @@ export function drawBackground(
       dy = (height - dHeight) / 2;
     }
 
-    if (settings.blur > 0) {
-      ctx.filter = `blur(${settings.blur}px)`;
+    let filterStr = 'none';
+    if (settings.filterPreset && settings.filterPreset !== 'none') {
+      switch (settings.filterPreset) {
+        case 'grayscale': filterStr = 'grayscale(100%)'; break;
+        case 'sepia': filterStr = 'sepia(100%)'; break;
+        case 'invert': filterStr = 'invert(100%)'; break;
+        case 'hue-rotate': filterStr = 'hue-rotate(180deg)'; break;
+        case 'contrast': filterStr = 'contrast(175%)'; break;
+      }
     }
+    if (settings.blur > 0) {
+      if (filterStr === 'none') filterStr = `blur(${settings.blur}px)`;
+      else filterStr += ` blur(${settings.blur}px)`;
+    }
+    ctx.filter = filterStr;
     
     ctx.drawImage(bgImgElement, dx, dy, dWidth, dHeight);
     
@@ -1122,9 +1140,21 @@ export function drawBackground(
       dy = (height - dHeight) / 2;
     }
 
-    if (settings.blur > 0) {
-      ctx.filter = `blur(${settings.blur}px)`;
+    let vidFilterStr = 'none';
+    if (settings.filterPreset && settings.filterPreset !== 'none') {
+      switch (settings.filterPreset) {
+        case 'grayscale': vidFilterStr = 'grayscale(100%)'; break;
+        case 'sepia': vidFilterStr = 'sepia(100%)'; break;
+        case 'invert': vidFilterStr = 'invert(100%)'; break;
+        case 'hue-rotate': vidFilterStr = 'hue-rotate(180deg)'; break;
+        case 'contrast': vidFilterStr = 'contrast(175%)'; break;
+      }
     }
+    if (settings.blur > 0) {
+      if (vidFilterStr === 'none') vidFilterStr = `blur(${settings.blur}px)`;
+      else vidFilterStr += ` blur(${settings.blur}px)`;
+    }
+    ctx.filter = vidFilterStr;
 
     ctx.drawImage(bgVidElement, dx, dy, dWidth, dHeight);
 
