@@ -1144,6 +1144,80 @@ export function drawBackground(
   // --- BACKGROUND VISUAL EFFECTS OVERLAYS ---
   const bIntensity = beatIntensity || 0;
 
+  // Setup overlay spectrum color mode helper
+  const mode = settings.overlaySpectrumColorMode || 'default';
+  const customColor = settings.overlaySpectrumCustomColor || '#00ff80';
+  const pulseSpeed = settings.overlaySpectrumPulseSpeed !== undefined ? settings.overlaySpectrumPulseSpeed : 1.0;
+  const syncToBeat = settings.overlaySpectrumSyncToBeat ?? false;
+
+  // Let's get a base hue/color that changes over time, or with beat
+  const now = Date.now();
+  const timeFactor = (now * 0.001 * pulseSpeed) + (syncToBeat ? bIntensity * 2.0 : 0);
+  
+  // A helper function to get a color for a specific coordinate/index/factor
+  const getSpectrumColor = (factor: number, defaultRgba: string, indexOffset = 0): string => {
+    if (mode === 'default') {
+      return defaultRgba;
+    }
+    
+    if (mode === 'solid-accent') {
+      const rgb = hexToRgb(customColor) || { r: 0, g: 255, b: 128 };
+      return `rgba(${rgb.r}, ${rgb.g}, ${rgb.b}, ${factor})`;
+    }
+
+    if (mode === 'reactive-rainbow') {
+      const hue = Math.floor((timeFactor * 40 + indexOffset + factor * 20) % 360);
+      return `hsla(${hue}, 100%, 60%, ${factor})`;
+    }
+
+    if (mode === 'neon-gradient') {
+      const t = (timeFactor * 0.5 + indexOffset * 0.1) % (Math.PI * 2);
+      const progress = (Math.sin(t) + 1) / 2; // 0 to 1
+      const r = Math.round(255 + (0 - 255) * progress);
+      const g = Math.round(0 + (255 - 0) * progress);
+      const b = Math.round(127 + (255 - 127) * progress);
+      return `rgba(${r}, ${g}, ${b}, ${factor})`;
+    }
+
+    if (mode === 'warm-sunset') {
+      const t = (timeFactor * 0.4 + indexOffset * 0.08) % (Math.PI * 2);
+      const progress = (Math.sin(t) + 1) / 2;
+      const r = Math.round(255);
+      const g = Math.round(60 + (120 - 60) * progress);
+      const b = Math.round(0 + (100 - 0) * progress);
+      return `rgba(${r}, ${g}, ${b}, ${factor})`;
+    }
+
+    if (mode === 'deep-ocean') {
+      const t = (timeFactor * 0.3 + indexOffset * 0.05) % (Math.PI * 2);
+      const progress = (Math.sin(t) + 1) / 2;
+      const r = Math.round(0);
+      const g = Math.round(50 + (180 - 50) * progress);
+      const b = Math.round(200 + (255 - 200) * progress);
+      return `rgba(${r}, ${g}, ${b}, ${factor})`;
+    }
+
+    if (mode === 'acid-cyberpunk') {
+      const t = (timeFactor * 0.6 + indexOffset * 0.12) % (Math.PI * 2);
+      const progress = (Math.sin(t) + 1) / 2;
+      const r = Math.round(57 + (255 - 57) * progress);
+      const g = Math.round(255 + (0 - 255) * progress);
+      const b = Math.round(20 + (127 - 20) * progress);
+      return `rgba(${r}, ${g}, ${b}, ${factor})`;
+    }
+
+    if (mode === 'vibrant-aurora') {
+      const t = (timeFactor * 0.45 + indexOffset * 0.07) % (Math.PI * 2);
+      const progress = (Math.sin(t) + 1) / 2;
+      const r = Math.round(0 + (180 - 0) * progress);
+      const g = Math.round(255 + (0 - 255) * progress);
+      const b = Math.round(100 + (255 - 100) * progress);
+      return `rgba(${r}, ${g}, ${b}, ${factor})`;
+    }
+
+    return defaultRgba;
+  };
+
   // 1. Matrix digital rain overlay
   if (settings.overlayMatrixRain) {
     ctx.save();
@@ -1163,7 +1237,7 @@ export function drawBackground(
           const alpha = (1 - (j / trailLen)) * (0.45 + bIntensity * 0.4);
           ctx.fillStyle = j === 0 
             ? 'rgba(255, 255, 255, 0.95)' 
-            : `rgba(0, 255, 128, ${alpha})`;
+            : getSpectrumColor(alpha, `rgba(0, 255, 128, ${alpha})`, i * 5);
           const chars = "10ABCDEFGHIJKLMNOPQRSTUVWXYZ<>!?#@$%&*";
           const char = chars[Math.floor((y + j) % chars.length)];
           ctx.fillText(char, x, trailY);
@@ -1209,7 +1283,8 @@ export function drawBackground(
         const radius = Math.max(0.1, s.size * (1 - s.z / width) * 2);
         ctx.beginPath();
         ctx.arc(px, py, radius, 0, Math.PI * 2);
-        ctx.fillStyle = s.color;
+        const originalAlpha = 1 - s.z / width;
+        ctx.fillStyle = getSpectrumColor(originalAlpha, s.color, i * 7);
         ctx.fill();
       }
     }
@@ -1231,8 +1306,10 @@ export function drawBackground(
     }
     const sweepY = (Date.now() * 0.1) % (height * 1.5);
     const grad = ctx.createLinearGradient(0, sweepY - 150, 0, sweepY);
+    const sweepIntensity = 0.03 + bIntensity * 0.08;
+    const sweepColor = getSpectrumColor(sweepIntensity, `rgba(184, 238, 2, ${sweepIntensity})`, 45);
     grad.addColorStop(0, 'rgba(255, 255, 255, 0)');
-    grad.addColorStop(0.5, `rgba(184, 238, 2, ${0.03 + bIntensity * 0.08})`);
+    grad.addColorStop(0.5, sweepColor);
     grad.addColorStop(1, 'rgba(255, 255, 255, 0)');
     ctx.fillStyle = grad;
     ctx.fillRect(0, sweepY - 150, width, 150);
@@ -1260,7 +1337,7 @@ export function drawBackground(
       const p = snowflakeParticles[i];
       ctx.beginPath();
       ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
-      ctx.fillStyle = `rgba(255, 255, 255, ${p.opacity})`;
+      ctx.fillStyle = getSpectrumColor(p.opacity, `rgba(255, 255, 255, ${p.opacity})`, i * 4);
       ctx.fill();
       p.y += p.speedY + bIntensity * 3;
       p.x += p.speedX + Math.sin(Date.now() * 0.001 + i) * 0.15;
@@ -1318,7 +1395,7 @@ export function drawBackground(
     for (let i = 0; i < raindropParticles.length; i++) {
       const d = raindropParticles[i];
       if (!d.splash) {
-        ctx.strokeStyle = `rgba(180, 220, 255, ${d.opacity})`;
+        ctx.strokeStyle = getSpectrumColor(d.opacity, `rgba(180, 220, 255, ${d.opacity})`, i * 3);
         ctx.lineWidth = 1.2;
         ctx.beginPath();
         ctx.moveTo(d.x, d.y);
@@ -1335,7 +1412,8 @@ export function drawBackground(
           }
         }
       } else {
-        ctx.strokeStyle = `rgba(180, 220, 255, ${d.opacity * (1 - d.splashRadius / d.maxSplashRadius)})`;
+        const splashOpacity = d.opacity * (1 - d.splashRadius / d.maxSplashRadius);
+        ctx.strokeStyle = getSpectrumColor(splashOpacity, `rgba(180, 220, 255, ${splashOpacity})`, i * 3);
         ctx.lineWidth = 0.8;
         ctx.beginPath();
         ctx.ellipse(d.x, height - 10, d.splashRadius, d.splashRadius * 0.35, 0, 0, Math.PI * 2);
@@ -1395,7 +1473,8 @@ export function drawBackground(
       if (b.x > width + b.size) b.x = -b.size;
       const activeSize = b.size * (1 + bIntensity * 0.2);
       const gradient = ctx.createRadialGradient(b.x, b.y, 0, b.x, b.y, activeSize);
-      gradient.addColorStop(0, b.color);
+      const bubbleColor = getSpectrumColor(1.0, b.color, i * 11);
+      gradient.addColorStop(0, bubbleColor);
       gradient.addColorStop(1, 'rgba(0, 0, 0, 0)');
       ctx.fillStyle = gradient;
       ctx.globalAlpha = b.alpha;

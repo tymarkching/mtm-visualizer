@@ -36,7 +36,7 @@ import {
   ArrowRight,
   ArrowDownRight,
   ArrowUpRight,
-  Share2, ChevronDown, Mic, Radio, HelpCircle, Undo, Redo
+  Share2, ChevronDown, Mic, Radio, HelpCircle, Undo, Redo, Maximize2, Minimize2, Clock
 } from 'lucide-react';
 import localforage from 'localforage';
 import { guess } from 'web-audio-beat-detector';
@@ -843,6 +843,7 @@ export default function App() {
     outlineThickness: 2,
     align: 'center',
     karaokeFillColor: '#ffff00',
+    syncOffset: 0,
   });
   const subtitlesRef = useRef(subtitles);
 
@@ -854,6 +855,13 @@ export default function App() {
   const [customTextX, setCustomTextX] = useState<number>(50); // 0 to 100 %
   const [customTextY, setCustomTextY] = useState<number>(25); // 0 to 100 %
   const [activeStickers, setActiveStickers] = useState<string[]>([]);
+
+  // Web Lyrics search states
+  const [lyricsSearchArtist, setLyricsSearchArtist] = useState<string>('');
+  const [lyricsSearchTitle, setLyricsSearchTitle] = useState<string>('');
+  const [isFetchingLyrics, setIsFetchingLyrics] = useState<boolean>(false);
+  const [isDetectingOffset, setIsDetectingOffset] = useState<boolean>(false);
+  const [lyricsFetchMessage, setLyricsFetchMessage] = useState<{ text: string; type: 'success' | 'error' | 'info' } | null>(null);
 
   // Multi-Image Overlay (Stickers / Album covers) state
   const [overlayImages, setOverlayImages] = useState<OverlayImage[]>([]);
@@ -1198,6 +1206,11 @@ export default function App() {
     coverUrl: null,
   });
 
+  useEffect(() => {
+    setLyricsSearchArtist(audioTrack.artist || titleOverlay?.artist || '');
+    setLyricsSearchTitle(audioTrack.name || titleOverlay?.text || '');
+  }, [audioTrack.name, audioTrack.artist]);
+
   const [playlist, setPlaylist] = useState<File[]>([]);
   const [currentTrackIndex, setCurrentTrackIndex] = useState<number>(0);
   const [draggedTrackIndex, setDraggedTrackIndex] = useState<number | null>(null);
@@ -1335,6 +1348,75 @@ export default function App() {
   useEffect(() => {
     monitorVolumeRef.current = monitorVolume;
   }, [monitorVolume]);
+
+  // Full Screen State & Support
+  const [isFullscreen, setIsFullscreen] = useState<boolean>(false);
+
+  useEffect(() => {
+    const onFullscreenChange = () => {
+      const isFS = !!document.fullscreenElement;
+      setIsFullscreen(isFS);
+      if (!isFS) {
+        setShowFSControls(true);
+      }
+    };
+    document.addEventListener('fullscreenchange', onFullscreenChange);
+    document.addEventListener('webkitfullscreenchange', onFullscreenChange);
+    document.addEventListener('mozfullscreenchange', onFullscreenChange);
+    return () => {
+      document.removeEventListener('fullscreenchange', onFullscreenChange);
+      document.removeEventListener('webkitfullscreenchange', onFullscreenChange);
+      document.removeEventListener('mozfullscreenchange', onFullscreenChange);
+    };
+  }, []);
+
+  const handleToggleFullscreen = () => {
+    const container = containerRef.current;
+    if (!container) return;
+    
+    if (!document.fullscreenElement) {
+      const req = container.requestFullscreen || 
+                  (container as any).webkitRequestFullscreen || 
+                  (container as any).mozRequestFullScreen || 
+                  (container as any).msRequestFullscreen;
+      if (req) {
+        req.call(container).catch((err: any) => {
+          console.error(`Error entering fullscreen: ${err.message || err}`);
+        });
+      }
+    } else {
+      const exit = document.exitFullscreen || 
+                   (document as any).webkitExitFullscreen || 
+                   (document as any).mozCancelFullScreen || 
+                   (document as any).msExitFullscreen;
+      if (exit) {
+        exit.call(document);
+      }
+    }
+  };
+
+  const [showFSControls, setShowFSControls] = useState<boolean>(true);
+  const fsTimeoutRef = useRef<number | null>(null);
+
+  const handleFSMouseMove = () => {
+    if (!document.fullscreenElement) {
+      if (!showFSControls) setShowFSControls(true);
+      return;
+    }
+    setShowFSControls(true);
+    if (fsTimeoutRef.current) {
+      window.clearTimeout(fsTimeoutRef.current);
+    }
+    fsTimeoutRef.current = window.setTimeout(() => {
+      setShowFSControls(false);
+    }, 2500); // Auto-hide controls after 2.5 seconds of idle in fullscreen
+  };
+
+  useEffect(() => {
+    return () => {
+      if (fsTimeoutRef.current) window.clearTimeout(fsTimeoutRef.current);
+    };
+  }, []);
 
   // Interactive Particle Pool ref
   const particlesPoolRef = useRef<RenderParticle[]>([]);
@@ -3110,7 +3192,13 @@ export default function App() {
   };
 
   const handleResetBackgroundTab = () => {
-    setBackground(PRESETS[0].background);
+    setBackground({
+      ...PRESETS[0].background,
+      overlaySpectrumColorMode: 'default',
+      overlaySpectrumCustomColor: '#00ff80',
+      overlaySpectrumPulseSpeed: 1.0,
+      overlaySpectrumSyncToBeat: false
+    });
     setAutoSyncColors(false);
   };
 
@@ -3191,6 +3279,149 @@ export default function App() {
     setCustomTextX(50);
     setCustomTextY(25);
     setActiveStickers([]);
+  };
+
+  const handleFetchLyrics = async () => {
+    const queryArtist = lyricsSearchArtist.trim() || audioTrack.artist || titleOverlay?.artist || '';
+    const queryTitle = lyricsSearchTitle.trim() || audioTrack.name || titleOverlay?.text || '';
+
+    if (!queryTitle) {
+      setLyricsFetchMessage({ text: 'Please specify at least a song title to search lyrics.', type: 'error' });
+      return;
+    }
+
+    setIsFetchingLyrics(true);
+    setLyricsFetchMessage({ text: `Searching lyrics database for "${queryTitle}"...`, type: 'info' });
+
+    try {
+      const artistParam = encodeURIComponent(queryArtist);
+      const titleParam = encodeURIComponent(queryTitle);
+      const getUrl = `https://lrclib.net/api/get?artist_name=${artistParam}&track_name=${titleParam}`;
+      
+      const response = await fetch(getUrl);
+      if (response.ok) {
+        const data = await response.json();
+        const lyricsString = data.syncedLyrics || data.plainLyrics || '';
+        if (lyricsString) {
+          setSubtitles(prev => ({
+            ...prev,
+            lrcString: lyricsString,
+            lyrics: parseSubtitles(lyricsString)
+          }));
+          setLyricsFetchMessage({ 
+            text: `Successfully fetched and synced lyrics for "${data.trackName || queryTitle}" by ${data.artistName || queryArtist}!`, 
+            type: 'success' 
+          });
+          setIsFetchingLyrics(false);
+          return;
+        }
+      }
+
+      // Try search API if get was not perfect
+      const searchUrl = `https://lrclib.net/api/search?q=${encodeURIComponent(queryArtist + ' ' + queryTitle)}`;
+      const searchResponse = await fetch(searchUrl);
+      if (searchResponse.ok) {
+        const results = await searchResponse.json();
+        if (results && results.length > 0) {
+          const match = results.find((r: any) => r.syncedLyrics || r.plainLyrics);
+          if (match) {
+            const lyricsString = match.syncedLyrics || match.plainLyrics || '';
+            setSubtitles(prev => ({
+              ...prev,
+              lrcString: lyricsString,
+              lyrics: parseSubtitles(lyricsString)
+            }));
+            setLyricsFetchMessage({ 
+              text: `Successfully found and synced lyrics for "${match.trackName}" by ${match.artistName}!`, 
+              type: 'success' 
+            });
+            setIsFetchingLyrics(false);
+            return;
+          }
+        }
+      }
+
+      setLyricsFetchMessage({ 
+        text: `No synced lyrics found on web source for "${queryTitle}" by "${queryArtist}".`, 
+        type: 'error' 
+      });
+    } catch (err: any) {
+      console.error('Error fetching lyrics:', err);
+      setLyricsFetchMessage({ 
+        text: `Failed to fetch lyrics: ${err.message || 'Network error'}`, 
+        type: 'error' 
+      });
+    } finally {
+      setIsFetchingLyrics(false);
+    }
+  };
+
+  const handleAutoDetectSyncOffset = async () => {
+    if (!audioTrack.file) {
+      setLyricsFetchMessage({ text: 'Please upload an audio file first to detect actual audio onset.', type: 'error' });
+      return;
+    }
+    if (!subtitles.lyrics || subtitles.lyrics.length === 0) {
+      setLyricsFetchMessage({ text: 'No synced lyrics loaded. Upload LRC or fetch lyrics first.', type: 'error' });
+      return;
+    }
+
+    setIsDetectingOffset(true);
+    setLyricsFetchMessage({ text: 'Decoding and analyzing audio onset...', type: 'info' });
+
+    try {
+      const arrayBuffer = await audioTrack.file.arrayBuffer();
+      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
+      const ctx = new AudioContextClass();
+      const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+      
+      // Find actual audio onset
+      const channels = audioBuffer.numberOfChannels;
+      const sampleRate = audioBuffer.sampleRate;
+      const length = audioBuffer.length;
+      const scanLimit = Math.min(length, sampleRate * 30); // scan first 30 seconds of audio
+      let onsetTime = 0;
+      const threshold = 0.015; // standard amplitude threshold
+
+      for (let i = 0; i < scanLimit; i += 50) { // step by 50 samples for higher precision/performance
+        let found = false;
+        for (let c = 0; c < channels; c++) {
+          const data = audioBuffer.getChannelData(c);
+          if (Math.abs(data[i]) >= threshold) {
+            onsetTime = i / sampleRate;
+            found = true;
+            break;
+          }
+        }
+        if (found) break;
+      }
+
+      await ctx.close();
+
+      const firstLyricTime = subtitles.lyrics[0].time;
+      const calculatedOffset = onsetTime - firstLyricTime;
+
+      // Update subtitle settings with calculated offset rounded to 2 decimal places
+      const roundedOffset = Math.round(calculatedOffset * 100) / 100;
+
+      setSubtitles(prev => ({
+        ...prev,
+        syncOffset: roundedOffset
+      }));
+
+      setLyricsFetchMessage({
+        text: `Detected audio onset at ${onsetTime.toFixed(2)}s. First lyric starts at ${firstLyricTime.toFixed(2)}s. Sync Offset auto-tuned to ${roundedOffset >= 0 ? '+' : ''}${roundedOffset}s!`,
+        type: 'success'
+      });
+    } catch (err: any) {
+      console.error('Error detecting audio onset:', err);
+      setLyricsFetchMessage({
+        text: `Onset detection failed: ${err.message || 'Error decoding audio'}`,
+        type: 'error'
+      });
+    } finally {
+      setIsDetectingOffset(false);
+    }
   };
 
   const handleResetSfxTab = () => {
@@ -4776,10 +5007,12 @@ export default function App() {
             ? ((currentFrameOverrideRef.current as any).currentTime || 0) 
             : (audioRef.current?.currentTime || currentTimeRef.current || 0);
             
+        const adjustedT = currentT - (subs.syncOffset || 0);
+            
         let currentLine = '';
         let currentLineIndex = -1;
         for (let i = 0; i < subs.lyrics.length; i++) {
-          if (subs.lyrics[i].time <= currentT) {
+          if (subs.lyrics[i].time <= adjustedT) {
             currentLine = subs.lyrics[i].text;
             currentLineIndex = i;
           } else {
@@ -4807,8 +5040,8 @@ export default function App() {
           
           const effect = subs.effect;
           const transition = subs.transition || 'none';
-          const timeSinceStart = currentT - subs.lyrics[currentLineIndex].time;
-          const timeUntilNext = (currentLineIndex < subs.lyrics.length - 1) ? subs.lyrics[currentLineIndex+1].time - currentT : 999;
+          const timeSinceStart = adjustedT - subs.lyrics[currentLineIndex].time;
+          const timeUntilNext = (currentLineIndex < subs.lyrics.length - 1) ? subs.lyrics[currentLineIndex+1].time - adjustedT : 999;
           const lineDuration = (currentLineIndex < subs.lyrics.length - 1) ? subs.lyrics[currentLineIndex+1].time - subs.lyrics[currentLineIndex].time : 2.0;
           const progress = Math.max(0, Math.min(1.0, timeSinceStart / (lineDuration || 2.0)));
           
@@ -6240,16 +6473,30 @@ export default function App() {
           </div>
 
           {/* ACTIVE WORKSPACE CANVAS STAGE WINDOW */}
-          <div ref={containerRef} className="w-full max-w-4xl">
-            <div className="bg-zinc-900 p-1.5 rounded-xl border border-zinc-900 shadow-sm relative group overflow-hidden">
+          <div 
+            ref={containerRef} 
+            onMouseMove={handleFSMouseMove}
+            className={`w-full transition-all duration-300 ${
+              isFullscreen 
+                ? 'fixed inset-0 z-[9999] bg-black p-0 flex flex-col justify-center items-center overflow-hidden' 
+                : 'max-w-4xl'
+            }`}
+          >
+            <div className={`w-full relative overflow-hidden transition-all duration-300 ${
+              isFullscreen 
+                ? 'h-screen w-screen bg-black' 
+                : 'bg-zinc-900 p-1.5 rounded-xl border border-zinc-900 shadow-sm relative group'
+            }`}>
               
               {/* Canvas Preview element */}
               <div 
-                className="relative bg-black rounded-lg overflow-hidden shadow-inner flex items-center justify-center transition-all"
+                className={`relative bg-black flex items-center justify-center transition-all ${
+                  isFullscreen ? 'w-full h-full rounded-none' : 'rounded-lg w-full'
+                }`}
                 style={{
-                  aspectRatio: exportSettings.aspectRatio === '16:9' ? '16/9' : exportSettings.aspectRatio === '9:16' ? '9/16' : '1/1',
-                  maxHeight: '480px',
-                  width: '100%',
+                  aspectRatio: isFullscreen ? undefined : (exportSettings.aspectRatio === '16:9' ? '16/9' : exportSettings.aspectRatio === '9:16' ? '9/16' : '1/1'),
+                  maxHeight: isFullscreen ? '100vh' : '480px',
+                  maxWidth: isFullscreen ? '100vw' : '100%',
                   margin: '0 auto',
                 }}
               >
@@ -6264,6 +6511,140 @@ export default function App() {
                   onTouchMove={handleCanvasTouchMove}
                   onTouchEnd={handleCanvasMouseUp}
                 />
+
+                {/* Floating Full Screen Trigger overlay button */}
+                <AnimatePresence>
+                  {showFSControls && (
+                    <motion.button
+                      initial={{ opacity: 0, scale: 0.9 }}
+                      animate={{ opacity: 1, scale: 1 }}
+                      exit={{ opacity: 0, scale: 0.9 }}
+                      type="button"
+                      onClick={handleToggleFullscreen}
+                      className="absolute top-4 right-4 z-40 p-2.5 rounded-xl bg-zinc-950/80 hover:bg-zinc-900 border border-zinc-800 hover:border-brand-green/50 text-zinc-300 hover:text-brand-green transition-all shadow-lg backdrop-blur-md cursor-pointer group/fs flex items-center justify-center gap-2 text-[10px] font-mono font-bold"
+                      title={isFullscreen ? 'Exit Full Screen (ESC)' : 'Enter Full Screen'}
+                    >
+                      {isFullscreen ? (
+                        <>
+                          <Minimize2 className="w-3.5 h-3.5" />
+                          <span className="max-w-0 group-hover/fs:max-w-[120px] overflow-hidden transition-all duration-300 whitespace-nowrap block text-[9px] tracking-wider uppercase">Exit Fullscreen</span>
+                        </>
+                      ) : (
+                        <>
+                          <Maximize2 className="w-3.5 h-3.5" />
+                          <span className="max-w-0 group-hover/fs:max-w-[120px] overflow-hidden transition-all duration-300 whitespace-nowrap block text-[9px] tracking-wider uppercase">Fullscreen</span>
+                        </>
+                      )}
+                    </motion.button>
+                  )}
+                </AnimatePresence>
+
+                {/* Floating Full Screen Controls Bar (Overlay on mouse activity) */}
+                <AnimatePresence>
+                  {isFullscreen && showFSControls && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 30 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 30 }}
+                      transition={{ duration: 0.2 }}
+                      className="absolute bottom-8 left-1/2 -translate-x-1/2 z-50 w-full max-w-2xl bg-zinc-950/90 border border-zinc-850/90 p-4 rounded-2xl backdrop-blur-xl shadow-2xl flex flex-col gap-3"
+                    >
+                      {/* Timeline Slider inside full screen */}
+                      <div className="w-full flex items-center space-x-3">
+                        <span className="text-[10px] text-zinc-400 font-mono min-w-[34px] text-right">
+                          {Math.floor(currentTime / 60)}:{(Math.floor(currentTime % 60)).toString().padStart(2, '0')}
+                        </span>
+                        
+                        <div className="flex-1 flex items-center relative group min-w-0">
+                          <input
+                            type="range"
+                            min="0"
+                            max={trackDuration || 30}
+                            step="0.1"
+                            value={currentTime}
+                            onChange={(e) => handleTimelineSeek(parseFloat(e.target.value))}
+                            className="w-full h-1.5 rounded-full accent-brand-green cursor-pointer bg-zinc-900 appearance-none border border-zinc-800 transition-all outline-none"
+                            title="Drag or click to seek audio playback timeline"
+                          />
+                        </div>
+
+                        <span className="text-[10px] text-zinc-400 font-mono min-w-[34px]">
+                          {audioTrack.file 
+                            ? `${Math.floor(trackDuration / 60)}:${(Math.floor(trackDuration % 60)).toString().padStart(2, '0')}`
+                            : 'LOOP'
+                          }
+                        </span>
+                      </div>
+
+                      {/* Main control action buttons inside full screen */}
+                      <div className="flex items-center justify-between w-full">
+                        <div className="flex items-center space-x-2.5">
+                          {/* Play/Pause Button */}
+                          <button
+                            onClick={handleTogglePlayback}
+                            className="w-9 h-9 rounded-full bg-zinc-900 hover:bg-zinc-800 text-brand-green flex items-center justify-center transition-all shadow-sm active:scale-95 cursor-pointer border border-brand-green/30"
+                            title={isPlaying ? 'Pause' : 'Play'}
+                          >
+                            {isPlaying ? <Pause className="w-4 h-4 text-brand-green fill-brand-green" /> : <Play className="w-4 h-4 fill-brand-green text-brand-green ml-0.5" />}
+                          </button>
+
+                          {/* Stop Button */}
+                          <button
+                            onClick={handleStopPlayback}
+                            className="w-8 h-8 rounded-full bg-zinc-900 hover:bg-zinc-800 text-brand-green flex items-center justify-center transition-all cursor-pointer border border-brand-green/30"
+                            title="Stop"
+                          >
+                            <Square className="w-3 h-3 fill-brand-green text-brand-green" />
+                          </button>
+                        </div>
+
+                        {/* Track Info */}
+                        <div className="hidden sm:flex flex-col text-center max-w-[40%]">
+                          <span className="text-white text-[11px] font-mono font-bold truncate">
+                            {audioTrack.name || "Virtual Synth Stream"}
+                          </span>
+                          <span className="text-zinc-400 text-[9px] font-sans truncate mt-0.5">
+                            {titleOverlay?.text || "Reactive Audio Visualizer"}
+                          </span>
+                        </div>
+
+                        {/* Right Section: Volume & Fullscreen exit */}
+                        <div className="flex items-center space-x-3">
+                          {/* Volume controls */}
+                          <div className="flex items-center space-x-1.5 bg-zinc-900 border border-zinc-800 px-2.5 py-1 rounded-full">
+                            <button
+                              onClick={() => setMonitorIsMuted(!monitorIsMuted)}
+                              className="text-zinc-400 hover:text-white transition-all cursor-pointer"
+                            >
+                              {monitorIsMuted ? <VolumeX className="w-3.5 h-3.5 text-red-400" /> : <Volume2 className="w-3.5 h-3.5 text-brand-green" />}
+                            </button>
+                            <input
+                              type="range"
+                              min="0"
+                              max="1"
+                              step="0.05"
+                              value={monitorVolume}
+                              onChange={(e) => {
+                                setMonitorVolume(parseFloat(e.target.value));
+                                setMonitorIsMuted(false);
+                              }}
+                              className="w-14 accent-brand-green h-1 cursor-pointer"
+                            />
+                          </div>
+
+                          {/* Exit Fullscreen button */}
+                          <button
+                            onClick={handleToggleFullscreen}
+                            className="w-8 h-8 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-brand-green/30 text-zinc-300 hover:text-brand-green transition-all shadow-md cursor-pointer flex items-center justify-center"
+                            title="Exit Full Screen"
+                          >
+                            <Minimize2 className="w-4 h-4" />
+                          </button>
+                        </div>
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
                 {/* Loading state or No-Audio warning indicator overlay */}
                 {!audioTrack.file && (
@@ -6428,6 +6809,16 @@ export default function App() {
                   className="w-16 md:w-20 accent-brand-green h-1 cursor-pointer"
                 />
               </div>
+
+              {/* Fullscreen Button */}
+              <button
+                type="button"
+                onClick={handleToggleFullscreen}
+                className="w-8 h-8 rounded-full bg-zinc-900 hover:bg-zinc-800 text-brand-green flex items-center justify-center transition-all cursor-pointer border border-brand-green/30 shrink-0"
+                title={isFullscreen ? "Exit Full Screen" : "Enter Full Screen"}
+              >
+                {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
+              </button>
 
             </div>
           </div>
@@ -11119,6 +11510,100 @@ export default function App() {
                     </div>
                   </div>
 
+                  {/* Advanced Spectrum Color Modes for Backdrop Visual Effects */}
+                  <div className="bg-zinc-900 border border-zinc-800 p-4 rounded-lg text-xs space-y-4 text-left">
+                    <div>
+                      <h4 className="text-xs font-semibold text-zinc-300 font-mono uppercase tracking-wider flex items-center space-x-1.5">
+                        <Sparkles className="w-3.5 h-3.5 text-brand-green" />
+                        <span>Advanced Spectrum Color Modes</span>
+                      </h4>
+                      <p className="text-[10px] text-zinc-500 mt-0.5">Customize spectrum color behaviors and neon palettes for active backdrop overlays</p>
+                    </div>
+
+                    <div className="space-y-3.5">
+                      {/* Color Mode Select */}
+                      <div className="space-y-1.5">
+                        <label className="block text-[10px] text-zinc-400 font-mono uppercase font-semibold">Spectrum Color Mode</label>
+                        <select
+                          value={background.overlaySpectrumColorMode || 'default'}
+                          onChange={(e) => setBackground(prev => ({ ...prev, overlaySpectrumColorMode: e.target.value as any }))}
+                          className="w-full bg-[#0a0a0f] border border-zinc-850 rounded-lg p-2.5 text-zinc-300 text-xs focus:outline-none focus:border-brand-green font-medium cursor-pointer font-mono"
+                        >
+                          <option value="default">Default Preset Theme Colors</option>
+                          <option value="solid-accent">Solid Custom Hue Accent</option>
+                          <option value="reactive-rainbow">Dynamic Psychedelic Rainbow</option>
+                          <option value="neon-gradient">Synthwave Neon-Gradient Sweep</option>
+                          <option value="warm-sunset">Energetic Warm-Sunset Sweep</option>
+                          <option value="deep-ocean">Tranquil Deep-Ocean Pulse</option>
+                          <option value="acid-cyberpunk">High-Contrast Acid Cyberpunk</option>
+                          <option value="vibrant-aurora">Ethereal Vibrant Aurora Glow</option>
+                        </select>
+                      </div>
+
+                      {/* Custom Hue picker (if solid-accent is selected) */}
+                      {background.overlaySpectrumColorMode === 'solid-accent' && (
+                        <div className="p-3 bg-zinc-950/45 border border-zinc-850 rounded space-y-2.5 animate-in fade-in slide-in-from-top-1 duration-200">
+                          <label className="block text-[10px] text-zinc-400 font-mono">Choose Custom Backdrop Accent</label>
+                          <div className="flex items-center space-x-3 bg-zinc-900 border border-zinc-800 p-2 rounded">
+                            <input
+                              type="color"
+                              value={background.overlaySpectrumCustomColor || '#00ff80'}
+                              onChange={(e) => setBackground(prev => ({ ...prev, overlaySpectrumCustomColor: e.target.value }))}
+                              className="w-8 h-8 border-0 bg-transparent rounded cursor-pointer animate-none animate-duration-0"
+                            />
+                            <div className="text-[10px] font-mono">
+                              <p className="text-white font-semibold">HEX Color Value</p>
+                              <p className="text-zinc-500">{(background.overlaySpectrumCustomColor || '#00ff80').toUpperCase()}</p>
+                            </div>
+                          </div>
+                        </div>
+                      )}
+
+                      {/* Pulse Speed Multiplier */}
+                      {background.overlaySpectrumColorMode && background.overlaySpectrumColorMode !== 'default' && (
+                        <div className="space-y-1.5 p-3 bg-zinc-950/45 border border-zinc-850 rounded animate-in fade-in duration-200">
+                          <div className="flex justify-between text-[10px] text-zinc-400 font-mono uppercase font-semibold">
+                            <span>Spectrum Pulse & Shift Speed</span>
+                            <span className="text-brand-green font-bold">{(background.overlaySpectrumPulseSpeed ?? 1.0).toFixed(1)}x</span>
+                          </div>
+                          <input
+                            type="range"
+                            min="0.1"
+                            max="3.0"
+                            step="0.1"
+                            value={background.overlaySpectrumPulseSpeed ?? 1.0}
+                            onChange={(e) => setBackground(prev => ({ ...prev, overlaySpectrumPulseSpeed: parseFloat(e.target.value) }))}
+                            className="w-full accent-brand-green cursor-pointer"
+                          />
+                          <p className="text-[8px] text-zinc-550 leading-relaxed font-sans text-left">
+                            Controls the color-shift velocity, phase-rotation speed, and wave-flow frequencies of backdrop overlays
+                          </p>
+                        </div>
+                      )}
+
+                      {/* Sync to Beat Toggle */}
+                      {background.overlaySpectrumColorMode && background.overlaySpectrumColorMode !== 'default' && (
+                        <div className="flex items-center justify-between p-2.5 bg-zinc-950/45 border border-zinc-850 rounded animate-in fade-in duration-200">
+                          <div className="text-left max-w-[75%]">
+                            <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Sync Color Rotation to Beat</span>
+                            <span className="text-[9px] text-zinc-500 block font-sans mt-0.5">Dynamically shift color hues and neon phases in sync with detected audio drum peaks</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setBackground(prev => ({ ...prev, overlaySpectrumSyncToBeat: !prev.overlaySpectrumSyncToBeat }))}
+                            className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                              background.overlaySpectrumSyncToBeat ? 'bg-brand-green' : 'bg-zinc-800'
+                            }`}
+                          >
+                            <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                              background.overlaySpectrumSyncToBeat ? 'translate-x-3.5' : 'translate-x-0'
+                            }`} />
+                          </button>
+                        </div>
+                      )}
+                    </div>
+                  </div>
+
                 </div>
               </motion.div>
             )}
@@ -12548,6 +13033,77 @@ export default function App() {
                               }));
                             }}
                           />
+
+                          {/* Web Lyrics Fetcher/Synchronizer Section */}
+                          <div className="mt-3 p-3 bg-zinc-950/60 rounded-lg border border-zinc-800/80 space-y-2.5 text-left">
+                            <div className="flex items-center justify-between border-b border-zinc-800/60 pb-1.5">
+                              <span className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-wide flex items-center gap-1.5">
+                                <Sparkles className="w-3.5 h-3.5 text-brand-green" />
+                                Sync Lyrics from Web Source
+                              </span>
+                              <span className="text-[8px] font-mono text-zinc-500">POWERED BY LRCLIB</span>
+                            </div>
+
+                            <div className="grid grid-cols-2 gap-2">
+                              <div>
+                                <label className="block text-[9px] font-mono text-zinc-500 mb-0.5">Track Title</label>
+                                <input
+                                  type="text"
+                                  placeholder="e.g. Blinding Lights"
+                                  value={lyricsSearchTitle}
+                                  onChange={(e) => setLyricsSearchTitle(e.target.value)}
+                                  className="w-full bg-zinc-900 border border-zinc-850 rounded px-2 py-1 text-[11px] text-white focus:outline-none focus:border-brand-green/50 placeholder:text-zinc-600"
+                                />
+                              </div>
+                              <div>
+                                <label className="block text-[9px] font-mono text-zinc-500 mb-0.5">Artist Name</label>
+                                <input
+                                  type="text"
+                                  placeholder="e.g. The Weeknd"
+                                  value={lyricsSearchArtist}
+                                  onChange={(e) => setLyricsSearchArtist(e.target.value)}
+                                  className="w-full bg-zinc-900 border border-zinc-850 rounded px-2 py-1 text-[11px] text-white focus:outline-none focus:border-brand-green/50 placeholder:text-zinc-600"
+                                />
+                              </div>
+                            </div>
+
+                            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 pt-1">
+                              <button
+                                type="button"
+                                onClick={handleFetchLyrics}
+                                disabled={isFetchingLyrics}
+                                className={`flex items-center justify-center space-x-1.5 px-3 py-1.5 rounded text-[10px] font-mono font-bold uppercase transition-all shadow-sm cursor-pointer ${
+                                  isFetchingLyrics
+                                    ? 'bg-zinc-800 text-zinc-500 border border-zinc-700'
+                                    : 'bg-brand-green/20 hover:bg-brand-green/30 text-brand-green-hover border border-brand-green/40 hover:border-brand-green/60'
+                                }`}
+                              >
+                                {isFetchingLyrics ? (
+                                  <>
+                                    <RefreshCw className="w-3 h-3 animate-spin text-brand-green" />
+                                    <span>Syncing...</span>
+                                  </>
+                                ) : (
+                                  <>
+                                    <Search className="w-3 h-3 text-brand-green" />
+                                    <span>Sync Web Lyrics</span>
+                                  </>
+                                )}
+                              </button>
+
+                              {lyricsFetchMessage && (
+                                <div className={`text-[10px] font-sans flex items-center space-x-1 max-w-full sm:max-w-[60%] truncate ${
+                                  lyricsFetchMessage.type === 'success' 
+                                    ? 'text-green-400 font-medium' 
+                                    : lyricsFetchMessage.type === 'error' 
+                                      ? 'text-red-400 font-medium' 
+                                      : 'text-zinc-400'
+                                }`}>
+                                  <span className="truncate">{lyricsFetchMessage.text}</span>
+                                </div>
+                              )}
+                            </div>
+                          </div>
                         </div>
                         
                         <div className="grid grid-cols-2 gap-3">
@@ -12616,9 +13172,9 @@ export default function App() {
                           </div>
                         </div>
 
-                        <div className="flex items-center space-x-3 pt-1 border-t border-zinc-800/50">
-                          <div className="flex-1 space-y-1.5">
-                            <label className="text-[9px] font-mono text-zinc-450 uppercase">Text Color</label>
+                        <div className="grid grid-cols-3 gap-3 pt-1 border-t border-zinc-800/50">
+                          <div className="space-y-1.5 text-left">
+                            <label className="text-[9px] font-mono text-zinc-450 uppercase block">Text Color</label>
                             <div className="flex items-center space-x-2">
                               <input
                                 type="color"
@@ -12629,9 +13185,23 @@ export default function App() {
                               <span className="text-[10px] font-mono text-zinc-400">{subtitles.color}</span>
                             </div>
                           </div>
-                          <div className="flex-1 space-y-1.5">
+                          
+                          <div className="space-y-1.5 text-left">
+                            <label className="text-[9px] font-mono text-zinc-450 uppercase block">Karaoke Fill</label>
+                            <div className="flex items-center space-x-2">
+                              <input
+                                type="color"
+                                value={subtitles.karaokeFillColor}
+                                onChange={(e) => setSubtitles(prev => ({ ...prev, karaokeFillColor: e.target.value }))}
+                                className="w-5 h-5 rounded cursor-pointer border-0 p-0 bg-transparent"
+                              />
+                              <span className="text-[10px] font-mono text-zinc-400">{subtitles.karaokeFillColor}</span>
+                            </div>
+                          </div>
+
+                          <div className="space-y-1.5 text-left">
                             <div className="flex justify-between items-center">
-                              <label className="text-[9px] font-mono text-zinc-450 uppercase">Glow Intensity ({subtitles.glowIntensity})</label>
+                              <label className="text-[9px] font-mono text-zinc-450 uppercase">Glow ({subtitles.glowIntensity})</label>
                               <input
                                 type="color"
                                 value={subtitles.glowColor}
@@ -12768,6 +13338,71 @@ export default function App() {
                             </div>
                           </div>
                         )}
+
+                        {/* Subtitle Sync Tuning Section */}
+                        <div className="space-y-3 pt-3 border-t border-zinc-800/50 text-left">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[10px] font-mono font-bold text-zinc-400 uppercase tracking-wide flex items-center gap-1.5">
+                              <Clock className="w-3.5 h-3.5 text-brand-green animate-pulse" />
+                              Lyrics Sync Tuning
+                            </label>
+                            <button
+                              type="button"
+                              onClick={handleAutoDetectSyncOffset}
+                              disabled={isDetectingOffset}
+                              className={`flex items-center gap-1.5 px-2 py-1 rounded text-[9px] font-mono font-bold uppercase transition-all border cursor-pointer ${
+                                isDetectingOffset
+                                  ? 'bg-zinc-800 text-zinc-500 border-zinc-700'
+                                  : 'bg-brand-green/10 hover:bg-brand-green/20 text-brand-green-hover border-brand-green/30 hover:border-brand-green/50'
+                              }`}
+                              title="Automatically align first lyric timestamp with the start of the audio onset"
+                            >
+                              {isDetectingOffset ? (
+                                <>
+                                  <RefreshCw className="w-2.5 h-2.5 animate-spin text-brand-green" />
+                                  <span>Analyzing Onset...</span>
+                                </>
+                              ) : (
+                                <>
+                                  <Sparkles className="w-2.5 h-2.5 text-brand-green" />
+                                  <span>Auto-Detect Sync</span>
+                                </>
+                              )}
+                            </button>
+                          </div>
+
+                          <div className="space-y-1.5">
+                            <div className="flex justify-between font-mono text-[9px] text-zinc-400">
+                              <span>Manual Sync Offset</span>
+                              <span className={`font-bold ${subtitles.syncOffset && subtitles.syncOffset > 0 ? 'text-amber-400' : subtitles.syncOffset && subtitles.syncOffset < 0 ? 'text-cyan-400' : 'text-zinc-400'}`}>
+                                {subtitles.syncOffset !== undefined ? (subtitles.syncOffset >= 0 ? `+${subtitles.syncOffset.toFixed(2)}` : subtitles.syncOffset.toFixed(2)) : '0.00'}s
+                              </span>
+                            </div>
+                            
+                            <div className="flex items-center space-x-3">
+                              <input
+                                type="range"
+                                min="-10"
+                                max="10"
+                                step="0.05"
+                                value={subtitles.syncOffset !== undefined ? subtitles.syncOffset : 0}
+                                onChange={(e) => setSubtitles(prev => ({ ...prev, syncOffset: parseFloat(e.target.value) }))}
+                                className="flex-1 h-1 bg-zinc-950 rounded-lg appearance-none cursor-pointer accent-brand-green"
+                              />
+                              <button
+                                type="button"
+                                onClick={() => setSubtitles(prev => ({ ...prev, syncOffset: 0 }))}
+                                className="px-1.5 py-0.5 rounded bg-zinc-900 border border-zinc-805 text-[8px] font-mono text-zinc-400 hover:text-white uppercase cursor-pointer"
+                                title="Reset manual sync offset to 0"
+                              >
+                                Reset
+                              </button>
+                            </div>
+                            <p className="text-[8px] text-zinc-500 font-sans leading-normal">
+                              Positive delay shifts lyrics later (+), while negative delay advances lyrics (-). Use Auto-Detect to align with music onset automatically.
+                            </p>
+                          </div>
+                        </div>
                       </div>
                     )}
                   </div>

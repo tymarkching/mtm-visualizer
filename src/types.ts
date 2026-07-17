@@ -330,6 +330,11 @@ export interface BackgroundSettings {
   overlayRaindrops?: boolean;
   overlayBokeh?: boolean;
   overlayVhsGlitch?: boolean;
+  // Advanced Spectrum Color Modes for backdrop overlays
+  overlaySpectrumColorMode?: 'default' | 'solid-accent' | 'reactive-rainbow' | 'neon-gradient' | 'warm-sunset' | 'deep-ocean' | 'acid-cyberpunk' | 'vibrant-aurora';
+  overlaySpectrumCustomColor?: string;
+  overlaySpectrumPulseSpeed?: number;
+  overlaySpectrumSyncToBeat?: boolean;
 }
 
 export interface OverlayImage {
@@ -410,6 +415,7 @@ export interface SubtitleSettings {
   outlineThickness: number;
   align: 'left' | 'center' | 'right';
   karaokeFillColor: string;
+  syncOffset?: number; // in seconds, positive means delay lyrics, negative means advance lyrics
 }
 
 export interface ExportSettings {
