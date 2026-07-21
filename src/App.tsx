@@ -36,10 +36,9 @@ import {
   ArrowRight,
   ArrowDownRight,
   ArrowUpRight,
-  Share2, ChevronDown, Mic, Radio, HelpCircle, Undo, Redo, Maximize2, Minimize2, Clock
+  Share2, ChevronDown, Mic, Radio, HelpCircle, Undo, Redo, Maximize2, Minimize2, Clock, Zap, ZapOff
 } from 'lucide-react';
 import localforage from 'localforage';
-import { guess } from 'web-audio-beat-detector';
 import GIF from 'gif.js';
 const gifWorker = '/gif.worker.js';
 import {
@@ -76,73 +75,151 @@ import { extractDominantColors } from './utils/color-extractor';
 const PRESETS = [
   {
     id: 'crimson-pulse',
-    name: 'Crimson Symmetrical',
-    description: 'Symmetrical red waveform pulsing over a dark crimson linear gradient background.',
+    name: 'Celestial Supernova 🌌 (Wow!)',
+    description: 'An ultimate multi-layered masterpiece combining concentric dual radials, neon geometric rings, and floating bubble particles in a premium cosmic style.',
     visuals: {
-      style: 'symmetrical-waveform' as VisualizerStyle,
-      primaryColor: '#ff003c',
-      secondaryColor: '#ff3b3b',
-      glowColor: '#ff003c',
-      glowStrength: 15,
-      lineThickness: 3,
-      sensitivity: 1.2,
-      fftSize: 1024,
-      barRoundness: 0,
-      barSpacing: 0,
+      style: 'concentric-dual-radials' as VisualizerStyle,
+      activeStyles: ['concentric-dual-radials', 'neon-geometric-ring', 'floating-bubble-particles'] as VisualizerStyle[],
+      primaryColor: '#ff007f',
+      secondaryColor: '#00ffff',
+      glowColor: '#7f00ff',
+      glowStrength: 25,
+      lineThickness: 3.5,
+      sensitivity: 1.4,
+      fftSize: 2048,
+      barRoundness: 4,
+      barSpacing: 2,
       placement: 'center' as const,
+      colorMode: 'gradient' as const,
+      barFrequencyCount: 128,
+      glitchFrequency: 0,
+      flashOnBeat: true,
+      flashIntensity: 0.8,
+      flashColorMode: 'glowColor' as const,
+      visualizerContrast: 1.5,
+      cameraShake: 0,
+      stylePositions: {
+        'concentric-dual-radials': {
+          xOffset: 50,
+          yOffset: 50,
+          verticalScale: 1.5,
+          horizontalScale: 4.0,
+          masterScale: 100,
+          horizontalSpan: 100,
+          springTension: 0.15,
+          springDampening: 0.7,
+        },
+        'neon-geometric-ring': {
+          xOffset: 50,
+          yOffset: 50,
+          verticalScale: 1.2,
+          horizontalScale: 2.0,
+          masterScale: 100,
+          horizontalSpan: 100,
+          springTension: 0.1,
+          springDampening: 0.8,
+        },
+        'floating-bubble-particles': {
+          xOffset: 50,
+          yOffset: 50,
+          verticalScale: 1.0,
+          horizontalScale: 2.5,
+          masterScale: 100,
+          horizontalSpan: 100,
+          springTension: 0.05,
+          springDampening: 0.9,
+        }
+      },
+      styleSettings: {
+        'concentric-dual-radials': {
+          xOffset: 50,
+          yOffset: 50,
+          scale: 1.5,
+          masterScale: 100,
+          horizontalSpan: 100,
+          springTension: 0.15,
+          springDampening: 0.7,
+        },
+        'neon-geometric-ring': {
+          xOffset: 50,
+          yOffset: 50,
+          scale: 1.2,
+          masterScale: 100,
+          horizontalSpan: 100,
+          springTension: 0.1,
+          springDampening: 0.8,
+        },
+        'floating-bubble-particles': {
+          xOffset: 50,
+          yOffset: 50,
+          scale: 1.0,
+          masterScale: 100,
+          horizontalSpan: 100,
+          springTension: 0.05,
+          springDampening: 0.9,
+        }
+      }
     },
     background: {
       type: 'gradient' as const,
       color: '#000000',
-      gradientStart: '#200108',
-      gradientEnd: '#050002',
+      gradientStart: '#0d001a',
+      gradientEnd: '#000211',
       imageUrl: null,
       videoUrl: null,
-      blur: 0,
-      opacity: 1.0,
+      blur: 2,
+      opacity: 0.9,
     },
     title: {
       visible: true,
-      text: 'CRIMSON PULSE',
-      artist: 'Audio Wave',
-      fontSize: 24,
-      color: '#ff003c',
+      text: 'CELESTIAL SUPERNOVA',
+      artist: 'Hyperdrive Engine',
+      fontSize: 26,
+      color: '#ff007f',
       fontFamily: 'Space Grotesk' as const,
       position: 'top-left' as const,
       fadeIn: true,
       offsetX: 10,
       offsetY: 10,
       textStyle: 'neon' as const,
-      colorBlend: false,
-      colorBlendEnd: '#ffffff',
+      colorBlend: true,
+      colorBlendEnd: '#00ffff',
       colorBlendMode: 'normal' as const,
     }
   },
   {
     id: 'cyberpunk-sunset',
-    name: 'Cyberpunk Sunset',
-    description: 'A neon-glow string line wave over a cyberpunk violet and neon-blue gradient canvas.',
+    name: 'Cyberpunk Aurora 🌆 (Wow!)',
+    description: 'A clean retro-futuristic synthwave vibe combining the scanning cyber laser horizon with sleek neon-glow string lines.',
     visuals: {
-      style: 'neon-glow-string' as VisualizerStyle,
+      style: 'cyber-laser-horizon' as VisualizerStyle,
+      activeStyles: ['cyber-laser-horizon', 'neon-glow-string'] as VisualizerStyle[],
       primaryColor: '#ff007f',
       secondaryColor: '#00ffff',
-      glowColor: '#ff007f',
-      glowStrength: 20,
-      lineThickness: 3,
-      sensitivity: 1.3,
+      glowColor: '#bc00dd',
+      glowStrength: 22,
+      lineThickness: 3.5,
+      sensitivity: 1.35,
       fftSize: 1024,
       barRoundness: 0,
       barSpacing: 0,
       placement: 'center' as const,
+      colorMode: 'gradient' as const,
+      barFrequencyCount: 96,
+      glitchFrequency: 0,
+      flashOnBeat: true,
+      flashIntensity: 0.6,
+      flashColorMode: 'primaryColor' as const,
+      cameraShake: 0,
     },
     background: {
       type: 'gradient' as const,
       color: '#000000',
-      gradientStart: '#2d004d',
-      gradientEnd: '#00032c',
+      gradientStart: '#1a0033',
+      gradientEnd: '#00011a',
       imageUrl: null,
       videoUrl: null,
-      blur: 0,
+      blur: 1,
       opacity: 0.9,
     },
     title: {
@@ -164,30 +241,38 @@ const PRESETS = [
   },
   {
     id: 'toxic-overdrive',
-    name: 'Toxic Overdrive',
-    description: 'An aggressive green area silhouette wave over an acid green to dark forest linear gradient.',
+    name: 'Toxic Matrix Overdrive ⚡ (Wow!)',
+    description: 'A clean digital matrix landscape layering a smooth area silhouette with column particles rising dynamically to frequency thresholds.',
     visuals: {
       style: 'smooth-area-silhouette' as VisualizerStyle,
+      activeStyles: ['smooth-area-silhouette', 'floating-matrix-particles'] as VisualizerStyle[],
       primaryColor: '#39ff14',
       secondaryColor: '#ccff00',
-      glowColor: '#39ff14',
-      glowStrength: 18,
-      lineThickness: 4,
+      glowColor: '#00ff66',
+      glowStrength: 20,
+      lineThickness: 3.0,
       sensitivity: 1.4,
       fftSize: 1024,
-      barRoundness: 0,
-      barSpacing: 0,
-      placement: 'center' as const,
+      barRoundness: 2,
+      barSpacing: 3,
+      placement: 'bottom' as const,
+      colorMode: 'gradient' as const,
+      barFrequencyCount: 64,
+      glitchFrequency: 0,
+      flashOnBeat: true,
+      flashIntensity: 0.7,
+      flashColorMode: 'glowColor' as const,
+      cameraShake: 0,
     },
     background: {
       type: 'gradient' as const,
-      color: '#021000',
-      gradientStart: '#0b1a03',
-      gradientEnd: '#020500',
+      color: '#010c00',
+      gradientStart: '#041501',
+      gradientEnd: '#000400',
       imageUrl: null,
       videoUrl: null,
       blur: 0,
-      opacity: 0.85,
+      opacity: 0.9,
     },
     title: {
       visible: true,
@@ -208,30 +293,38 @@ const PRESETS = [
   },
   {
     id: 'retro-80s-grid',
-    name: 'Retro 80s Ribbon',
-    description: 'A glowing plasma ribbon waveform over a retro neon-purple and indigo linear gradient.',
+    name: 'Retro Arcade Dream 🏎️ (Wow!)',
+    description: 'Vibrant 80s arcade styling wrapping a glowing plasma ribbon over a clean retro-arcade dot grid.',
     visuals: {
       style: 'plasma-glow-ribbon' as VisualizerStyle,
+      activeStyles: ['plasma-glow-ribbon', 'retro-arcade-dot-grid'] as VisualizerStyle[],
       primaryColor: '#ff00ff',
       secondaryColor: '#00ffff',
       glowColor: '#ff00ff',
-      glowStrength: 22,
+      glowStrength: 24,
       lineThickness: 3.5,
-      sensitivity: 1.2,
+      sensitivity: 1.25,
       fftSize: 2048,
       barRoundness: 0,
-      barSpacing: 0,
+      barSpacing: 2,
       placement: 'center' as const,
+      colorMode: 'gradient' as const,
+      barFrequencyCount: 128,
+      glitchFrequency: 0,
+      flashOnBeat: true,
+      flashIntensity: 0.5,
+      flashColorMode: 'glowColor' as const,
+      cameraShake: 0,
     },
     background: {
       type: 'gradient' as const,
       color: '#000000',
-      gradientStart: '#1f003a',
-      gradientEnd: '#03001e',
+      gradientStart: '#140026',
+      gradientEnd: '#010014',
       imageUrl: null,
       videoUrl: null,
       blur: 2,
-      opacity: 0.8,
+      opacity: 0.85,
     },
     title: {
       visible: true,
@@ -252,26 +345,34 @@ const PRESETS = [
   },
   {
     id: 'sakura-petal-breeze',
-    name: 'Sakura Fresnel',
-    description: 'Overlapping pink fresnel waves against a serene violet and deep rose linear gradient background.',
+    name: 'Sakura Zen Resonance 🌸 (Wow!)',
+    description: 'An elegant organic layout layering gentle pink fresnel wave curves with intertwined helix thread lines for a calm, graceful Zen mood.',
     visuals: {
       style: 'fresnel-wave' as VisualizerStyle,
+      activeStyles: ['fresnel-wave', 'dna-helix-thread'] as VisualizerStyle[],
       primaryColor: '#ffb7c5',
       secondaryColor: '#ffffff',
-      glowColor: '#ffb7c5',
-      glowStrength: 12,
-      lineThickness: 2,
-      sensitivity: 1.1,
+      glowColor: '#ff8da1',
+      glowStrength: 15,
+      lineThickness: 2.5,
+      sensitivity: 1.15,
       fftSize: 2048,
-      barRoundness: 0,
-      barSpacing: 0,
+      barRoundness: 99,
+      barSpacing: 4,
       placement: 'center' as const,
+      colorMode: 'gradient' as const,
+      barFrequencyCount: 64,
+      glitchFrequency: 0,
+      flashOnBeat: false,
+      flashIntensity: 0.3,
+      flashColorMode: 'glowColor' as const,
+      cameraShake: 0,
     },
     background: {
       type: 'gradient' as const,
-      color: '#1a0a1a',
-      gradientStart: '#240e24',
-      gradientEnd: '#0d040d',
+      color: '#120012',
+      gradientStart: '#1f031f',
+      gradientEnd: '#050005',
       imageUrl: null,
       videoUrl: null,
       blur: 0,
@@ -296,26 +397,34 @@ const PRESETS = [
   },
   {
     id: 'monochromatic-wave',
-    name: 'Monochromatic Wave',
-    description: 'Sleek silver flowing waves over a stark charcoal-to-black linear gradient.',
+    name: 'Liquid Platinum Mirror 💎 (Wow!)',
+    description: 'Sleek, high-contrast silver wave ribbons mirrored dynamically with flowing bezier wave echo ghost trails.',
     visuals: {
       style: 'waveform' as VisualizerStyle,
+      activeStyles: ['waveform', 'floating-wave-echo'] as VisualizerStyle[],
       primaryColor: '#ffffff',
-      secondaryColor: '#888888',
+      secondaryColor: '#777777',
       glowColor: '#ffffff',
-      glowStrength: 8,
+      glowStrength: 10,
       lineThickness: 2.5,
-      sensitivity: 1.1,
+      sensitivity: 1.2,
       fftSize: 2048,
       barRoundness: 0,
       barSpacing: 0,
       placement: 'center' as const,
+      colorMode: 'gradient' as const,
+      barFrequencyCount: 160,
+      glitchFrequency: 0,
+      flashOnBeat: true,
+      flashIntensity: 0.4,
+      flashColorMode: 'primaryColor' as const,
+      cameraShake: 0,
     },
     background: {
       type: 'gradient' as const,
-      color: '#050505',
-      gradientStart: '#1a1a1a',
-      gradientEnd: '#020202',
+      color: '#030303',
+      gradientStart: '#141414',
+      gradientEnd: '#000000',
       imageUrl: null,
       videoUrl: null,
       blur: 0,
@@ -340,30 +449,38 @@ const PRESETS = [
   },
   {
     id: 'nebula-mountain-matrix',
-    name: 'Nebula Wave Echo',
-    description: 'Deep blue floating wave echoes with ghost trails over an outer-space cosmic violet linear gradient.',
+    name: 'Nebula Warp Tunnel 🌌 (Wow!)',
+    description: 'An immersive space travel effect combining a cosmic neon concentric tunnel with circular outer orbiting spectrum blocks.',
     visuals: {
-      style: 'floating-wave-echo' as VisualizerStyle,
-      primaryColor: '#00d2ff',
-      secondaryColor: '#9d00ff',
+      style: 'neon-tunnel' as VisualizerStyle,
+      activeStyles: ['neon-tunnel', 'circular-orbit'] as VisualizerStyle[],
+      primaryColor: '#00ffff',
+      secondaryColor: '#8a00ff',
       glowColor: '#00d2ff',
-      glowStrength: 15,
+      glowStrength: 25,
       lineThickness: 2.5,
-      sensitivity: 1.3,
+      sensitivity: 1.35,
       fftSize: 1024,
-      barRoundness: 0,
-      barSpacing: 0,
+      barRoundness: 4,
+      barSpacing: 2,
       placement: 'center' as const,
+      colorMode: 'gradient' as const,
+      barFrequencyCount: 128,
+      glitchFrequency: 0,
+      flashOnBeat: true,
+      flashIntensity: 0.7,
+      flashColorMode: 'glowColor' as const,
+      cameraShake: 0,
     },
     background: {
       type: 'gradient' as const,
       color: '#000000',
-      gradientStart: '#0d001a',
-      gradientEnd: '#010005',
+      gradientStart: '#080017',
+      gradientEnd: '#000005',
       imageUrl: null,
       videoUrl: null,
-      blur: 5,
-      opacity: 0.9,
+      blur: 4,
+      opacity: 0.95,
     },
     title: {
       visible: true,
@@ -384,30 +501,38 @@ const PRESETS = [
   },
   {
     id: 'synthwave-horizon',
-    name: 'Synthwave Reflected',
-    description: 'A reflected glow ribbon wave over a sunset-orange and warm amber linear gradient background.',
+    name: 'Volcanic Overlord 🔥 (Wow!)',
+    description: 'An intense, highly reactive volcanic aesthetic pairing mirrored mountain silhouettes with sweeping coordinate prism laser scanners.',
     visuals: {
-      style: 'reflected-glow-ribbon' as VisualizerStyle,
-      primaryColor: '#ff7700',
-      secondaryColor: '#ff0055',
-      glowColor: '#ff7700',
-      glowStrength: 18,
-      lineThickness: 3,
-      sensitivity: 1.4,
-      fftSize: 1024,
+      style: 'reflected-mountain-silhouette' as VisualizerStyle,
+      activeStyles: ['reflected-mountain-silhouette', 'prism-laser-scanner'] as VisualizerStyle[],
+      primaryColor: '#ff4d00',
+      secondaryColor: '#ffd700',
+      glowColor: '#ff0000',
+      glowStrength: 26,
+      lineThickness: 3.5,
+      sensitivity: 1.45,
+      fftSize: 2048,
       barRoundness: 0,
-      barSpacing: 0,
+      barSpacing: 2,
       placement: 'center' as const,
+      colorMode: 'gradient' as const,
+      barFrequencyCount: 128,
+      glitchFrequency: 0.1,
+      flashOnBeat: true,
+      flashIntensity: 0.9,
+      flashColorMode: 'glowColor' as const,
+      cameraShake: 0,
     },
     background: {
       type: 'gradient' as const,
-      color: '#10051a',
-      gradientStart: '#3a0a00',
-      gradientEnd: '#0f0200',
+      color: '#0c0000',
+      gradientStart: '#1d0101',
+      gradientEnd: '#020000',
       imageUrl: null,
       videoUrl: null,
       blur: 2,
-      opacity: 0.8,
+      opacity: 0.9,
     },
     title: {
       visible: true,
@@ -1289,8 +1414,6 @@ export default function App() {
   const [exportedVideoUrl, setExportedVideoUrl] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
 
-  const [isDetectingBpm, setIsDetectingBpm] = useState<boolean>(false);
-
   // Tap Tempo history state
   const [tapTimestamps, setTapTimestamps] = useState<number[]>([]);
 
@@ -1454,10 +1577,17 @@ export default function App() {
 
   // Apply Preset Config
   const loadPreset = (preset: typeof PRESETS[0]) => {
-    setVisuals(preset.visuals);
+    const visualsToSet = {
+      ...preset.visuals,
+      activeStyles: preset.visuals.activeStyles || [preset.visuals.style]
+    };
+    setVisuals(visualsToSet);
     setBackground(preset.background);
     setTitleOverlay(preset.title);
     setParticlesSet(prev => ({ ...prev, enabled: false }));
+    
+    // Auto-switch to the WAVE Tab (visuals) to see the applied settings immediately
+    setActiveTab('visuals');
     
     // Update track names to match preset titles if no file is uploaded
     if (!audioTrack.file) {
@@ -1780,6 +1910,8 @@ export default function App() {
       const analyser = ctx.createAnalyser();
       analyser.fftSize = visuals.fftSize;
       analyser.smoothingTimeConstant = typeof visuals.smoothing === 'number' ? visuals.smoothing : 0.8;
+      analyser.minDecibels = -85;
+      analyser.maxDecibels = -10;
 
       // Initialize 10-Band Equalizer Filter Chain
       const eqFrequencies = [32, 64, 125, 250, 500, 1000, 2000, 4000, 8000, 16000];
@@ -3157,13 +3289,29 @@ export default function App() {
     if (e.dataTransfer.files && e.dataTransfer.files.length > 0) {
       const filesArray = Array.from(e.dataTransfer.files) as File[];
       
-      // If multiple files are dropped, filter for audio files
-      const audioFiles = filesArray.filter(file => file.type.startsWith('audio/'));
+      const isAudioFile = (file: File) => {
+        const type = file.type.toLowerCase();
+        const name = file.name.toLowerCase();
+        return type.startsWith('audio/') || 
+               name.endsWith('.mp3') || 
+               name.endsWith('.wav') || 
+               name.endsWith('.flac') || 
+               name.endsWith('.ogg') || 
+               name.endsWith('.m4a') || 
+               name.endsWith('.mp4');
+      };
+
+      // Filter for audio files
+      const audioFiles = filesArray.filter(isAudioFile);
       
       if (audioFiles.length > 0) {
-        setPlaylist(audioFiles);
-        setCurrentTrackIndex(0);
-        loadAudioFile(audioFiles[0]);
+        const isPlaylistEmpty = playlist.length === 0;
+        const newPlaylist = [...playlist, ...audioFiles];
+        setPlaylist(newPlaylist);
+        if (isPlaylistEmpty) {
+          setCurrentTrackIndex(0);
+          loadAudioFile(audioFiles[0]);
+        }
       } else {
         const file = filesArray[0];
         const type = file.type;
@@ -3373,27 +3521,34 @@ export default function App() {
       const arrayBuffer = await audioTrack.file.arrayBuffer();
       const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
       const ctx = new AudioContextClass();
-      const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
       
-      // Find actual audio onset
-      const channels = audioBuffer.numberOfChannels;
-      const sampleRate = audioBuffer.sampleRate;
-      const length = audioBuffer.length;
-      const scanLimit = Math.min(length, sampleRate * 30); // scan first 30 seconds of audio
       let onsetTime = 0;
-      const threshold = 0.015; // standard amplitude threshold
+      let decoded = false;
+      try {
+        const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
+        decoded = true;
+        
+        // Find actual audio onset
+        const channels = audioBuffer.numberOfChannels;
+        const sampleRate = audioBuffer.sampleRate;
+        const length = audioBuffer.length;
+        const scanLimit = Math.min(length, sampleRate * 30); // scan first 30 seconds of audio
+        const threshold = 0.015; // standard amplitude threshold
 
-      for (let i = 0; i < scanLimit; i += 50) { // step by 50 samples for higher precision/performance
-        let found = false;
-        for (let c = 0; c < channels; c++) {
-          const data = audioBuffer.getChannelData(c);
-          if (Math.abs(data[i]) >= threshold) {
-            onsetTime = i / sampleRate;
-            found = true;
-            break;
+        for (let i = 0; i < scanLimit; i += 50) { // step by 50 samples for higher precision/performance
+          let found = false;
+          for (let c = 0; c < channels; c++) {
+            const data = audioBuffer.getChannelData(c);
+            if (Math.abs(data[i]) >= threshold) {
+              onsetTime = i / sampleRate;
+              found = true;
+              break;
+            }
           }
+          if (found) break;
         }
-        if (found) break;
+      } catch (decodeErr: any) {
+        console.warn('Could not decode audio data for onset detection, using fallback onset of 0s:', decodeErr.message || decodeErr);
       }
 
       await ctx.close();
@@ -3410,14 +3565,16 @@ export default function App() {
       }));
 
       setLyricsFetchMessage({
-        text: `Detected audio onset at ${onsetTime.toFixed(2)}s. First lyric starts at ${firstLyricTime.toFixed(2)}s. Sync Offset auto-tuned to ${roundedOffset >= 0 ? '+' : ''}${roundedOffset}s!`,
-        type: 'success'
+        text: decoded 
+          ? `Detected audio onset at ${onsetTime.toFixed(2)}s. First lyric starts at ${firstLyricTime.toFixed(2)}s. Sync Offset auto-tuned to ${roundedOffset >= 0 ? '+' : ''}${roundedOffset}s!`
+          : `Audio decoding bypassed or failed. Offset auto-tuned assuming standard 0.0s onset (Offset: ${roundedOffset}s).`,
+        type: decoded ? 'success' : 'info'
       });
     } catch (err: any) {
-      console.error('Error detecting audio onset:', err);
+      console.warn('Error detecting audio onset:', err);
       setLyricsFetchMessage({
-        text: `Onset detection failed: ${err.message || 'Error decoding audio'}`,
-        type: 'error'
+        text: `Onset detection bypassed: ${err.message || 'Error decoding audio'}`,
+        type: 'info'
       });
     } finally {
       setIsDetectingOffset(false);
@@ -3470,9 +3627,13 @@ export default function App() {
   const handleManualAudioUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
     if (e.target.files && e.target.files.length > 0) {
       const filesArray = Array.from(e.target.files) as File[];
-      setPlaylist(filesArray);
-      setCurrentTrackIndex(0);
-      loadAudioFile(filesArray[0]);
+      const isPlaylistEmpty = playlist.length === 0;
+      const newPlaylist = [...playlist, ...filesArray];
+      setPlaylist(newPlaylist);
+      if (isPlaylistEmpty) {
+        setCurrentTrackIndex(0);
+        loadAudioFile(filesArray[0]);
+      }
     }
   };
 
@@ -3549,29 +3710,6 @@ export default function App() {
       }
       return newTaps;
     });
-  };
-
-  const handleAutoDetectTempo = async () => {
-    if (!audioTrack.file) return;
-    setIsDetectingBpm(true);
-    try {
-      const arrayBuffer = await audioTrack.file.arrayBuffer();
-      const AudioContextClass = window.AudioContext || (window as any).webkitAudioContext;
-      const ctx = new AudioContextClass();
-      const audioBuffer = await ctx.decodeAudioData(arrayBuffer);
-      const { bpm } = await guess(audioBuffer);
-      
-      setVisuals(prev => ({
-        ...prev,
-        beatLockBpm: Math.round(bpm),
-        beatLock: true
-      }));
-      await ctx.close();
-    } catch (err) {
-      console.error("Failed to detect BPM:", err);
-    } finally {
-      setIsDetectingBpm(false);
-    }
   };
 
   // Performance tracking refs to prevent continuous teardown & recreation of the render loop
@@ -3727,8 +3865,10 @@ export default function App() {
     let currentZoomAmt = 0;
     let currentVignettePulseAmt = 0;
     let currentStrobeAmt = 0;
+    let strobeBeatCounter = 0;
     let accumulatedAutoRotation = 0;
     let lastAutoRotateTime = performance.now();
+    let currentDuckingFactor = 1.0;
 
     // Persistent interpolation arrays for motion smoothing
     let smoothAnalyser: Float32Array | null = null;
@@ -3849,8 +3989,9 @@ export default function App() {
         // Fallback default idle audio values if not active
         const mockTime = Date.now() / 1500;
         for (let i = 0; i < analyserData.length; i++) {
-          analyserData[i] = Math.max(0, Math.sin(mockTime * 3 + i * 0.1) * 60 + 40);
-          waveformData[i] = Math.sin(mockTime * 5 + i * 0.25) * 45 + 128;
+          const rawWave = Math.sin(mockTime * 3 + i * 0.12);
+          analyserData[i] = Math.max(0, Math.round((rawWave - 0.25) * 110)); // drops completely to 0 on troughs
+          waveformData[i] = Math.round(Math.sin(mockTime * 5 + i * 0.25) * 45 + 128);
         }
         
         if (isBeatLocked) {
@@ -3866,6 +4007,10 @@ export default function App() {
             beatIntensity = 0.5;
           }
         }
+      }
+
+      if (isBeat) {
+        strobeBeatCounter++;
       }
 
       if (activeTabRef.current === 'sfx') {
@@ -3918,6 +4063,87 @@ export default function App() {
         window.dispatchEvent(new CustomEvent('audio-visualizer-beat', { detail: { beatIntensity } }));
       }
 
+      // Vocal Ducking logic
+      if (visualsRef.current?.vocalDucking && trackGainNodeRef.current && audioContextRef.current && analyserData && analyserData.length > 0) {
+        const duckingBand = visualsRef.current.vocalDuckingBand ?? 2; // 1 = Low-Mid, 2 = Mid, 3 = High-Mid, 4 = Wide
+        const sensitivity = visualsRef.current.vocalDuckingSensitivity ?? 0.5;
+        const strength = visualsRef.current.vocalDuckingStrength ?? 0.6; // reduce up to 60% of volume
+
+        // Determine FFT bin index range for speech frequencies
+        const N = analyserData.length;
+        let startIndex = 0;
+        let endIndex = 0;
+
+        if (duckingBand === 1) {
+          // Low-Mid: 120 Hz to 500 Hz (deep baritone / bass-mid frequencies)
+          startIndex = Math.floor(120 * N / 22050);
+          endIndex = Math.ceil(500 * N / 22050);
+        } else if (duckingBand === 3) {
+          // High-Mid: 2000 Hz to 4000 Hz (clarity, presence, high pitches)
+          startIndex = Math.floor(2000 * N / 22050);
+          endIndex = Math.ceil(4000 * N / 22050);
+        } else if (duckingBand === 4) {
+          // Wide Vocal: 120 Hz to 4000 Hz
+          startIndex = Math.floor(120 * N / 22050);
+          endIndex = Math.ceil(4000 * N / 22050);
+        } else {
+          // Mid-Range (Default): 500 Hz to 2000 Hz (core speech resonance)
+          startIndex = Math.floor(500 * N / 22050);
+          endIndex = Math.ceil(2000 * N / 22050);
+        }
+
+        // Clamp indices
+        startIndex = Math.max(0, Math.min(N - 1, startIndex));
+        endIndex = Math.max(startIndex + 1, Math.min(N, endIndex));
+
+        // Calculate peak amplitude in the monitored frequency band
+        let maxVal = 0;
+        for (let i = startIndex; i < endIndex; i++) {
+          if (analyserData[i] > maxVal) {
+            maxVal = analyserData[i];
+          }
+        }
+
+        const normVal = maxVal / 255;
+        // Higher sensitivity means lower threshold to trigger ducking
+        const threshold = Math.max(0.01, 1.0 - sensitivity * 0.95);
+
+        let targetDucking = 1.0;
+        if (normVal > threshold) {
+          const excess = (normVal - threshold) / (1.0 - threshold);
+          targetDucking = 1.0 - (excess * strength);
+        }
+
+        // Smoothly interpolate currentDuckingFactor
+        if (targetDucking < currentDuckingFactor) {
+          // Fast attack
+          currentDuckingFactor += (targetDucking - currentDuckingFactor) * 0.35;
+        } else {
+          // Slower release
+          currentDuckingFactor += (targetDucking - currentDuckingFactor) * 0.08;
+        }
+
+        // Clamp
+        currentDuckingFactor = Math.max(1.0 - strength, Math.min(1.0, currentDuckingFactor));
+
+        // Apply ducking to trackGainNode
+        const nominalVolume = isMutedRef.current ? 0 : volumeRef.current;
+        trackGainNodeRef.current.gain.setValueAtTime(
+          nominalVolume * currentDuckingFactor,
+          audioContextRef.current.currentTime
+        );
+      } else if (trackGainNodeRef.current && audioContextRef.current) {
+        // If ducking is disabled or not set, ensure it is at full nominal volume
+        if (currentDuckingFactor !== 1.0) {
+          currentDuckingFactor = 1.0;
+          const nominalVolume = isMutedRef.current ? 0 : volumeRef.current;
+          trackGainNodeRef.current.gain.setValueAtTime(
+            nominalVolume,
+            audioContextRef.current.currentTime
+          );
+        }
+      }
+
       // Calculate dynamic average weights for sticker/background/shake beat reactions in real-time
       let avgBass = 0;
       let avgMain = 0;
@@ -3948,7 +4174,7 @@ export default function App() {
 
       // Camera Beat Shake translation logic decays per frame or boosts on transient beats
       if (isBeat) {
-        let shakeMultiplier = visualsRef.current.cameraShake !== undefined ? visualsRef.current.cameraShake : 5;
+        let shakeMultiplier = visualsRef.current.cameraShake !== undefined ? visualsRef.current.cameraShake : 0;
         if (visualsRef.current.earthquakeCameraShake && shakeMultiplier < 5) {
           shakeMultiplier = 5; // ensure base shake for earthquake if slider is too low
         }
@@ -5361,11 +5587,20 @@ export default function App() {
 
       // 7.5. Strobe Effect and CRT Scanlines
       if (visualsRef.current?.strobeEffect) {
+        let shouldTriggerStrobe = false;
         if (isBeat) {
+          const freq = visualsRef.current?.strobeFrequency || 1;
+          if (strobeBeatCounter % freq === 0) {
+            shouldTriggerStrobe = true;
+          }
+        }
+
+        if (shouldTriggerStrobe) {
           const intensity = visualsRef.current?.strobeIntensity !== undefined ? visualsRef.current.strobeIntensity : 0.8;
           currentStrobeAmt = beatIntensity * intensity;
         } else {
-          currentStrobeAmt *= 0.85; // fast decay
+          const decay = visualsRef.current?.strobeFadeDuration !== undefined ? visualsRef.current.strobeFadeDuration : 0.85;
+          currentStrobeAmt *= decay; // configurable decay
         }
         if (currentStrobeAmt > 0.05) {
           ctx.save();
@@ -5460,7 +5695,7 @@ export default function App() {
 
         ctx.textAlign = tAlign;
         ctx.textBaseline = tBaseline;
-        ctx.fillText('Made with tymark', tx, ty);
+        ctx.fillText('Made with Chaotic Fart Studio', tx, ty);
         ctx.restore();
       }
 
@@ -6476,6 +6711,29 @@ export default function App() {
               <div className="flex items-center justify-between sm:justify-end gap-3">
                 <button
                   type="button"
+                  onClick={() => setVisuals(prev => ({ ...prev, highResolutionPreview: !prev.highResolutionPreview }))}
+                  className={`flex items-center space-x-1 px-2 py-0.5 rounded transition-all text-[10px] font-mono font-semibold cursor-pointer active:scale-95 shrink-0 ${
+                    visuals.highResolutionPreview
+                      ? 'bg-brand-green/20 text-brand-green border border-brand-green shadow-[0_0_8px_rgba(184,238,2,0.15)] hover:bg-brand-green/25 hover:text-brand-green-hover'
+                      : 'bg-zinc-950 text-zinc-400 border border-zinc-800 hover:border-brand-green hover:text-brand-green-hover hover:shadow-brand-green/20 hover:bg-brand-green/10'
+                  }`}
+                  title={visuals.highResolutionPreview ? "Switch to standard-res preview (better performance)" : "Switch to high-res preview (crisp lines)"}
+                >
+                  {visuals.highResolutionPreview ? (
+                    <>
+                      <Zap className="w-3 h-3 text-brand-green animate-pulse" />
+                      <span>HD PREVIEW: ON</span>
+                    </>
+                  ) : (
+                    <>
+                      <ZapOff className="w-3 h-3" />
+                      <span>HD PREVIEW: OFF</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
                   onClick={handleRandomizeStyles}
                   className="flex items-center space-x-1 px-2 py-0.5 rounded bg-zinc-950 text-zinc-400 border border-zinc-800 hover:border-brand-green hover:text-brand-green-hover hover:shadow-brand-green/20 hover:bg-brand-green/10 transition-all text-[10px] font-mono font-semibold cursor-pointer active:scale-95 shrink-0"
                   title="Randomize everything"
@@ -7011,99 +7269,6 @@ export default function App() {
 
 
 
-                {/* Background Music Track Controls */}
-                <div className="bg-zinc-900 border border-zinc-850 p-4 rounded-lg space-y-3 text-left">
-                  <div className="flex items-center justify-between">
-                    <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider font-mono flex items-center space-x-2">
-                      <Volume2 className="w-3.5 h-3.5 text-brand-green" />
-                      <span>Background Music Routing Mix</span>
-                    </span>
-                  </div>
-
-                  <div className="flex items-center space-x-3 bg-zinc-950 border border-zinc-900 px-3 py-2.5 rounded-lg font-sans">
-                    <button
-                      type="button"
-                      onClick={() => setIsMuted(prev => !prev)}
-                      className={`px-2.5 py-1.5 rounded text-[10px] font-semibold font-mono tracking-wide transition-all cursor-pointer flex items-center space-x-1.5 flex-shrink-0 ${
-                        isMuted
-                          ? 'bg-red-955 border border-red-800 text-red-400'
-                          : 'bg-zinc-900 border border-zinc-800 hover:border-zinc-750 text-zinc-300'
-                      }`}
-                    >
-                      {isMuted ? (
-                        <>
-                          <VolumeX className="w-3.5 h-3.5 text-red-450 animate-pulse" />
-                          <span>MUTED</span>
-                        </>
-                      ) : (
-                        <>
-                          <Volume2 className="w-3.5 h-3.5 text-zinc-400" />
-                          <span>MUTE</span>
-                        </>
-                      )}
-                    </button>
-                    <div className="flex-1 space-y-1">
-                      <div className="flex justify-between font-mono text-[9px] text-zinc-500">
-                        <span>Music Volume</span>
-                        <span className="text-zinc-200 font-semibold">{Math.round(volume * 100)} %</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="0"
-                        max="1"
-                        step="0.01"
-                        value={volume}
-                        onChange={(e) => {
-                          setVolume(parseFloat(e.target.value));
-                          setIsMuted(false);
-                        }}
-                        className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none"
-                      />
-                    </div>
-                  </div>
-
-                  {/* Fade In & Fade Out Sliders */}
-                  <div className="space-y-2.5 pt-3 border-t border-zinc-850/50">
-                    <div className="space-y-1">
-                      <div className="flex justify-between font-mono text-[9px] text-zinc-400">
-                        <span>FADE IN DURATION</span>
-                        <span className="text-zinc-200 font-semibold">
-                          {visuals.fadeInDuration !== undefined ? visuals.fadeInDuration : 0}s
-                        </span>
-                      </div>
-                      <input
-                        type="range"
-                        min="0"
-                        max="10"
-                        step="0.5"
-                        value={visuals.fadeInDuration !== undefined ? visuals.fadeInDuration : 0}
-                        onChange={(e) => setVisuals(prev => ({ ...prev, fadeInDuration: parseFloat(e.target.value) }))}
-                        className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-950 rounded-lg appearance-none"
-                      />
-                    </div>
-
-                    <div className="space-y-1">
-                      <div className="flex justify-between font-mono text-[9px] text-zinc-400">
-                        <span>FADE OUT DURATION</span>
-                        <span className="text-zinc-200 font-semibold">
-                          {visuals.fadeOutDuration !== undefined ? visuals.fadeOutDuration : 0}s
-                        </span>
-                      </div>
-                      <input
-                        type="range"
-                        min="0"
-                        max="10"
-                        step="0.5"
-                        value={visuals.fadeOutDuration !== undefined ? visuals.fadeOutDuration : 0}
-                        onChange={(e) => setVisuals(prev => ({ ...prev, fadeOutDuration: parseFloat(e.target.value) }))}
-                        className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-950 rounded-lg appearance-none"
-                      />
-                    </div>
-                  </div>
-                </div>
-
-
-
                 {/* VISIBLE TITLE TEXT OVERLAYS SETTINGS */}
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
@@ -7319,6 +7484,97 @@ export default function App() {
                       </div>
                     </div>
                   )}
+                </div>
+
+                {/* Background Music Track Controls */}
+                <div className="bg-zinc-900 border border-zinc-850 p-4 rounded-lg space-y-3 text-left">
+                  <div className="flex items-center justify-between">
+                    <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider font-mono flex items-center space-x-2">
+                      <Volume2 className="w-3.5 h-3.5 text-brand-green" />
+                      <span>Background Music Routing Mix</span>
+                    </span>
+                  </div>
+
+                  <div className="flex items-center space-x-3 bg-zinc-950 border border-zinc-900 px-3 py-2.5 rounded-lg font-sans">
+                    <button
+                      type="button"
+                      onClick={() => setIsMuted(prev => !prev)}
+                      className={`px-2.5 py-1.5 rounded text-[10px] font-semibold font-mono tracking-wide transition-all cursor-pointer flex items-center space-x-1.5 flex-shrink-0 ${
+                        isMuted
+                          ? 'bg-red-955 border border-red-800 text-red-400'
+                          : 'bg-zinc-900 border border-zinc-800 hover:border-zinc-750 text-zinc-300'
+                      }`}
+                    >
+                      {isMuted ? (
+                        <>
+                          <VolumeX className="w-3.5 h-3.5 text-red-450 animate-pulse" />
+                          <span>MUTED</span>
+                        </>
+                      ) : (
+                        <>
+                          <Volume2 className="w-3.5 h-3.5 text-zinc-400" />
+                          <span>MUTE</span>
+                        </>
+                      )}
+                    </button>
+                    <div className="flex-1 space-y-1">
+                      <div className="flex justify-between font-mono text-[9px] text-zinc-500">
+                        <span>Music Volume</span>
+                        <span className="text-zinc-200 font-semibold">{Math.round(volume * 100)} %</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="1"
+                        step="0.01"
+                        value={volume}
+                        onChange={(e) => {
+                          setVolume(parseFloat(e.target.value));
+                          setIsMuted(false);
+                        }}
+                        className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none"
+                      />
+                    </div>
+                  </div>
+
+                  {/* Fade In & Fade Out Sliders */}
+                  <div className="space-y-2.5 pt-3 border-t border-zinc-850/50">
+                    <div className="space-y-1">
+                      <div className="flex justify-between font-mono text-[9px] text-zinc-400">
+                        <span>FADE IN DURATION</span>
+                        <span className="text-zinc-200 font-semibold">
+                          {visuals.fadeInDuration !== undefined ? visuals.fadeInDuration : 0}s
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="10"
+                        step="0.5"
+                        value={visuals.fadeInDuration !== undefined ? visuals.fadeInDuration : 0}
+                        onChange={(e) => setVisuals(prev => ({ ...prev, fadeInDuration: parseFloat(e.target.value) }))}
+                        className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-950 rounded-lg appearance-none"
+                      />
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="flex justify-between font-mono text-[9px] text-zinc-400">
+                        <span>FADE OUT DURATION</span>
+                        <span className="text-zinc-200 font-semibold">
+                          {visuals.fadeOutDuration !== undefined ? visuals.fadeOutDuration : 0}s
+                        </span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0"
+                        max="10"
+                        step="0.5"
+                        value={visuals.fadeOutDuration !== undefined ? visuals.fadeOutDuration : 0}
+                        onChange={(e) => setVisuals(prev => ({ ...prev, fadeOutDuration: parseFloat(e.target.value) }))}
+                        className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-950 rounded-lg appearance-none"
+                      />
+                    </div>
+                  </div>
                 </div>
 
               </motion.div>
@@ -8271,37 +8527,13 @@ export default function App() {
                             className="w-full accent-brand-green cursor-pointer"
                           />
                         </div>
-                        <div className="grid grid-cols-2 gap-2">
+                        <div className="pt-0.5">
                           <button
                             type="button"
                             onClick={handleTapTempo}
-                            className="w-full py-2 px-2.5 bg-zinc-950 text-zinc-400 border border-zinc-800 hover:border-brand-green hover:text-brand-green-hover hover:shadow-brand-green/20 hover:bg-brand-green/10 rounded text-[10px] font-bold font-mono tracking-wider transition-all duration-150 active:scale-95 shadow-sm uppercase cursor-pointer"
+                            className="w-full py-2 px-2.5 bg-zinc-950 text-zinc-400 border border-zinc-800 hover:border-brand-green hover:text-brand-green-hover hover:shadow-brand-green/20 hover:bg-brand-green/10 rounded text-[10px] font-bold font-mono tracking-wider transition-all duration-150 active:scale-95 shadow-sm uppercase cursor-pointer text-center"
                           >
                             Tap Tempo
-                          </button>
-                          <button
-                            type="button"
-                            onClick={handleAutoDetectTempo}
-                            disabled={!audioTrack.file || isDetectingBpm}
-                            className={`w-full py-2 px-2.5 flex items-center justify-center space-x-1 border rounded text-[10px] font-bold font-mono tracking-wider transition-all duration-150 uppercase shadow-sm ${
-                              !audioTrack.file 
-                                ? 'bg-zinc-900/50 text-zinc-600 border-zinc-800/50 cursor-not-allowed' 
-                                : isDetectingBpm
-                                  ? 'bg-lime-900/50 text-lime-300 border-lime-800/50 cursor-wait'
-                                  : 'bg-zinc-950 text-zinc-400 border border-zinc-800 hover:border-brand-green hover:text-brand-green-hover hover:shadow-brand-green/20 hover:bg-brand-green/10 cursor-pointer active:scale-95'
-                            }`}
-                          >
-                            {isDetectingBpm ? (
-                              <>
-                                <RefreshCw className="w-3 h-3 animate-spin" />
-                                <span>Detecting...</span>
-                              </>
-                            ) : (
-                              <>
-                                <Wand2 className="w-3 h-3" />
-                                <span>Auto-detect</span>
-                              </>
-                            )}
                           </button>
                         </div>
                       </div>
@@ -8446,6 +8678,48 @@ export default function App() {
                         className="w-full accent-brand-green cursor-pointer"
                       />
                       <span className="text-[8px] text-zinc-500 block">Modulates base line thickness and glow strength dynamically to fit ambient vs high-intensity music style styles</span>
+                    </div>
+
+                    <div className="space-y-1 border-t border-zinc-850 pt-2 bg-transparent">
+                      <div className="flex justify-between font-mono text-[9px] text-zinc-400 font-bold">
+                        <span>WAVEFORM OVERDRIVE / DISTORTION</span>
+                        <span className="text-white font-semibold">
+                          {visuals.waveformOverdrive && visuals.waveformOverdrive > 1.0 
+                            ? `${visuals.waveformOverdrive.toFixed(1)}x` 
+                            : 'OFF'}
+                        </span>
+                      </div>
+                      <input
+                        id="visualizer-overdrive-slider"
+                        type="range"
+                        min="1.0"
+                        max="15.0"
+                        step="0.1"
+                        value={visuals.waveformOverdrive !== undefined ? visuals.waveformOverdrive : 1.0}
+                        onChange={(e) => setVisuals(prev => ({ ...prev, waveformOverdrive: parseFloat(e.target.value) }))}
+                        className="w-full accent-brand-green cursor-pointer"
+                      />
+                      <span className="text-[8px] text-zinc-500 block">Non-linearly boosts waveshape frequency / time-domain values to produce aggressive, sharp clipping aesthetics</span>
+
+                      {visuals.waveformOverdrive && visuals.waveformOverdrive > 1.0 && (
+                        <div className="flex items-center justify-between p-1.5 bg-[#050508]/40 border-l border-brand-green/80 rounded mt-1.5">
+                          <div className="max-w-[75%]">
+                            <span className="font-semibold text-zinc-400 block font-sans text-[10px]">Overdrive Gain Scaling</span>
+                            <span className="text-[8px] text-zinc-500 block font-sans mt-0.5">Amplify signal before distortion to maximize clipping harshness</span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setVisuals(prev => ({ ...prev, overdriveGainScaling: !prev.overdriveGainScaling }))}
+                            className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                              visuals.overdriveGainScaling ? 'bg-brand-green' : 'bg-zinc-800'
+                            }`}
+                          >
+                            <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                              visuals.overdriveGainScaling ? 'translate-x-3.5' : 'translate-x-0'
+                            }`} />
+                          </button>
+                        </div>
+                      )}
                     </div>
 
                     <div className="space-y-1">
@@ -9234,7 +9508,7 @@ export default function App() {
                           </button>
                         </div>
                         {visuals.glowBloom && (
-                          <div className="space-y-1 p-2.5 bg-[#07070a]/40 rounded border border-zinc-950/40 mt-1">
+                          <div className="space-y-1.5 p-2.5 bg-[#07070a]/40 rounded border border-zinc-950/40 mt-1">
                             <div className="flex justify-between font-mono text-[9px] text-zinc-400 font-bold">
                               <span>BLOOM INTENSITY</span>
                               <span className="text-white font-semibold">{((visuals.glowBloomIntensity ?? 0.6) * 100).toFixed(0)}%</span>
@@ -9248,6 +9522,35 @@ export default function App() {
                               onChange={(e) => setVisuals(prev => ({ ...prev, glowBloomIntensity: parseFloat(e.target.value) }))}
                               className="w-full accent-brand-green cursor-pointer"
                             />
+                            
+                            {/* Bloom Presets Button Group */}
+                            <div className="pt-2 mt-1.5 border-t border-zinc-900/60">
+                              <label className="block text-[8px] font-mono font-bold text-zinc-500 uppercase tracking-wide mb-1">Bloom Intensity Presets</label>
+                              <div className="grid grid-cols-3 gap-1">
+                                {[
+                                  { label: 'Subtle', value: 0.3 },
+                                  { label: 'Vibrant', value: 0.7 },
+                                  { label: 'Extreme', value: 1.3 }
+                                ].map((preset) => {
+                                  const currentIntensity = visuals.glowBloomIntensity ?? 0.6;
+                                  const isSelected = Math.abs(currentIntensity - preset.value) < 0.05;
+                                  return (
+                                    <button
+                                      key={preset.label}
+                                      type="button"
+                                      onClick={() => setVisuals(prev => ({ ...prev, glowBloomIntensity: preset.value }))}
+                                      className={`px-1 py-0.5 text-[9px] rounded font-mono font-bold transition-all cursor-pointer border text-center ${
+                                        isSelected 
+                                          ? 'bg-brand-green/10 border-brand-green text-brand-green' 
+                                          : 'bg-zinc-950/50 border-zinc-850 text-zinc-400 hover:text-zinc-200 hover:border-zinc-750'
+                                      }`}
+                                    >
+                                      {preset.label}
+                                    </button>
+                                  );
+                                })}
+                              </div>
+                            </div>
                           </div>
                         )}
                       </div>
@@ -12949,7 +13252,7 @@ export default function App() {
                       <div className="flex items-center justify-between">
                         <div className="text-left">
                           <span className="font-semibold text-zinc-350 block font-sans text-[11px] uppercase tracking-wide">Text Branding Watermark</span>
-                          <span className="text-[9.5px] text-zinc-500 block font-sans mt-0.5">Subtle customizable "Made with tymark" overlay signature</span>
+                          <span className="text-[9.5px] text-zinc-500 block font-sans mt-0.5">Subtle customizable "Made with Chaotic Fart Studio" overlay signature</span>
                         </div>
                         <button
                           type="button"
@@ -13725,20 +14028,80 @@ export default function App() {
                     </button>
                   </div>
                   {visuals.strobeEffect && (
-                    <div className="space-y-1.5 pt-2 border-t border-zinc-800/50">
-                      <div className="flex justify-between text-[10px] text-zinc-400 font-mono uppercase font-semibold">
-                        <span>Intensity</span>
-                        <span className="text-white">{((visuals.strobeIntensity ?? 0.8) * 100).toFixed(0)}%</span>
+                    <div className="space-y-4 pt-2 border-t border-zinc-800/50">
+                      <div className="space-y-1.5">
+                        <div className="flex justify-between text-[10px] text-zinc-400 font-mono uppercase font-semibold">
+                          <span>Intensity</span>
+                          <span className="text-white">{((visuals.strobeIntensity ?? 0.8) * 100).toFixed(0)}%</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0.1"
+                          max="1.0"
+                          step="0.05"
+                          value={visuals.strobeIntensity ?? 0.8}
+                          onChange={(e) => setVisuals(prev => ({ ...prev, strobeIntensity: parseFloat(e.target.value) }))}
+                          className="w-full accent-white cursor-pointer"
+                        />
                       </div>
-                      <input
-                        type="range"
-                        min="0.1"
-                        max="1.0"
-                        step="0.05"
-                        value={visuals.strobeIntensity ?? 0.8}
-                        onChange={(e) => setVisuals(prev => ({ ...prev, strobeIntensity: parseFloat(e.target.value) }))}
-                        className="w-full accent-white cursor-pointer"
-                      />
+
+                      <div className="space-y-1.5 pt-1.5 border-t border-zinc-900/40">
+                        <div className="flex justify-between text-[10px] text-zinc-400 font-mono uppercase font-semibold">
+                          <span>Frequency Subdivision</span>
+                          <span className="text-white">
+                            {(() => {
+                              const f = visuals.strobeFrequency ?? 1;
+                              if (f === 1) return "Every Beat (1/1)";
+                              if (f === 2) return "Every 2nd Beat (1/2)";
+                              if (f === 4) return "Every 4th Beat (1/4)";
+                              return `Every ${f} Beats`;
+                            })()}
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min="1"
+                          max="3"
+                          step="1"
+                          value={(() => {
+                            const f = visuals.strobeFrequency ?? 1;
+                            if (f === 4) return 3;
+                            if (f === 2) return 2;
+                            return 1;
+                          })()}
+                          onChange={(e) => {
+                            const val = parseInt(e.target.value);
+                            const mappedFreq = val === 3 ? 4 : val === 2 ? 2 : 1;
+                            setVisuals(prev => ({ ...prev, strobeFrequency: mappedFreq }));
+                          }}
+                          className="w-full accent-white cursor-pointer"
+                        />
+                      </div>
+
+                      <div className="space-y-1.5 pt-1.5 border-t border-zinc-900/40">
+                        <div className="flex justify-between text-[10px] text-zinc-400 font-mono uppercase font-semibold">
+                          <span>Strobe Fade Duration</span>
+                          <span className="text-white">
+                            {(() => {
+                              const d = visuals.strobeFadeDuration ?? 0.85;
+                              if (d <= 0.6) return "Ultra Sharp (Fast)";
+                              if (d <= 0.8) return "Sharp";
+                              if (d <= 0.88) return "Normal (Medium)";
+                              if (d <= 0.94) return "Smooth (Slow)";
+                              return "Linger (Very Slow)";
+                            })()} ({((visuals.strobeFadeDuration ?? 0.85)).toFixed(2)})
+                          </span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0.5"
+                          max="0.98"
+                          step="0.01"
+                          value={visuals.strobeFadeDuration ?? 0.85}
+                          onChange={(e) => setVisuals(prev => ({ ...prev, strobeFadeDuration: parseFloat(e.target.value) }))}
+                          className="w-full accent-white cursor-pointer"
+                        />
+                      </div>
                     </div>
                   )}
                 </div>
@@ -14593,6 +14956,117 @@ export default function App() {
                   <div className="text-[9px] text-zinc-500 font-mono leading-relaxed bg-zinc-950/25 p-2 rounded border border-zinc-900/30">
                     Applies a professional <span className="text-brand-green-hover font-bold">+12 dB</span> low-shelf amplification centered at <span className="text-brand-green-hover font-bold">60Hz</span> to enrich sub-bass energy instantly.
                   </div>
+                </div>
+
+                {/* Section: Vocal Ducking Controller */}
+                <div className="bg-zinc-950/40 p-5 rounded-xl border border-zinc-900/50 space-y-4 animate-fadeIn">
+                  <div className="flex items-center justify-between">
+                    <div className="flex flex-col text-left">
+                      <span className="text-[11px] font-semibold text-zinc-400 font-mono tracking-wide uppercase flex items-center space-x-1.5">
+                        <Mic className="w-3.5 h-3.5 text-brand-green-hover" />
+                        <span>Vocal Ducking System</span>
+                      </span>
+                      <span className="text-[9.5px] text-zinc-500 mt-1">Automatically ducks background music volume during spoken-word or vocal parts</span>
+                    </div>
+
+                    <button
+                      type="button"
+                      onClick={() => {
+                        initAudioSystem();
+                        setVisuals(prev => ({ ...prev, vocalDucking: !prev.vocalDucking }));
+                      }}
+                      className={`relative inline-flex h-5 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none focus:ring-1 focus:ring-brand-green/50 ${
+                        visuals.vocalDucking ? 'bg-brand-green' : 'bg-zinc-800'
+                      }`}
+                    >
+                      <span
+                        className={`pointer-events-none inline-block h-4 w-4 transform rounded-full bg-white shadow ring-0 transition duration-200 ease-in-out ${
+                          visuals.vocalDucking ? 'translate-x-5' : 'translate-x-0'
+                        }`}
+                      />
+                    </button>
+                  </div>
+
+                  {visuals.vocalDucking && (
+                    <div className="space-y-4 pt-3 border-t border-zinc-900/50">
+                      {/* Selection 1: Monitored Vocal Frequency Band */}
+                      <div className="space-y-1.5 text-left">
+                        <label className="block text-[10px] text-zinc-400 font-mono uppercase font-semibold">
+                          Monitored Vocal Frequency Band
+                        </label>
+                        <div className="grid grid-cols-2 sm:grid-cols-4 gap-1.5">
+                          {[
+                            { id: 1, label: 'Low-Mid Speech', desc: '120-500 Hz (deep voice)' },
+                            { id: 2, label: 'Mid Vocals', desc: '500-2000 Hz (standard)' },
+                            { id: 3, label: 'High-Mid Sibilance', desc: '2k-4k Hz (sharpness)' },
+                            { id: 4, label: 'Wide Vocal', desc: '120-4000 Hz (full)' },
+                          ].map((band) => (
+                            <button
+                              type="button"
+                              key={band.id}
+                              onClick={() => setVisuals(prev => ({ ...prev, vocalDuckingBand: band.id }))}
+                              className={`py-1.5 px-2 text-[9px] font-mono rounded border transition-all text-center cursor-pointer flex flex-col items-center justify-center ${
+                                (visuals.vocalDuckingBand ?? 2) === band.id
+                                  ? 'bg-zinc-900 border-brand-green/50 text-brand-green-hover font-bold'
+                                  : 'bg-zinc-900/30 border-zinc-900/80 text-zinc-500 hover:text-zinc-400 hover:bg-zinc-900/50'
+                              }`}
+                            >
+                              <span>{band.label}</span>
+                              <span className="text-[7.5px] text-zinc-600 mt-0.5 font-normal">{band.desc}</span>
+                            </button>
+                          ))}
+                        </div>
+                      </div>
+
+                      {/* Slider 1: Vocal Ducking Sensitivity */}
+                      <div className="space-y-1.5 text-left">
+                        <div className="flex justify-between font-mono text-[10px] text-zinc-400 font-semibold">
+                          <span>Vocal Ducking Sensitivity</span>
+                          <span className="text-white">
+                            {((visuals.vocalDuckingSensitivity ?? 0.5) * 100).toFixed(0)}%
+                          </span>
+                        </div>
+                        <input
+                          id="vocal-ducking-sensitivity-slider"
+                          type="range"
+                          min="0.1"
+                          max="1.0"
+                          step="0.05"
+                          value={visuals.vocalDuckingSensitivity ?? 0.5}
+                          onChange={(e) => setVisuals(prev => ({ ...prev, vocalDuckingSensitivity: parseFloat(e.target.value) }))}
+                          className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none"
+                        />
+                        <div className="flex justify-between text-[7.5px] text-zinc-500 font-mono">
+                          <span>Less Sensitive (High Threshold)</span>
+                          <span>More Sensitive (Low Threshold)</span>
+                        </div>
+                      </div>
+
+                      {/* Slider 2: Ducking Attenuation Strength */}
+                      <div className="space-y-1.5 text-left">
+                        <div className="flex justify-between font-mono text-[10px] text-zinc-400 font-semibold">
+                          <span>Music Volume Attenuation (Reduction)</span>
+                          <span className="text-brand-green-hover">
+                            -{((visuals.vocalDuckingStrength ?? 0.6) * 100).toFixed(0)}%
+                          </span>
+                        </div>
+                        <input
+                          id="vocal-ducking-strength-slider"
+                          type="range"
+                          min="0.1"
+                          max="0.95"
+                          step="0.05"
+                          value={visuals.vocalDuckingStrength ?? 0.6}
+                          onChange={(e) => setVisuals(prev => ({ ...prev, vocalDuckingStrength: parseFloat(e.target.value) }))}
+                          className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none"
+                        />
+                        <div className="flex justify-between text-[7.5px] text-zinc-500 font-mono">
+                          <span>Light Ducking (-10%)</span>
+                          <span>Heavy Ducking (-95%)</span>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </div>
               </motion.div>
             )}

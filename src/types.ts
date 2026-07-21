@@ -80,6 +80,7 @@ export interface VisualizerSettings {
   glowStrength: number;
   lineThickness: number;
   sensitivity: number; // multiplier for Audio Analyser data
+  noiseFloorThreshold?: number; // threshold to cut off silent background audio (0 to 100)
   horizontalScale?: number; // horizontal layout stretch scale
   verticalScale?: number; // vertical layout stretch scale
   centerScale?: number; // center scale zoom
@@ -118,6 +119,12 @@ export interface VisualizerSettings {
   cycleColors?: boolean; // slowly rotate the primary and secondary colors over time
   colorCycleInterval?: number; // interval in seconds for a full color cycle rotation
   glitchIntensity?: number; // intensity for horizontal scan-line displacement effect
+  waveformOverdrive?: number; // overdrive/distortion multiplier (1.0 to 15.0)
+  overdriveGainScaling?: boolean; // amplify the signal before the non-linear distortion
+  vocalDucking?: boolean; // enable vocal ducking
+  vocalDuckingSensitivity?: number; // sensitivity threshold (0.0 to 1.0)
+  vocalDuckingStrength?: number; // ducking attenuation strength (0.0 to 1.0)
+  vocalDuckingBand?: number; // frequency band to monitor (1 = Low-Mid, 2 = Mid, 3 = High-Mid, 4 = Wide Vocal)
   beatSensitivity?: number; // threshold sensitivity for beat detection (e.g. 1.0 to 10.0 or 0 to 1)
   reactiveTextGlow?: boolean; // link on-screen text glow to middle/high frequency audio data
   shakeIntensity?: number; // multiplier/slider for camera shake response
@@ -236,6 +243,8 @@ export interface VisualizerSettings {
   crtScanlines?: boolean;
   strobeEffect?: boolean;
   strobeIntensity?: number;
+  strobeFrequency?: number; // 1 = every beat, 2 = every 2nd beat, 4 = every 4th beat
+  strobeFadeDuration?: number; // fade decay factor (0.5 to 0.99, e.g. 0.85 default)
   beatRhythmMultiplier?: number;
   motionBlurIntensity?: number;
   waveformRipple?: boolean;

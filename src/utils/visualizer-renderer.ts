@@ -2292,6 +2292,37 @@ export function drawVisualizer(
   let localWaveformData = new Uint8Array(activeWaveformData);
   const dataLen = localAnalyserData.length;
 
+  // Apply Overdrive / Distortion non-linear boost if enabled (> 1.0)
+  const overdrive = settings.waveformOverdrive !== undefined ? settings.waveformOverdrive : 1.0;
+  if (overdrive > 1.0) {
+    const scale = Math.tanh(overdrive);
+    const preGain = settings.overdriveGainScaling ? 2.5 : 1.0;
+    for (let i = 0; i < dataLen; i++) {
+      // Frequency overdrive:
+      const normFreq = (localAnalyserData[i] / 255) * preGain;
+      const boostedFreq = Math.tanh(normFreq * overdrive) / scale;
+      localAnalyserData[i] = Math.max(0, Math.min(255, Math.round(boostedFreq * 255)));
+
+      // Waveform overdrive:
+      const normWave = ((localWaveformData[i] - 128) / 128) * preGain; // -1.0 to 1.0
+      const boostedWave = Math.tanh(normWave * overdrive) / scale;
+      localWaveformData[i] = Math.max(0, Math.min(255, Math.round(128 + boostedWave * 128)));
+    }
+  }
+
+  // Apply Noise Floor Gating & Punchy Dynamic Expansion Curve
+  // Eliminates background noise floor so frequency bars drop completely to zero baseline between beats and during quiet passages.
+  const noiseFloor = settings.noiseFloorThreshold !== undefined ? settings.noiseFloorThreshold : 28;
+  for (let i = 0; i < dataLen; i++) {
+    const rawVal = localAnalyserData[i];
+    if (rawVal <= noiseFloor) {
+      localAnalyserData[i] = 0;
+    } else {
+      const norm = (rawVal - noiseFloor) / (255 - noiseFloor);
+      localAnalyserData[i] = Math.max(0, Math.min(255, Math.round(Math.pow(norm, 1.25) * 255)));
+    }
+  }
+
   // Calculate frequency band averages
   let bass = 0, mid = 0, treble = 0;
   const bassEnd = Math.floor(dataLen * 0.1) || 1;
@@ -2706,7 +2737,7 @@ export function drawVisualizer(
         // Logarithmic scale mapping to show low and mid frequencies cleanly
         const idx = Math.floor(Math.pow(i / barCount, 1.3) * (dataLen * 0.75));
         const value = analyserData[idx] || 0;
-        const barHeight = (value / 255) * (height * 0.65) * settings.sensitivity + 4;
+        const barHeight = (value / 255) * (height * 0.65) * settings.sensitivity;
 
         const x = startX + i * step;
         
@@ -2749,16 +2780,16 @@ export function drawVisualizer(
         const idx = Math.min(dataLen - 1, Math.floor((i / densityPoints) * dataLen));
         const prevIdx = Math.max(0, Math.min(dataLen - 1, Math.floor(((i - 1) / densityPoints) * dataLen)));
 
-        // wave value is normalized around 128 (for 8-bit unsigned integer)
-        const v = waveformData[idx] / 128.0; 
-        const y = (v * (height / 3)) * settings.sensitivity + midY - (height / 6);
+        // wave value is normalized around 128 (0 at silence in 8-bit unsigned integer)
+        const normWave = (waveformData[idx] - 128) / 128.0; 
+        const y = midY + normWave * (height / 3) * settings.sensitivity;
 
         if (i === 0) {
           ctx.moveTo(x, y);
         } else {
           const prevX = x - sliceWidth;
-          const prevV = waveformData[prevIdx] / 128.0;
-          const prevY = (prevV * (height / 3)) * settings.sensitivity + midY - (height / 6);
+          const prevNormWave = (waveformData[prevIdx] - 128) / 128.0;
+          const prevY = midY + prevNormWave * (height / 3) * settings.sensitivity;
           ctx.bezierCurveTo(prevX + sliceWidth / 2, prevY, prevX + sliceWidth / 2, y, x, y);
         }
         x += sliceWidth;
@@ -2816,7 +2847,7 @@ export function drawVisualizer(
       const rawValue = analyserData[idx] || 0;
       // High-Frequency Equalization Gain
       const value = Math.min(255, rawValue * (1 + (i / totalBars) * 1.5));
-      const barHeight = (value / 255) * (height * 0.6) * settings.sensitivity + 4;
+      const barHeight = (value / 255) * (height * 0.6) * settings.sensitivity;
 
       const x = startX + i * step;
       
@@ -3394,7 +3425,7 @@ export function drawVisualizer(
     for (let i = 0; i < barCount; i++) {
        const idx = Math.floor(Math.pow(i / barCount, 1.3) * (dataLen * 0.7));
        const value = analyserData[idx] || 0;
-       const barHeight = (value / 255) * (height * 0.35) * settings.sensitivity + 2;
+       const barHeight = (value / 255) * (height * 0.35) * settings.sensitivity;
 
        const x = startX + i * step;
       
@@ -3592,8 +3623,8 @@ export function drawVisualizer(
     ctx.moveTo(0, midY);
 
     for (let i = 0; i < dataLen; i++) {
-      const v = waveformData[i] / 128.0; 
-      const y = (v * (height * 0.28)) * settings.sensitivity + midY - (height * 0.14);
+      const normWave = (waveformData[i] - 128) / 128.0; 
+      const y = midY + normWave * (height * 0.28) * settings.sensitivity;
       ctx.lineTo(i * sliceWidth, y);
     }
     
@@ -3626,8 +3657,8 @@ export function drawVisualizer(
     // Sinuous top stroke
     ctx.beginPath();
     for (let i = 0; i < dataLen; i++) {
-      const v = waveformData[i] / 128.0; 
-      const y = (v * (height * 0.28)) * settings.sensitivity + midY - (height * 0.14);
+      const normWave = (waveformData[i] - 128) / 128.0; 
+      const y = midY + normWave * (height * 0.28) * settings.sensitivity;
       if (i === 0) ctx.moveTo(0, y);
       else ctx.lineTo(i * sliceWidth, y);
     }
@@ -3693,7 +3724,7 @@ export function drawVisualizer(
     for (let i = 0; i < barCount; i++) {
       const idx = Math.floor(Math.pow(i / barCount, 1.3) * (dataLen * 0.7));
       const value = analyserData[idx] || 0;
-      const barHeight = (value / 255) * (height * 0.6) * settings.sensitivity + 4;
+      const barHeight = (value / 255) * (height * 0.6) * settings.sensitivity;
 
       const x = startX + i * step;
       
