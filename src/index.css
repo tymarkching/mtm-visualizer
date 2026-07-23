@@ -47,11 +47,13 @@
   transition: transform 0.12s cubic-bezier(0.175, 0.885, 0.32, 1.25), box-shadow 0.12s ease-out;
 }
 
-#symmetry-mirror-multiplier-slider.beat-pulse::-webkit-slider-thumb {
+#symmetry-mirror-multiplier-slider.beat-pulse::-webkit-slider-thumb,
+#chaos-multiplier-slider.beat-pulse::-webkit-slider-thumb {
   animation: thumb-pulse-anim 0.28s cubic-bezier(0.0, 0.0, 0.2, 1) forwards;
 }
 
-#symmetry-mirror-multiplier-slider::-moz-range-thumb {
+#symmetry-mirror-multiplier-slider::-moz-range-thumb,
+#chaos-multiplier-slider::-moz-range-thumb {
   width: 14px;
   height: 14px;
   border-radius: 50%;
@@ -62,7 +64,8 @@
   transition: transform 0.12s cubic-bezier(0.175, 0.885, 0.32, 1.25), box-shadow 0.12s ease-out;
 }
 
-#symmetry-mirror-multiplier-slider.beat-pulse::-moz-range-thumb {
+#symmetry-mirror-multiplier-slider.beat-pulse::-moz-range-thumb,
+#chaos-multiplier-slider.beat-pulse::-moz-range-thumb {
   animation: thumb-pulse-anim 0.28s cubic-bezier(0.0, 0.0, 0.2, 1) forwards;
 }
 

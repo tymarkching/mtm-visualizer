@@ -35,6 +35,10 @@ let waterReflectionCanvas: HTMLCanvasElement | null = null;
 let noiseTextureCanvas: HTMLCanvasElement | null = null;
 let globalActiveStyleColor: string | CanvasGradient | null = null;
 
+// Reusable static typed arrays for zero-allocation per frame rendering
+let cachedAnalyserBuf: Uint8Array | null = null;
+let cachedWaveformBuf: Uint8Array | null = null;
+
 interface Shockwave {
   x: number;
   y: number;
@@ -113,8 +117,15 @@ const bouncingCirclesCache: { [key: number]: BouncingCircleState } = {};
 interface PhysicsState {
   current: Float32Array;
   velocity: Float32Array;
+  smoothed?: Uint8Array;
 }
 const stylePhysicsCache: { [styleId: string]: PhysicsState } = {};
+const kineticCache: { [key: string]: Float32Array } = {};
+const peakHoldersCache: { [key: string]: Float32Array } = {};
+
+let perfFrameCount = 0;
+let perfCurrentFPS = 60;
+let perfLastFpsUpdate = typeof performance !== 'undefined' ? performance.now() : Date.now();
 
 export interface RenderParticle {
   x: number;
@@ -314,7 +325,9 @@ export function createParticle(
   height: number,
   randomY = false
 ): RenderParticle {
-  const size = settings.minSize + Math.random() * (settings.maxSize - settings.minSize);
+  const minS = Math.min(settings.minSize ?? 1, settings.maxSize ?? 10);
+  const maxS = Math.max(settings.minSize ?? 1, settings.maxSize ?? 10);
+  const size = minS + Math.random() * Math.max(0.1, maxS - minS);
   const dir = settings.emittingDirection || 'float-up';
   
   // Starting positions based on gravity and direction
@@ -700,9 +713,12 @@ export function updateParticles(
       p.history = [];
     }
     const trailLen = settings.trailLength !== undefined ? settings.trailLength : 0;
-    if (trailLen > 0) {
+    const chaosValForTrail = settings.chaosMultiplier !== undefined ? settings.chaosMultiplier : 0.0;
+    const effectiveTrailLen = Math.max(trailLen, chaosValForTrail > 2.0 ? Math.min(12, Math.floor(chaosValForTrail * 2.5)) : 0);
+
+    if (effectiveTrailLen > 0) {
       p.history.push({ x: p.x, y: p.y });
-      if (p.history.length > trailLen) {
+      if (p.history.length > effectiveTrailLen) {
         p.history.shift();
       }
     } else if (p.history.length > 0) {
@@ -907,6 +923,23 @@ export function updateParticles(
         p.y += (Math.random() - 0.5) * 30;
       }
     }
+
+    // Apply Chaos Multiplier random jitter force for organic, fluid, and less predictable trajectory
+    const chaosMultiplier = settings.chaosMultiplier !== undefined ? settings.chaosMultiplier : 0.0;
+    if (chaosMultiplier > 0) {
+      let effectiveChaos = chaosMultiplier;
+      if (settings.beatReactiveChaos) {
+        // Spike in intensity on every heavy bass beat
+        const beatSpike = isBeat ? (1.8 + bassIntensity * 2.2) : (1.0 + bassIntensity * 0.4);
+        effectiveChaos *= beatSpike;
+      }
+      const jitterForce = effectiveChaos * (0.8 + dynamicVolume * 0.4);
+      const jitterX = (Math.random() - 0.5) * jitterForce;
+      const jitterY = (Math.random() - 0.5) * jitterForce;
+      p.x += jitterX * 1.5;
+      p.y += jitterY * 1.5;
+    }
+
     p.angle += p.spin;
 
     // Apply physics boundary bounces (bouncing off walls)
@@ -967,16 +1000,21 @@ export function updateParticles(
         let p1 = result[i];
         if (p1.life <= 0) continue; // Skip already dead particles
         
+        const radius1 = p1.radius || p1.size || 4;
+
         for (let j = i + 1; j < result.length; j++) {
           let p2 = result[j];
           if (p2.life <= 0) continue;
           
           let dx = p2.x - p1.x;
           let dy = p2.y - p1.y;
-          const distSq = dx * dx + dy * dy;
-          const radius1 = p1.radius || p1.size || 4;
           const radius2 = p2.radius || p2.size || 4;
           const minDist = radius1 + radius2;
+
+          // Fast bounding box rejection check before square root / multiplication
+          if (Math.abs(dx) > minDist || Math.abs(dy) > minDist) continue;
+
+          const distSq = dx * dx + dy * dy;
           const minDistSq = minDist * minDist;
 
           if (distSq < minDistSq) {
@@ -1053,8 +1091,10 @@ export function drawBackground(
 ) {
   ctx.save();
 
+  const animSpeed = settings.animationSpeed !== undefined ? settings.animationSpeed : 1.0;
+
   if (settings.parallaxSway && settings.parallaxSway > 0 && (settings.type === 'image' || settings.type === 'video')) {
-    const time = Date.now() * 0.0005;
+    const time = Date.now() * 0.0005 * animSpeed;
     const amp = settings.parallaxSway * 10 * (1 + (beatIntensity || 0));
     const swayX = Math.sin(time) * amp;
     const swayY = Math.cos(time * 0.8) * amp;
@@ -1076,7 +1116,16 @@ export function drawBackground(
     ctx.fillStyle = settings.color;
     ctx.fillRect(0, 0, width, height);
   } else if (settings.type === 'gradient') {
-    const gradient = ctx.createLinearGradient(0, 0, 0, height);
+    const t = Date.now() * 0.0003 * animSpeed;
+    const angle = t % (Math.PI * 2);
+    const cx = width / 2;
+    const cy = height / 2;
+    const r = Math.max(width, height) * 0.75;
+    const x0 = cx + Math.cos(angle) * r;
+    const y0 = cy + Math.sin(angle) * r;
+    const x1 = cx - Math.cos(angle) * r;
+    const y1 = cy - Math.sin(angle) * r;
+    const gradient = ctx.createLinearGradient(x0, y0, x1, y1);
     gradient.addColorStop(0, settings.gradientStart);
     gradient.addColorStop(1, settings.gradientEnd);
     ctx.fillStyle = gradient;
@@ -1124,6 +1173,13 @@ export function drawBackground(
     if (bgVidElement.paused) {
       bgVidElement.play().catch(() => {});
     }
+    try {
+      const targetRate = Math.max(0.25, Math.min(3.0, animSpeed));
+      if (Math.abs(bgVidElement.playbackRate - targetRate) > 0.05) {
+        bgVidElement.playbackRate = targetRate;
+      }
+    } catch (e) {}
+
     // Video covering
     const vidRatio = bgVidElement.videoWidth / bgVidElement.videoHeight;
     const canvasRatio = width / height;
@@ -1182,7 +1238,7 @@ export function drawBackground(
 
   // Let's get a base hue/color that changes over time, or with beat
   const now = Date.now();
-  const timeFactor = (now * 0.001 * pulseSpeed) + (syncToBeat ? bIntensity * 2.0 : 0);
+  const timeFactor = (now * 0.001 * pulseSpeed * animSpeed) + (syncToBeat ? bIntensity * 2.0 : 0);
   
   // A helper function to get a color for a specific coordinate/index/factor
   const getSpectrumColor = (factor: number, defaultRgba: string, indexOffset = 0): string => {
@@ -1583,8 +1639,8 @@ export function drawParticles(
 
   // Implement a Z-depth sorting mechanism for the forward-moving particles in the 'forward-movement' mode
   let displayParticles = particles;
-  if (settings.emittingDirection === 'forward-movement') {
-    displayParticles = [...particles].sort((a, b) => {
+  if (settings.emittingDirection === 'forward-movement' && particles.length > 1) {
+    particles.sort((a, b) => {
       const az = a.z !== undefined ? a.z : 1000;
       const bz = b.z !== undefined ? b.z : 1000;
       return bz - az; // Farthest (larger z) first
@@ -1683,24 +1739,30 @@ export function drawParticles(
     }
 
     const trailLenValue = settings.trailLength !== undefined ? settings.trailLength : 0;
-    if (trailLenValue > 0 && p.history && p.history.length > 0 && 
-        (settings.type === 'stars' || settings.type === 'sparks' || settings.type === 'spark-stars')) {
+    const chaosValForDraw = settings.chaosMultiplier !== undefined ? settings.chaosMultiplier : 0.0;
+    const isChaosTrailActive = chaosValForDraw > 2.0;
+    const isStandardTrailActive = trailLenValue > 0 && (settings.type === 'stars' || settings.type === 'sparks' || settings.type === 'spark-stars');
+
+    if ((isStandardTrailActive || isChaosTrailActive) && p.history && p.history.length > 0) {
       ctx.save();
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
-      const pts = [...p.history, { x: p.x, y: p.y }];
-      for (let i = 0; i < pts.length - 1; i++) {
-        const pStart = pts[i];
-        const pEnd = pts[i + 1];
+      const hLen = p.history.length;
+      const totalSegs = hLen + 1;
+      for (let i = 0; i < totalSegs - 1; i++) {
+        const pStart = p.history[i];
+        const pEnd = (i === hLen - 1) ? p : p.history[i + 1];
         
         ctx.beginPath();
         ctx.moveTo(pStart.x, pStart.y);
         ctx.lineTo(pEnd.x, pEnd.y);
         
-        const ratio = (i + 1) / pts.length;
-        ctx.globalAlpha = finalAlpha * ratio;
+        const ratio = (i + 1) / totalSegs;
+        // Faint trail for chaos jitter visualization (faint alpha, thinner line)
+        const trailAlphaScale = (isChaosTrailActive && !isStandardTrailActive) ? 0.35 : 1.0;
+        ctx.globalAlpha = Math.min(1, finalAlpha * ratio * trailAlphaScale);
         ctx.strokeStyle = finalColor;
-        ctx.lineWidth = p.size * ratio * 0.9;
+        ctx.lineWidth = Math.max(0.5, p.size * ratio * ((isChaosTrailActive && !isStandardTrailActive) ? 0.6 : 0.9));
         ctx.stroke();
       }
       ctx.restore();
@@ -2288,8 +2350,16 @@ export function drawVisualizer(
     };
   }
 
-  let localAnalyserData = new Uint8Array(activeAnalyserData);
-  let localWaveformData = new Uint8Array(activeWaveformData);
+  if (!cachedAnalyserBuf || cachedAnalyserBuf.length !== activeAnalyserData.length) {
+    cachedAnalyserBuf = new Uint8Array(activeAnalyserData.length);
+  }
+  if (!cachedWaveformBuf || cachedWaveformBuf.length !== activeWaveformData.length) {
+    cachedWaveformBuf = new Uint8Array(activeWaveformData.length);
+  }
+  cachedAnalyserBuf.set(activeAnalyserData);
+  cachedWaveformBuf.set(activeWaveformData);
+  let localAnalyserData = cachedAnalyserBuf;
+  let localWaveformData = cachedWaveformBuf;
   const dataLen = localAnalyserData.length;
 
   // Apply Overdrive / Distortion non-linear boost if enabled (> 1.0)
@@ -2322,6 +2392,38 @@ export function drawVisualizer(
       localAnalyserData[i] = Math.max(0, Math.min(255, Math.round(Math.pow(norm, 1.25) * 255)));
     }
   }
+
+  // Kinetic Response Mode: Energy-proportional snappy decay back to zero for punchy drum transients
+  if (settings.kineticResponse) {
+    let totalAudioSum = 0;
+    for (let i = 0; i < dataLen; i++) {
+      totalAudioSum += localAnalyserData[i];
+    }
+    const avgAudioEnergy = totalAudioSum / (dataLen * 255); // 0.0 to 1.0
+
+    if (!kineticCache['main'] || kineticCache['main'].length !== dataLen) {
+      kineticCache['main'] = new Float32Array(dataLen);
+    }
+    const kBuf = kineticCache['main'];
+    const kSens = settings.kineticSensitivity !== undefined ? settings.kineticSensitivity : 1.0;
+    // Higher total audio energy accelerates decay rate back to zero (snappy drop profile)
+    const decayFactor = Math.min(0.95, (0.35 + avgAudioEnergy * 0.55) * kSens);
+
+    for (let i = 0; i < dataLen; i++) {
+      const target = localAnalyserData[i];
+      let current = kBuf[i];
+      if (target >= current) {
+        current = target; // Immediate sharp attack on transient hit
+      } else {
+        current = current - (current - target) * decayFactor;
+        if (current < 1) current = 0;
+      }
+      kBuf[i] = current;
+      localAnalyserData[i] = Math.round(current);
+    }
+  }
+
+  const activeBeatIntensity = settings.enableWaveformBeatPulse !== false ? beatIntensity : 0;
 
   // Calculate frequency band averages
   let bass = 0, mid = 0, treble = 0;
@@ -2469,12 +2571,8 @@ export function drawVisualizer(
   // Save settings in module scope
   activeSettings = settings;
 
-  // Apply visualizer-wide bloom filter
-  if (settings.glowIntensity !== undefined && settings.glowIntensity > 0) {
-    ctx.filter = `drop-shadow(0 0 ${settings.glowIntensity}px ${settings.glowColor || settings.primaryColor || '#b8ee02'}) brightness(${(1 + settings.glowIntensity * 0.05).toFixed(2)})`;
-  } else {
-    ctx.filter = 'none';
-  }
+  // Clear filter during vector waveform path rendering for maximum performance
+  ctx.filter = 'none';
 
   const primaryRGB = hexToRgb(settings.primaryColor) || { r: 184, g: 238, b: 2 };
   const secondaryRGB = hexToRgb(settings.secondaryColor) || { r: 255, g: 0, b: 128 };
@@ -2614,12 +2712,16 @@ export function drawVisualizer(
       }
       stylePhysicsCache[styleId] = {
         current: initialArray,
-        velocity: new Float32Array(dataLenVal)
+        velocity: new Float32Array(dataLenVal),
+        smoothed: new Uint8Array(dataLenVal)
       };
     }
 
     const cacheObj = stylePhysicsCache[styleId];
-    const smoothedWave = new Uint8Array(dataLenVal);
+    if (!cacheObj.smoothed || cacheObj.smoothed.length !== dataLenVal) {
+      cacheObj.smoothed = new Uint8Array(dataLenVal);
+    }
+    const smoothedWave = cacheObj.smoothed;
 
     for (let i = 0; i < dataLenVal; i++) {
       const target = rawWaveTemp[i];
@@ -2761,6 +2863,28 @@ export function drawVisualizer(
           ctx.rect(x, y, barWidth, barHeight);
         }
         ctx.fill();
+
+        // Real-Time Peak Level Indicators
+        if (settings.showPeakHolders) {
+          if (!peakHoldersCache['spectrumAnalyzer'] || peakHoldersCache['spectrumAnalyzer'].length < barCount) {
+            peakHoldersCache['spectrumAnalyzer'] = new Float32Array(barCount);
+          }
+          const peaks = peakHoldersCache['spectrumAnalyzer'];
+          const decay = settings.peakDecaySpeed !== undefined ? settings.peakDecaySpeed : 1.8;
+          if (barHeight >= peaks[i]) {
+            peaks[i] = barHeight;
+          } else {
+            peaks[i] = Math.max(0, peaks[i] - decay);
+          }
+          if (peaks[i] > 1) {
+            const peakY = yPercent < 40 ? (midY + peaks[i]) : (placement === 'center' ? (midY - peaks[i] / 2 - 3) : (midY - peaks[i] - 3));
+            ctx.fillStyle = settings.glowColor || settings.secondaryColor || '#00ffff';
+            ctx.shadowColor = settings.glowColor || '#00ffff';
+            ctx.shadowBlur = 6;
+            ctx.fillRect(x, peakY, barWidth, 2.5);
+            ctx.shadowBlur = 0;
+          }
+        }
       }
     } else {
       // Smooth flowing bezier wave path with density matched exactly to barFrequencyCount
@@ -2872,11 +2996,33 @@ export function drawVisualizer(
         ctx.rect(x, y, computedBarWidth, barHeight);
       }
       ctx.fill();
+
+      // Real-Time Peak Level Indicators
+      if (settings.showPeakHolders) {
+        if (!peakHoldersCache['bars'] || peakHoldersCache['bars'].length < totalBars) {
+          peakHoldersCache['bars'] = new Float32Array(totalBars);
+        }
+        const peaks = peakHoldersCache['bars'];
+        const decay = settings.peakDecaySpeed !== undefined ? settings.peakDecaySpeed : 1.8;
+        if (barHeight >= peaks[i]) {
+          peaks[i] = barHeight;
+        } else {
+          peaks[i] = Math.max(0, peaks[i] - decay);
+        }
+        if (peaks[i] > 1) {
+          const peakY = yPercent < 40 ? (midY + peaks[i]) : (placement === 'center' ? (midY - peaks[i] / 2 - 3) : (midY - peaks[i] - 3));
+          ctx.fillStyle = settings.glowColor || settings.secondaryColor || '#00ffff';
+          ctx.shadowColor = settings.glowColor || '#00ffff';
+          ctx.shadowBlur = 6;
+          ctx.fillRect(x, peakY, computedBarWidth, 2.5);
+          ctx.shadowBlur = 0;
+        }
+      }
     }
 
   } else if (settings.style === 'circular') {
     // Glowing pulsating circle of lines matching frequency details
-    const baseRadius = Math.min(width, height) * 0.18 * (1 + beatIntensity * 0.15);
+    const baseRadius = Math.min(width, height) * 0.18 * (1 + activeBeatIntensity * 0.15);
 
     ctx.beginPath();
     const pointsCount = Math.min(128, dataLen);
@@ -3452,7 +3598,7 @@ export function drawVisualizer(
 
   } else if (settings.style === 'circular-orbit') {
     // Elegant central orbit ring where frequencies explode outwards
-    const baseRadius = Math.min(width, height) * 0.16 * (1 + beatIntensity * 0.1);
+    const baseRadius = Math.min(width, height) * 0.16 * (1 + activeBeatIntensity * 0.1);
     const pointsCount = Math.min(128, dataLen);
     const timeRot = Date.now() * 0.0005;
 
@@ -5266,9 +5412,15 @@ export function drawVisualizer(
   }
 
   const drawChromaticAberration = (ctx: CanvasRenderingContext2D, canvas: HTMLCanvasElement, beatInt: number) => {
+    let bloomFilter = 'none';
+    if (settings.glowIntensity !== undefined && settings.glowIntensity > 0) {
+      bloomFilter = `drop-shadow(0 0 ${settings.glowIntensity}px ${settings.glowColor || settings.primaryColor || '#b8ee02'}) brightness(${(1 + settings.glowIntensity * 0.05).toFixed(2)})`;
+    }
+
     if (settings.chromaticAberration && beatInt > 0.4) {
       const splitOffset = beatInt * 25; // max 25px
       ctx.save();
+      if (bloomFilter !== 'none') ctx.filter = bloomFilter;
       ctx.globalCompositeOperation = 'screen';
       
       // RED channel (Left)
@@ -5297,7 +5449,14 @@ export function drawVisualizer(
       
       ctx.restore();
     } else {
-      ctx.drawImage(canvas, 0, 0);
+      if (bloomFilter !== 'none') {
+        ctx.save();
+        ctx.filter = bloomFilter;
+        ctx.drawImage(canvas, 0, 0);
+        ctx.restore();
+      } else {
+        ctx.drawImage(canvas, 0, 0);
+      }
     }
   };
 
@@ -5505,7 +5664,77 @@ export function drawVisualizer(
     }
   }
 
+  // Draw Real-Time Performance & Diagnostics Overlay (FPS & Memory Usage)
+  drawPerformanceOverlay(mainCtx, originalWidth, originalHeight, incomingSettings);
+
   mainCtx.restore();
+}
+
+function drawPerformanceOverlay(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  settings: VisualizerSettings
+) {
+  if (!settings.showPerformanceOverlay) return;
+
+  const now = typeof performance !== 'undefined' ? performance.now() : Date.now();
+  perfFrameCount++;
+  if (now - perfLastFpsUpdate >= 400) {
+    perfCurrentFPS = Math.max(1, Math.round((perfFrameCount * 1000) / (now - perfLastFpsUpdate)));
+    perfFrameCount = 0;
+    perfLastFpsUpdate = now;
+  }
+
+  ctx.save();
+  ctx.setTransform(1, 0, 0, 1, 0, 0);
+
+  let memText = '';
+  if (typeof window !== 'undefined' && (performance as any).memory && (performance as any).memory.usedJSHeapSize) {
+    const heapMB = ((performance as any).memory.usedJSHeapSize / (1024 * 1024)).toFixed(1);
+    memText = ` • ${heapMB}MB RAM`;
+  }
+
+  const text = `${perfCurrentFPS} FPS${memText}`;
+  ctx.font = '700 10px "JetBrains Mono", monospace';
+  const textWidth = ctx.measureText(text).width;
+
+  const paddingX = 10;
+  const boxW = textWidth + paddingX * 2 + 12;
+  const boxH = 22;
+  const boxX = width - boxW - 16;
+  const boxY = 16;
+
+  ctx.fillStyle = 'rgba(7, 7, 12, 0.88)';
+  const statusColor = perfCurrentFPS >= 50 ? '#39ff14' : perfCurrentFPS >= 30 ? '#ffaa00' : '#ff007f';
+  ctx.strokeStyle = statusColor;
+  ctx.lineWidth = 1;
+
+  ctx.beginPath();
+  if (ctx.roundRect) {
+    ctx.roundRect(boxX, boxY, boxW, boxH, 6);
+  } else {
+    ctx.rect(boxX, boxY, boxW, boxH);
+  }
+  ctx.fill();
+  ctx.stroke();
+
+  // Status pulse dot
+  ctx.fillStyle = statusColor;
+  ctx.shadowColor = statusColor;
+  ctx.shadowBlur = 6;
+  ctx.beginPath();
+  ctx.arc(boxX + paddingX + 2, boxY + boxH / 2, 3, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.shadowBlur = 0;
+
+  // Text
+  ctx.fillStyle = '#f4f4f5';
+  ctx.textAlign = 'left';
+  ctx.textBaseline = 'middle';
+  ctx.fillText(text, boxX + paddingX + 10, boxY + boxH / 2 + 0.5);
+
+  ctx.restore();
 }
 
 // DRAW TEXT OVERLAYS
@@ -5553,8 +5782,8 @@ export function drawTitleOverlay(
   let align: CanvasTextAlign = 'center';
 
   if (settings.position === 'custom') {
-    const hPct = settings.offsetX !== undefined ? settings.offsetX : 50;
-    const vPct = settings.offsetY !== undefined ? settings.offsetY : 50;
+    const hPct = settings.offsetX !== undefined ? settings.offsetX : 1;
+    const vPct = settings.offsetY !== undefined ? settings.offsetY : 6;
     x = width * (hPct / 100);
     y = height * (vPct / 100);
     if (hPct < 35) {
@@ -5570,8 +5799,10 @@ export function drawTitleOverlay(
     y = height / 2 - mainSize * 0.2;
   } else if (settings.position === 'top-left') {
     align = 'left';
-    x = 40;
-    y = 60 + mainSize;
+    const hPct = settings.offsetX !== undefined ? settings.offsetX : 1;
+    const vPct = settings.offsetY !== undefined ? settings.offsetY : 6;
+    x = width * (hPct / 100);
+    y = height * (vPct / 100) + mainSize * 0.7;
   } else if (settings.position === 'top-right') {
     align = 'right';
     x = width - 40;

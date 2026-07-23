@@ -81,6 +81,12 @@ export interface VisualizerSettings {
   lineThickness: number;
   sensitivity: number; // multiplier for Audio Analyser data
   noiseFloorThreshold?: number; // threshold to cut off silent background audio (0 to 100)
+  kineticResponse?: boolean; // energy-proportional snappy decay back to zero for punchy transients
+  kineticSensitivity?: number; // sensitivity multiplier for kinetic response decay
+  showPeakHolders?: boolean; // real-time peak level indicators on frequency bars
+  peakDecaySpeed?: number; // falloff speed for floating peak indicators
+  showPerformanceOverlay?: boolean; // real-time FPS and JS memory usage HUD overlay
+  enableWaveformBeatPulse?: boolean; // toggles dynamic radius expansion and pulsation of round visualizer shapes on bass beats
   horizontalScale?: number; // horizontal layout stretch scale
   verticalScale?: number; // vertical layout stretch scale
   centerScale?: number; // center scale zoom
@@ -297,6 +303,8 @@ export interface ParticleSettings {
   shatterSpeed?: number;
   forwardVelocityRamp?: number;
   forwardSpeedMultiplier?: number;
+  chaosMultiplier?: number; // Random jitter force for organic fluid particle movement
+  beatReactiveChaos?: boolean; // Spikes chaos jitter intensity on heavy bass beat
 }
 
 export interface TitleOverlaySettings {
@@ -348,6 +356,7 @@ export interface BackgroundSettings {
   overlaySpectrumCustomColor?: string;
   overlaySpectrumPulseSpeed?: number;
   overlaySpectrumSyncToBeat?: boolean;
+  animationSpeed?: number; // Speed multiplier for background gradients, movements, and effects (default 1.0)
 }
 
 export interface OverlayImage {
@@ -436,4 +445,21 @@ export interface ExportSettings {
   aspectRatio: '16:9' | '9:16' | '1:1';
   resolution: '2160p' | '1080p' | '720p';
   fps: 30 | 60;
+  engine?: 'offline' | 'realtime';
 }
+
+export type SkinCategory = 'all' | 'cyber' | 'cosmic' | 'zen' | 'bass' | 'luxury' | 'retro' | 'ocean' | 'minimal';
+
+export interface ThemedSkin {
+  id: string;
+  name: string;
+  badge: string;
+  category: SkinCategory;
+  description: string;
+  tags: string[];
+  visuals: VisualizerSettings;
+  background: BackgroundSettings;
+  title: TitleOverlaySettings;
+  particles?: Partial<ParticleSettings>;
+}
+

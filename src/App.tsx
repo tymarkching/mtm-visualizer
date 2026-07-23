@@ -36,7 +36,7 @@ import {
   ArrowRight,
   ArrowDownRight,
   ArrowUpRight,
-  Share2, ChevronDown, Mic, Radio, HelpCircle, Undo, Redo, Maximize2, Minimize2, Clock, Zap, ZapOff
+  Share2, ChevronDown, Mic, Radio, HelpCircle, Undo, Redo, Maximize2, Minimize2, Clock, Zap, ZapOff, Palette
 } from 'lucide-react';
 import localforage from 'localforage';
 import GIF from 'gif.js';
@@ -56,7 +56,11 @@ import {
   OverlayImage,
   SparkParticle,
   FireworkRocket,
+  ThemedSkin,
 } from './types';
+import { THEMED_SKINS } from './data/themed-skins';
+import { ThemedSkinsModal } from './components/ThemedSkinsModal';
+
 import {
   initParticles,
   updateParticles,
@@ -179,8 +183,8 @@ const PRESETS = [
       fontFamily: 'Space Grotesk' as const,
       position: 'top-left' as const,
       fadeIn: true,
-      offsetX: 10,
-      offsetY: 10,
+      offsetX: 1,
+      offsetY: 6,
       textStyle: 'neon' as const,
       colorBlend: true,
       colorBlendEnd: '#00ffff',
@@ -231,8 +235,8 @@ const PRESETS = [
       fontFamily: 'Outfit' as const,
       position: 'top-left' as const,
       fadeIn: true,
-      offsetX: 10,
-      offsetY: 10,
+      offsetX: 1,
+      offsetY: 6,
       textStyle: 'normal' as const,
       colorBlend: true,
       colorBlendEnd: '#ff007f',
@@ -283,8 +287,8 @@ const PRESETS = [
       fontFamily: 'JetBrains Mono' as const,
       position: 'top-left' as const,
       fadeIn: true,
-      offsetX: 10,
-      offsetY: 10,
+      offsetX: 1,
+      offsetY: 6,
       textStyle: 'shadow' as const,
       colorBlend: false,
       colorBlendEnd: '#ffffff',
@@ -335,8 +339,8 @@ const PRESETS = [
       fontFamily: 'Space Grotesk' as const,
       position: 'top-left' as const,
       fadeIn: true,
-      offsetX: 10,
-      offsetY: 10,
+      offsetX: 1,
+      offsetY: 6,
       textStyle: 'retro' as const,
       colorBlend: false,
       colorBlendEnd: '#ffffff',
@@ -387,8 +391,8 @@ const PRESETS = [
       fontFamily: 'Inter' as const,
       position: 'top-left' as const,
       fadeIn: true,
-      offsetX: 10,
-      offsetY: 10,
+      offsetX: 1,
+      offsetY: 6,
       textStyle: 'glass' as const,
       colorBlend: true,
       colorBlendEnd: '#ffffff',
@@ -439,8 +443,8 @@ const PRESETS = [
       fontFamily: 'Inter' as const,
       position: 'top-left' as const,
       fadeIn: true,
-      offsetX: 10,
-      offsetY: 10,
+      offsetX: 1,
+      offsetY: 6,
       textStyle: 'stroke' as const,
       colorBlend: false,
       colorBlendEnd: '#ffffff',
@@ -491,8 +495,8 @@ const PRESETS = [
       fontFamily: 'Outfit' as const,
       position: 'top-left' as const,
       fadeIn: true,
-      offsetX: 10,
-      offsetY: 10,
+      offsetX: 1,
+      offsetY: 6,
       textStyle: 'neon' as const,
       colorBlend: true,
       colorBlendEnd: '#9d00ff',
@@ -543,8 +547,8 @@ const PRESETS = [
       fontFamily: 'Outfit' as const,
       position: 'top-left' as const,
       fadeIn: true,
-      offsetX: 10,
-      offsetY: 10,
+      offsetX: 1,
+      offsetY: 6,
       textStyle: 'retro' as const,
       colorBlend: true,
       colorBlendEnd: '#ff0055',
@@ -1399,6 +1403,7 @@ export default function App() {
   // Drag-and-drop state
   const [isDraggingOver, setIsDraggingOver] = useState<boolean>(false);
   const [isShareModalOpen, setIsShareModalOpen] = useState<boolean>(false);
+  const [isSkinsModalOpen, setIsSkinsModalOpen] = useState<boolean>(false);
   const [shareThumbnail, setShareThumbnail] = useState<string | null>(null);
 
   // Export State
@@ -1407,6 +1412,7 @@ export default function App() {
     aspectRatio: '16:9',
     resolution: '1080p',
     fps: 60,
+    engine: 'offline',
   });
   const [isExporting, setIsExporting] = useState<boolean>(false);
   const [exportProgress, setExportProgress] = useState<number>(0);
@@ -1522,17 +1528,16 @@ export default function App() {
   const fsTimeoutRef = useRef<number | null>(null);
 
   const handleFSMouseMove = () => {
-    if (!document.fullscreenElement) {
-      if (!showFSControls) setShowFSControls(true);
-      return;
-    }
     setShowFSControls(true);
     if (fsTimeoutRef.current) {
       window.clearTimeout(fsTimeoutRef.current);
     }
-    fsTimeoutRef.current = window.setTimeout(() => {
-      setShowFSControls(false);
-    }, 2500); // Auto-hide controls after 2.5 seconds of idle in fullscreen
+    // Auto-hide controls after 3s of mouse inactivity if playing
+    if (isPlayingRef.current) {
+      fsTimeoutRef.current = window.setTimeout(() => {
+        setShowFSControls(false);
+      }, 3000);
+    }
   };
 
   useEffect(() => {
@@ -1575,8 +1580,8 @@ export default function App() {
   // Project Configuration Importer Ref
   const projectFileRef = useRef<HTMLInputElement | null>(null);
 
-  // Apply Preset Config
-  const loadPreset = (preset: typeof PRESETS[0]) => {
+  // Apply Preset / Skin Config
+  const loadPreset = (preset: ThemedSkin | typeof PRESETS[0]) => {
     const visualsToSet = {
       ...preset.visuals,
       activeStyles: preset.visuals.activeStyles || [preset.visuals.style]
@@ -1584,7 +1589,23 @@ export default function App() {
     setVisuals(visualsToSet);
     setBackground(preset.background);
     setTitleOverlay(preset.title);
-    setParticlesSet(prev => ({ ...prev, enabled: false }));
+
+    if ('particles' in preset && preset.particles) {
+      setParticlesSet(prev => ({
+        ...prev,
+        ...preset.particles,
+        speed: 2.0,
+        movementSpeed: 2.0,
+        enabled: preset.particles?.enabled ?? true,
+      }));
+    } else {
+      setParticlesSet(prev => ({
+        ...prev,
+        speed: 2.0,
+        movementSpeed: 2.0,
+        enabled: false,
+      }));
+    }
     
     // Auto-switch to the WAVE Tab (visuals) to see the applied settings immediately
     setActiveTab('visuals');
@@ -3342,6 +3363,7 @@ export default function App() {
   const handleResetBackgroundTab = () => {
     setBackground({
       ...PRESETS[0].background,
+      animationSpeed: 1.0,
       overlaySpectrumColorMode: 'default',
       overlaySpectrumCustomColor: '#00ff80',
       overlaySpectrumPulseSpeed: 1.0,
@@ -3358,6 +3380,7 @@ export default function App() {
 
   const handleResetParticlesTab = () => {
     setParticlesSet({
+      enabled: false,
       type: 'stars' as ParticleType,
       count: 100,
       minSize: 3,
@@ -3367,16 +3390,44 @@ export default function App() {
       gravity: 0.5,
       wind: 0.1,
       beatReactive: true,
+      audioReactiveGravity: false,
+      audioGravityMultiplier: 1.0,
+      isAngularBurstActive: false,
       beatThreshold: 140,
-      enabled: false,
+      enablePhysics: false,
+      enableParticleCollisions: false,
+      particleLifeBehavior: 'bounce',
+      collisionDamping: 0.85,
+      emittingDirection: 'float-up',
+      enableApexAttractor: false,
+      movementSpeed: 1.0,
+      beatBurst: false,
+      trailLength: 0,
+      lifetime: 3.0,
+      sensitivityFloor: 0.0,
+      audioDriveTarget: 'sub-bass',
+      useColorPalette: false,
+      particleColorPalette: ['#ff007f', '#7f00ff', '#00ffff', '#ffaa00'],
+      selectedPalettePreset: 'neon-synthwave',
+      colorInvertOnBeat: false,
+      colorBurstOnBeat: false,
+      beatReactiveColorShift: false,
+      cycleColors: false,
+      particleColorRandomness: 0,
+      particleTwinkle: false,
+      orbitalSway: false,
+      particleGlitch: false,
+      straightMotionOverride: false,
+      chaoticWindDrift: false,
+      spectralRainbow: false,
+      alphaDissolve: 1.0,
       shatterEnabled: false,
       shatterRadius: 150,
       shatterSpeed: 5,
       forwardVelocityRamp: 1.0,
       forwardSpeedMultiplier: 1.0,
-      useColorPalette: false,
-      selectedPalettePreset: 'neon-synthwave',
-      particleColorPalette: ['#ff007f', '#7f00ff', '#00ffff', '#ffaa00'],
+      chaosMultiplier: 0.0,
+      beatReactiveChaos: false,
     });
   };
 
@@ -3619,7 +3670,8 @@ export default function App() {
       format: 'mp4',
       aspectRatio: '16:9',
       resolution: '1080p',
-      fps: 60
+      fps: 60,
+      engine: 'offline'
     });
   };
 
@@ -3762,16 +3814,20 @@ export default function App() {
   useEffect(() => { customTextYRef.current = customTextY; }, [customTextY]);
   useEffect(() => { activeStickersRef.current = activeStickers; }, [activeStickers]);
 
-  // Listen for visualizer beat events to animate the symmetry multiplier slider thumb
+  // Listen for visualizer beat events to animate slider thumbs
   useEffect(() => {
     const handleBeat = () => {
-      const slider = document.getElementById('symmetry-mirror-multiplier-slider');
-      if (slider) {
-        slider.classList.remove('beat-pulse');
-        // Trigger reflow to restart css animation
-        void slider.offsetWidth;
-        slider.classList.add('beat-pulse');
-      }
+      const sliders = [
+        document.getElementById('symmetry-mirror-multiplier-slider'),
+        document.getElementById('chaos-multiplier-slider')
+      ];
+      sliders.forEach((slider) => {
+        if (slider) {
+          slider.classList.remove('beat-pulse');
+          void slider.offsetWidth;
+          slider.classList.add('beat-pulse');
+        }
+      });
     };
 
     window.addEventListener('audio-visualizer-beat', handleBeat);
@@ -5916,7 +5972,7 @@ export default function App() {
 
       source.start(0);
       await offlineCtx.startRendering();
-      return cache;
+      return { cache, audioBuffer, duration };
     } catch (err) {
       console.warn("Offline Audio extraction error, falling back to simulated visuals:", err);
       return null;
@@ -6084,7 +6140,208 @@ export default function App() {
         return;
       }
 
-      // 1. Setup standard browser canvas capture stream with explicit frame rate of 60 FPS
+      // Check if user requested Offline Step Render Engine or Real-Time Stream
+      const useOfflineEngine = exportSettings.engine !== 'realtime';
+
+      if (useOfflineEngine) {
+        const totalFrames = Math.ceil(totalDuration * fps);
+        setExportTimeRemaining("Offline Step Engine: Decoding audio and calculating exact 60 FPS FFT slices...");
+
+        const offlineAudioResult = await generateOfflineAudioDataCache(fps, totalFrames);
+        const offlineCache = offlineAudioResult?.cache || null;
+
+        // Reset playables
+        if (audioRef.current) {
+          audioRef.current.currentTime = 0;
+          audioRef.current.playbackRate = 1.0;
+        }
+        if (overlayVideoRef.current) {
+          overlayVideoRef.current.currentTime = 0;
+          overlayVideoRef.current.playbackRate = 1.0;
+        }
+
+        // Setup stream recording with requested FPS
+        const canvasStream = canvas.captureStream(fps);
+        const combinedStream = new MediaStream();
+        canvasStream.getVideoTracks().forEach(track => combinedStream.addTrack(track));
+
+        if (audioDestinationRef.current) {
+          audioDestinationRef.current.stream.getAudioTracks().forEach(track => combinedStream.addTrack(track));
+        }
+
+        // Determine supported MimeType
+        let selectedMimeType = 'video/webm;codecs=vp8,opus';
+        if (exportSettings.format === 'mov') {
+          selectedMimeType = 'video/quicktime;codecs=h264';
+        } else if (exportSettings.format === 'mp4') {
+          if (MediaRecorder.isTypeSupported('video/mp4;codecs=avc1,mp4a.40.2')) {
+            selectedMimeType = 'video/mp4;codecs=avc1,mp4a.40.2';
+          } else if (MediaRecorder.isTypeSupported('video/mp4;codecs=h264,aac')) {
+            selectedMimeType = 'video/mp4;codecs=h264,aac';
+          } else if (MediaRecorder.isTypeSupported('video/mp4;codecs=h264')) {
+            selectedMimeType = 'video/mp4;codecs=h264';
+          } else if (MediaRecorder.isTypeSupported('video/mp4')) {
+            selectedMimeType = 'video/mp4';
+          } else if (MediaRecorder.isTypeSupported('video/webm;codecs=h264,aac')) {
+            selectedMimeType = 'video/webm;codecs=h264,aac';
+          } else if (MediaRecorder.isTypeSupported('video/webm;codecs=h264')) {
+            selectedMimeType = 'video/webm;codecs=h264';
+          }
+        }
+
+        if (!MediaRecorder.isTypeSupported(selectedMimeType)) selectedMimeType = 'video/webm;codecs=vp8,opus';
+        if (!MediaRecorder.isTypeSupported(selectedMimeType)) selectedMimeType = 'video/webm;codecs=vp8';
+        if (!MediaRecorder.isTypeSupported(selectedMimeType)) selectedMimeType = 'video/webm';
+
+        const exportChunks: Blob[] = [];
+        const recorder = new MediaRecorder(combinedStream, {
+          mimeType: selectedMimeType,
+          videoBitsPerSecond: 6000000,
+        });
+
+        mediaRecorderRef.current = recorder;
+        recorder.ondataavailable = (event) => {
+          if (event.data && event.data.size > 0) {
+            exportChunks.push(event.data);
+          }
+        };
+
+        const onRecordingStopped = new Promise<Blob>((resolve, reject) => {
+          recorder.onstop = () => {
+            try {
+              const superBlob = new Blob(exportChunks, { type: selectedMimeType });
+              try {
+                (superBlob as any).title = audioTrack.name;
+                (superBlob as any).artist = 'tymark';
+                (superBlob as any).author = 'tymark';
+                (superBlob as any).copyright = '© tymark';
+                (superBlob as any).creator = 'tymark';
+              } catch (e) {}
+              resolve(superBlob);
+            } catch (err) {
+              reject(err);
+            }
+          };
+        });
+
+        // Pause live audio playback during frame-by-frame rendering
+        handleStopPlayback();
+
+        // Audio playback into audio destination node for media recorder capture
+        if (audioRef.current) {
+          audioRef.current.muted = false;
+          if (audioTrack.file) {
+            try { await audioRef.current.play(); } catch (e) {}
+          }
+        }
+
+        recorder.start();
+
+        const frameTimeStep = 1 / fps;
+        const frameMs = 1000 / fps;
+
+        for (let frame = 0; frame < totalFrames; frame++) {
+          if (isExportingCancelledRef.current) break;
+
+          const frameTime = frame * frameTimeStep;
+
+          let freqData: Uint8Array;
+          let waveformData: Uint8Array;
+
+          if (offlineCache && offlineCache[frame]) {
+            freqData = offlineCache[frame].freq;
+            waveformData = offlineCache[frame].time;
+          } else {
+            const fallback = generateRhythmicSimulatedData(frameTime, visuals.fftSize || 512);
+            freqData = fallback.analyserData;
+            waveformData = fallback.waveformData;
+          }
+
+          let isBeat = false;
+          let beatIntensity = 0;
+          let bassSum = 0;
+          const checkBins = Math.min(12, freqData.length);
+          for (let b = 0; b < checkBins; b++) bassSum += freqData[b];
+          const avgBass = bassSum / checkBins;
+          if (avgBass > 135) {
+            isBeat = true;
+            beatIntensity = Math.min(1.0, (avgBass - 90) / 110);
+          }
+
+          currentFrameOverrideRef.current = {
+            analyserData: freqData,
+            waveformData: waveformData,
+            isBeat,
+            beatIntensity,
+            currentTime: frameTime,
+          };
+
+          if (bgVideoRef.current && bgVideoRef.current.readyState >= 1) {
+            bgVideoRef.current.currentTime = frameTime;
+          }
+          if (overlayVideoRef.current && overlayVideoRef.current.readyState >= 1) {
+            overlayVideoRef.current.currentTime = frameTime;
+          }
+
+          if (renderFrameRef.current) {
+            renderFrameRef.current();
+          }
+
+          const renderProgress = Math.min(99, Math.floor(((frame + 1) / totalFrames) * 99));
+          setExportProgress(renderProgress);
+          setCurrentTime(frameTime);
+          setExportTimeRemaining(
+            `Offline Step Engine (Locked 60 FPS): Frame ${frame + 1} / ${totalFrames} (${renderProgress}% completed)...`
+          );
+
+          await new Promise((resolve) => setTimeout(resolve, frameMs));
+        }
+
+        currentFrameOverrideRef.current = null;
+        if (recorder.state !== 'inactive') {
+          recorder.stop();
+        }
+        handleStopPlayback();
+
+        setExportTimeRemaining("Finalizing file encoding and saving video...");
+        setExportProgress(99);
+
+        const superBlob = await onRecordingStopped;
+
+        let finalBlob = superBlob;
+        if (selectedMimeType.includes('mp4')) {
+          try {
+            const arrayBuffer = await superBlob.arrayBuffer();
+            const infectedBuffer = injectMP4Metadata(arrayBuffer, "tymark", "© tymark");
+            finalBlob = new Blob([infectedBuffer], { type: selectedMimeType });
+          } catch (err) {
+            console.error("MP4 Metadata Native injection failed:", err);
+          }
+        }
+
+        const videoUrl = URL.createObjectURL(finalBlob);
+        setExportedVideoUrl(videoUrl);
+        setIsExporting(false);
+        isExportingRef.current = false;
+        setExportProgress(100);
+        setExportTimeRemaining("Completed");
+
+        const a = document.createElement("a");
+        a.href = videoUrl;
+        const originalSongTitle = audioTrack.file 
+          ? audioTrack.file.name.replace(/\.[^/.]+$/, "") 
+          : audioTrack.name;
+        
+        let fileExt = exportSettings.format;
+        if (selectedMimeType.includes('webm')) fileExt = 'webm';
+        else if (selectedMimeType.includes('mp4')) fileExt = 'mp4';
+
+        a.download = `${originalSongTitle} - Music Video.${fileExt}`;
+        a.click();
+        return;
+      }
+
+      // Real-Time Fast Export Engine (Fallback/Standard Stream Path)
       const canvasStream = canvas.captureStream(60);
       const combinedStream = new MediaStream();
       canvasStream.getVideoTracks().forEach(track => combinedStream.addTrack(track));
@@ -6734,6 +6991,16 @@ export default function App() {
 
                 <button
                   type="button"
+                  onClick={() => setIsSkinsModalOpen(true)}
+                  className="flex items-center space-x-1.5 px-2.5 py-0.5 rounded bg-brand-green/15 text-brand-green-hover border border-brand-green/30 hover:bg-brand-green/25 transition-all text-[10px] font-mono font-bold cursor-pointer active:scale-95 shrink-0 shadow-sm"
+                  title="Browse all visualizer presets gallery"
+                >
+                  <Palette className="w-3 h-3 text-brand-green" />
+                  <span>🎨 PRESET GALLERY</span>
+                </button>
+
+                <button
+                  type="button"
                   onClick={handleRandomizeStyles}
                   className="flex items-center space-x-1 px-2 py-0.5 rounded bg-zinc-950 text-zinc-400 border border-zinc-800 hover:border-brand-green hover:text-brand-green-hover hover:shadow-brand-green/20 hover:bg-brand-green/10 transition-all text-[10px] font-mono font-semibold cursor-pointer active:scale-95 shrink-0"
                   title="Randomize everything"
@@ -6744,29 +7011,33 @@ export default function App() {
               </div>
             </div>
             
-            <div className="grid grid-cols-2 sm:grid-cols-4 lg:grid-cols-8 gap-2 w-full items-center">
-              {PRESETS.map((p) => {
-                const isActive = visuals.style === p.visuals.style && background.type === p.background.type;
+            {/* THEMED SKINS QUICK SELECTOR BAR */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 w-full items-center">
+              {THEMED_SKINS.slice(0, 12).map((skin) => {
+                const isActive = visuals.style === skin.visuals.style && visuals.primaryColor === skin.visuals.primaryColor;
                 return (
                   <button
-                    key={p.id}
-                    onClick={() => loadPreset(p)}
-                    title={p.description}
-                    style={isActive ? { boxShadow: `0 0 12px var(--color-brand-green)` } : {}}
-                    className={`flex items-center justify-start text-left px-3 py-2 rounded-md border text-[10px] transition-all relative overflow-hidden group cursor-pointer ${
+                    key={skin.id}
+                    onClick={() => loadPreset(skin)}
+                    title={skin.description}
+                    style={isActive ? { boxShadow: `0 0 10px ${skin.visuals.primaryColor}88` } : {}}
+                    className={`flex items-center justify-between text-left px-2.5 py-1.5 rounded-lg border text-[10px] font-mono transition-all relative overflow-hidden group cursor-pointer ${
                       isActive
-                        ? 'bg-brand-green text-zinc-950 font-bold border-brand-green'
-                        : 'border-zinc-900/50 bg-zinc-950/40 text-lime-700 font-medium hover:text-brand-green hover:bg-brand-green-hover/5 hover:border-zinc-800'
+                        ? 'bg-brand-green text-zinc-950 font-bold border-brand-green shadow-sm'
+                        : 'border-zinc-850 bg-zinc-950/60 text-zinc-300 font-medium hover:text-white hover:bg-zinc-900 hover:border-zinc-700'
                     }`}
                   >
+                    <div className="flex items-center space-x-1.5 truncate">
+                      <span className="text-[10px]">{skin.badge.split(' ')[0]}</span>
+                      <span className="truncate">{skin.name}</span>
+                    </div>
                     <span 
-                      className="w-1.5 h-1.5 rounded-full mr-1.5 shrink-0 transition-all duration-300" 
+                      className="w-2 h-2 rounded-full shrink-0 transition-all duration-300 border border-white/20" 
                       style={{ 
-                        backgroundColor: p.visuals.primaryColor, 
-                        boxShadow: isActive ? `0 0 6px ${p.visuals.primaryColor}` : 'none'
+                        backgroundColor: skin.visuals.primaryColor, 
+                        boxShadow: isActive ? `0 0 6px ${skin.visuals.primaryColor}` : 'none'
                       }} 
                     />
-                    <span className="truncate w-full">{p.name}</span>
                   </button>
                 );
               })}
@@ -6813,149 +7084,149 @@ export default function App() {
                   onTouchEnd={handleCanvasMouseUp}
                 />
 
-                {/* Floating Full Screen Trigger overlay button */}
+                {/* YouTube Style Overlay Audio/Video Playback Interface */}
                 <AnimatePresence>
                   {showFSControls && (
-                    <motion.button
-                      initial={{ opacity: 0, scale: 0.9 }}
-                      animate={{ opacity: 1, scale: 1 }}
-                      exit={{ opacity: 0, scale: 0.9 }}
-                      type="button"
-                      onClick={handleToggleFullscreen}
-                      className="absolute top-4 right-4 z-40 p-2.5 rounded-xl bg-zinc-950/80 hover:bg-zinc-900 border border-zinc-800 hover:border-brand-green/50 text-zinc-300 hover:text-brand-green transition-all shadow-lg backdrop-blur-md cursor-pointer group/fs flex items-center justify-center gap-2 text-[10px] font-mono font-bold"
-                      title={isFullscreen ? 'Exit Full Screen (ESC)' : 'Enter Full Screen'}
-                    >
-                      {isFullscreen ? (
-                        <>
-                          <Minimize2 className="w-3.5 h-3.5" />
-                          <span className="max-w-0 group-hover/fs:max-w-[120px] overflow-hidden transition-all duration-300 whitespace-nowrap block text-[9px] tracking-wider uppercase">Exit Fullscreen</span>
-                        </>
-                      ) : (
-                        <>
-                          <Maximize2 className="w-3.5 h-3.5" />
-                          <span className="max-w-0 group-hover/fs:max-w-[120px] overflow-hidden transition-all duration-300 whitespace-nowrap block text-[9px] tracking-wider uppercase">Fullscreen</span>
-                        </>
-                      )}
-                    </motion.button>
-                  )}
-                </AnimatePresence>
-
-                {/* Floating Full Screen Controls Bar (Overlay on mouse activity) */}
-                <AnimatePresence>
-                  {isFullscreen && showFSControls && (
                     <motion.div
-                      initial={{ opacity: 0, y: 30 }}
+                      initial={{ opacity: 0, y: 15 }}
                       animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: 30 }}
+                      exit={{ opacity: 0, y: 15 }}
                       transition={{ duration: 0.2 }}
-                      className="absolute bottom-8 left-1/2 -translate-x-1/2 z-50 w-full max-w-2xl bg-zinc-950/90 border border-zinc-850/90 p-4 rounded-2xl backdrop-blur-xl shadow-2xl flex flex-col gap-3"
+                      className="absolute bottom-0 inset-x-0 z-40 bg-gradient-to-t from-black/20 via-black/10 to-transparent pt-10 pb-3 px-3 sm:px-4 flex flex-col gap-2 select-none pointer-events-auto"
                     >
-                      {/* Timeline Slider inside full screen */}
-                      <div className="w-full flex items-center space-x-3">
-                        <span className="text-[10px] text-zinc-400 font-mono min-w-[34px] text-right">
-                          {Math.floor(currentTime / 60)}:{(Math.floor(currentTime % 60)).toString().padStart(2, '0')}
-                        </span>
-                        
-                        <div className="flex-1 flex items-center relative group min-w-0">
-                          <input
-                            type="range"
-                            min="0"
-                            max={trackDuration || 30}
-                            step="0.1"
-                            value={currentTime}
-                            onChange={(e) => handleTimelineSeek(parseFloat(e.target.value))}
-                            className="w-full h-1.5 rounded-full accent-brand-green cursor-pointer bg-zinc-900 appearance-none border border-zinc-800 transition-all outline-none"
-                            title="Drag or click to seek audio playback timeline"
+                      {/* YouTube Style Progress / Scrubber Bar */}
+                      <div className="relative w-full flex items-center group/scrubber h-3 cursor-pointer">
+                        {/* Track background */}
+                        <div className="w-full h-1 group-hover/scrubber:h-1.5 bg-zinc-700/70 rounded-full overflow-hidden transition-all relative">
+                          {/* Progress fill (brand-green) */}
+                          <div 
+                            className="h-full bg-brand-green relative transition-all duration-75"
+                            style={{ width: `${Math.min(100, Math.max(0, ((currentTime) / (trackDuration || 30)) * 100))}%` }}
                           />
                         </div>
 
-                        <span className="text-[10px] text-zinc-400 font-mono min-w-[34px]">
-                          {audioTrack.file 
-                            ? `${Math.floor(trackDuration / 60)}:${(Math.floor(trackDuration % 60)).toString().padStart(2, '0')}`
-                            : 'LOOP'
-                          }
-                        </span>
+                        {/* Scrubber Knob (YouTube style handle) */}
+                        <div 
+                          className="absolute w-3.5 h-3.5 bg-brand-green rounded-full border-2 border-white shadow-md transform -translate-x-1/2 scale-0 group-hover/scrubber:scale-100 transition-transform pointer-events-none"
+                          style={{ left: `${Math.min(100, Math.max(0, ((currentTime) / (trackDuration || 30)) * 100))}%` }}
+                        />
+
+                        {/* Range Input for Seeking */}
+                        <input
+                          type="range"
+                          min="0"
+                          max={trackDuration || 30}
+                          step="0.1"
+                          value={currentTime}
+                          onChange={(e) => handleTimelineSeek(parseFloat(e.target.value))}
+                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                          title="Click or drag to seek audio timeline"
+                        />
                       </div>
 
-                      {/* Main control action buttons inside full screen */}
-                      <div className="flex items-center justify-between w-full">
-                        <div className="flex items-center space-x-2.5">
-                          {/* Play/Pause Button */}
+                      {/* YouTube Style Controls Bar Row */}
+                      <div className="flex items-center justify-between text-white font-sans">
+                        
+                        {/* Left Controls: Play/Pause, Stop, Volume, Duration */}
+                        <div className="flex items-center space-x-2 sm:space-x-3">
+                          {/* Play / Pause button */}
                           <button
+                            type="button"
                             onClick={handleTogglePlayback}
-                            className="w-9 h-9 rounded-full bg-zinc-900 hover:bg-zinc-800 text-brand-green flex items-center justify-center transition-all shadow-sm active:scale-95 cursor-pointer border border-brand-green/30"
+                            className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/15 text-white transition-all cursor-pointer active:scale-95 shrink-0"
                             title={isPlaying ? 'Pause' : 'Play'}
                           >
-                            {isPlaying ? <Pause className="w-4 h-4 text-brand-green fill-brand-green" /> : <Play className="w-4 h-4 fill-brand-green text-brand-green ml-0.5" />}
+                            {isPlaying ? (
+                              <Pause className="w-4 h-4 fill-brand-green text-brand-green" />
+                            ) : (
+                              <Play className="w-4 h-4 fill-brand-green text-brand-green ml-0.5" />
+                            )}
                           </button>
 
-                          {/* Stop Button */}
+                          {/* Stop button */}
                           <button
+                            type="button"
                             onClick={handleStopPlayback}
-                            className="w-8 h-8 rounded-full bg-zinc-900 hover:bg-zinc-800 text-brand-green flex items-center justify-center transition-all cursor-pointer border border-brand-green/30"
-                            title="Stop"
+                            className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-white/15 text-zinc-300 hover:text-brand-green transition-all cursor-pointer shrink-0"
+                            title="Stop & Reset"
                           >
-                            <Square className="w-3 h-3 fill-brand-green text-brand-green" />
+                            <Square className="w-3 h-3 fill-zinc-300 text-zinc-300 hover:fill-brand-green hover:text-brand-green" />
                           </button>
-                        </div>
 
-                        {/* Track Info */}
-                        <div className="hidden sm:flex flex-col text-center max-w-[40%]">
-                          <span className="text-white text-[11px] font-mono font-bold truncate">
-                            {audioTrack.name || "Virtual Synth Stream"}
-                          </span>
-                          <span className="text-zinc-400 text-[9px] font-sans truncate mt-0.5">
-                            {titleOverlay?.text || "Reactive Audio Visualizer"}
-                          </span>
-                        </div>
-
-                        {/* Right Section: Volume & Fullscreen exit */}
-                        <div className="flex items-center space-x-3">
-                          {/* Volume controls */}
-                          <div className="flex items-center space-x-1.5 bg-zinc-900 border border-zinc-800 px-2.5 py-1 rounded-full">
+                          {/* YouTube Style Volume Control */}
+                          <div className="flex items-center space-x-1.5 group/volume">
                             <button
+                              type="button"
                               onClick={() => setMonitorIsMuted(!monitorIsMuted)}
-                              className="text-zinc-400 hover:text-white transition-all cursor-pointer"
+                              className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-white/15 text-zinc-300 hover:text-white transition-all cursor-pointer shrink-0"
+                              title={monitorIsMuted ? 'Unmute' : 'Mute'}
                             >
-                              {monitorIsMuted ? <VolumeX className="w-3.5 h-3.5 text-red-400" /> : <Volume2 className="w-3.5 h-3.5 text-brand-green" />}
+                              {monitorIsMuted || monitorVolume === 0 ? (
+                                <VolumeX className="w-4 h-4 text-red-400" />
+                              ) : (
+                                <Volume2 className="w-4 h-4 text-brand-green" />
+                              )}
                             </button>
+                            
                             <input
                               type="range"
                               min="0"
                               max="1"
                               step="0.05"
-                              value={monitorVolume}
+                              value={monitorIsMuted ? 0 : monitorVolume}
                               onChange={(e) => {
                                 setMonitorVolume(parseFloat(e.target.value));
                                 setMonitorIsMuted(false);
                               }}
-                              className="w-14 accent-brand-green h-1 cursor-pointer"
+                              className="w-12 sm:w-16 accent-brand-green h-1 cursor-pointer"
                             />
                           </div>
 
-                          {/* Exit Fullscreen button */}
+                          {/* Time Display (YouTube style: 0:15 / 3:42) */}
+                          <div className="text-[11px] font-mono text-zinc-300 tracking-tight shrink-0 font-medium ml-1">
+                            <span>
+                              {Math.floor(currentTime / 60)}:{(Math.floor(currentTime % 60)).toString().padStart(2, '0')}
+                            </span>
+                            <span className="text-zinc-500 mx-1">/</span>
+                            <span className="text-zinc-400">
+                              {audioTrack.file 
+                                ? `${Math.floor(trackDuration / 60)}:${(Math.floor(trackDuration % 60)).toString().padStart(2, '0')}`
+                                : 'LOOP'
+                              }
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Center Section: YouTube Title & Artist info */}
+                        <div className="hidden md:flex flex-col text-center max-w-[160px] lg:max-w-[280px]">
+                          <span className="text-[11px] font-mono font-bold text-zinc-200 truncate">
+                            {audioTrack.name || "Virtual Synth Stream"}
+                          </span>
+                          <span className="text-[9px] text-brand-green/80 font-mono uppercase tracking-widest truncate">
+                            {titleOverlay?.text || "Tymark Visualizer Studio"}
+                          </span>
+                        </div>
+
+                        {/* Right Controls: Quality badge & Fullscreen toggle */}
+                        <div className="flex items-center space-x-2 shrink-0">
+                          <span className="hidden sm:inline-block px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-zinc-900/90 border border-zinc-800 text-brand-green uppercase tracking-wider">
+                            {exportSettings.fps}FPS • {exportSettings.quality}
+                          </span>
+
                           <button
+                            type="button"
                             onClick={handleToggleFullscreen}
-                            className="w-8 h-8 rounded-lg bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-brand-green/30 text-zinc-300 hover:text-brand-green transition-all shadow-md cursor-pointer flex items-center justify-center"
-                            title="Exit Full Screen"
+                            className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/15 text-zinc-300 hover:text-brand-green transition-all cursor-pointer"
+                            title={isFullscreen ? "Exit Fullscreen (ESC)" : "Fullscreen (F)"}
                           >
-                            <Minimize2 className="w-4 h-4" />
+                            {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
                           </button>
                         </div>
+
                       </div>
                     </motion.div>
                   )}
                 </AnimatePresence>
-
-                {/* Loading state or No-Audio warning indicator overlay */}
-                {!audioTrack.file && (
-                  <div className="absolute inset-x-0 bottom-4 text-center pointer-events-none px-4">
-                    <div className="inline-flex items-center space-x-2 bg-zinc-900/95 border border-zinc-800 px-3 py-1.5 rounded-md backdrop-blur-sm text-[10px] text-zinc-300 font-mono">
-                      <AlertCircle className="w-3.5 h-3.5 text-brand-green" />
-                      <span>Rhythmic visualizer simulation active. Drag and drop audio to begin custom rendering</span>
-                    </div>
-                  </div>
-                )}
 
                 {/* Exporting Indicator Overlay */}
                 {isExporting && (
@@ -7038,89 +7309,29 @@ export default function App() {
             </div>
           </div>
 
-          {/* ACTIVE PREVIEW CONTROLLER STATUS BAR */}
-          <div className="w-full max-w-4xl bg-zinc-900 border border-zinc-900 rounded-xl p-4 flex flex-col sm:flex-row items-center justify-between gap-4">
-            
-            {/* Timeline slider representation */}
-            <div className="w-full flex items-center space-x-3">
-              <span className="text-xs text-zinc-500 font-mono min-w-[34px] text-right">
-                {Math.floor(currentTime / 60)}:{(Math.floor(currentTime % 60)).toString().padStart(2, '0')}
-              </span>
-              
-              <div className="flex-1 flex items-center relative group min-w-0">
-                <input
-                  type="range"
-                  min="0"
-                  max={trackDuration || 30}
-                  step="0.1"
-                  value={currentTime}
-                  onChange={(e) => handleTimelineSeek(parseFloat(e.target.value))}
-                  className="w-full h-1.5 rounded-full accent-brand-green cursor-pointer bg-zinc-950 appearance-none hover:bg-zinc-905 border border-zinc-900/60 transition-all outline-none"
-                  title="Drag or click to seek audio playback timeline"
-                />
+          {/* YOUTUBE STYLE VIDEO / AUDIO METADATA CARD */}
+          <div className="w-full max-w-4xl bg-zinc-950 border border-zinc-900 rounded-xl p-3.5 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-sm">
+            <div className="flex items-center space-x-3 min-w-0">
+              <div className="w-9 h-9 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center shrink-0">
+                <Music className="w-4 h-4 text-brand-green" />
               </div>
-
-              <span className="text-xs text-zinc-500 font-mono min-w-[34px]">
-                {audioTrack.file 
-                  ? `${Math.floor(trackDuration / 60)}:${(Math.floor(trackDuration % 60)).toString().padStart(2, '0')}`
-                  : 'LOOP'
-                }
-              </span>
+              <div className="min-w-0 flex flex-col">
+                <span className="text-xs font-mono font-bold text-zinc-200 truncate">
+                  {audioTrack.name || "Virtual Synth Stream"}
+                </span>
+                <span className="text-[10px] text-zinc-500 font-sans truncate">
+                  {audioTrack.artist ? `${audioTrack.artist} • ` : ''}{visuals.style.toUpperCase()} MODE
+                </span>
+              </div>
             </div>
 
-            {/* Controls panel button deck */}
-            <div className="flex items-center justify-between w-full sm:w-auto gap-4 self-stretch sm:self-auto border-t sm:border-t-0 pt-3 sm:pt-0 border-zinc-800">
-              
-              <div className="flex items-center space-x-2">
-                <button
-                  onClick={handleTogglePlayback}
-                  className="w-9 h-9 rounded-full bg-zinc-900 hover:bg-zinc-800 text-brand-green flex items-center justify-center transition-all shadow-sm active:scale-95 cursor-pointer border border-brand-green/30"
-                  title={isPlaying ? 'Pause Preview' : 'Play Preview'}
-                >
-                  {isPlaying ? <Pause className="w-4 h-4 text-brand-green fill-brand-green" /> : <Play className="w-4 h-4 fill-brand-green text-brand-green ml-0.5" />}
-                </button>
-
-                <button
-                  onClick={handleStopPlayback}
-                  className="w-8 h-8 rounded-full bg-zinc-900 hover:bg-zinc-800 text-brand-green flex items-center justify-center transition-all cursor-pointer border border-brand-green/30"
-                  title="Stop and Reset"
-                >
-                  <Square className="w-3 h-3 fill-brand-green text-brand-green" />
-                </button>
-              </div>
-
-              {/* Volume sliders */}
-              <div className="flex items-center space-x-2 bg-zinc-950 border border-zinc-850 px-3 py-1.5 rounded-full">
-                <button
-                  onClick={() => setMonitorIsMuted(!monitorIsMuted)}
-                  className="text-zinc-400 hover:text-white transition-all cursor-pointer"
-                >
-                  {monitorIsMuted ? <VolumeX className="w-3.5 h-3.5 text-red-400" /> : <Volume2 className="w-3.5 h-3.5" />}
-                </button>
-                <input
-                  type="range"
-                  min="0"
-                  max="1"
-                  step="0.05"
-                  value={monitorVolume}
-                  onChange={(e) => {
-                    setMonitorVolume(parseFloat(e.target.value));
-                    setMonitorIsMuted(false);
-                  }}
-                  className="w-16 md:w-20 accent-brand-green h-1 cursor-pointer"
-                />
-              </div>
-
-              {/* Fullscreen Button */}
-              <button
-                type="button"
-                onClick={handleToggleFullscreen}
-                className="w-8 h-8 rounded-full bg-zinc-900 hover:bg-zinc-800 text-brand-green flex items-center justify-center transition-all cursor-pointer border border-brand-green/30 shrink-0"
-                title={isFullscreen ? "Exit Full Screen" : "Enter Full Screen"}
-              >
-                {isFullscreen ? <Minimize2 className="w-3.5 h-3.5" /> : <Maximize2 className="w-3.5 h-3.5" />}
-              </button>
-
+            <div className="flex items-center space-x-2 text-[10px] font-mono shrink-0">
+              <span className="px-2 py-1 rounded bg-zinc-900 border border-zinc-800 text-zinc-400">
+                ASPECT {exportSettings.aspectRatio}
+              </span>
+              <span className="px-2 py-1 rounded bg-brand-green/10 border border-brand-green/20 text-brand-green font-bold">
+                {isPlaying ? "PLAYING" : "PAUSED"}
+              </span>
             </div>
           </div>
 
@@ -8722,6 +8933,155 @@ export default function App() {
                       )}
                     </div>
 
+                    {/* Amplitude Noise Gate & Transient Movement */}
+                    <div className="space-y-3 border-t border-zinc-850 pt-3 bg-transparent">
+                      <div className="flex items-center justify-between">
+                        <span className="font-semibold text-white uppercase text-[10px] tracking-wider font-mono">Audio Responsiveness & Diagnostics</span>
+                      </div>
+
+                      {/* Amplitude Noise Gate Slider */}
+                      <div className="space-y-1">
+                        <div className="flex justify-between font-mono text-[9px] text-zinc-400 font-bold">
+                          <span>AMPLITUDE NOISE GATE</span>
+                          <span className="text-brand-green font-semibold">{(visuals.noiseFloorThreshold !== undefined ? visuals.noiseFloorThreshold : 28)} / 100</span>
+                        </div>
+                        <input
+                          type="range"
+                          min="0"
+                          max="80"
+                          step="1"
+                          value={visuals.noiseFloorThreshold !== undefined ? visuals.noiseFloorThreshold : 28}
+                          onChange={(e) => setVisuals(prev => ({ ...prev, noiseFloorThreshold: parseInt(e.target.value) }))}
+                          className="w-full accent-brand-green cursor-pointer"
+                        />
+                        <span className="text-[9px] text-zinc-500 block font-sans">
+                          Minimum noise cutoff threshold ensuring bars drop completely back to zero during silence or quiet passages.
+                        </span>
+                      </div>
+
+                      {/* Kinetic Response Mode */}
+                      <div className="space-y-2 p-2.5 bg-[#07070d]/80 rounded border border-zinc-900">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="font-semibold text-zinc-200 block font-sans text-[11px]">Kinetic Response Mode</span>
+                            <span className="text-[9px] text-zinc-400 block font-sans mt-0.5">
+                              Dynamic snapback speed proportional to audio energy for snappy drum transients.
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setVisuals(prev => ({ ...prev, kineticResponse: !prev.kineticResponse }))}
+                            className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                              visuals.kineticResponse ? 'bg-brand-green' : 'bg-zinc-800'
+                            }`}
+                          >
+                            <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                              visuals.kineticResponse ? 'translate-x-3.5' : 'translate-x-0'
+                            }`} />
+                          </button>
+                        </div>
+                        {visuals.kineticResponse && (
+                          <div className="space-y-1 pt-1 border-t border-zinc-800/60">
+                            <div className="flex justify-between font-mono text-[9px] text-zinc-400 font-bold">
+                              <span>KINETIC SNAPBACK SPEED</span>
+                              <span className="text-white font-semibold">{(visuals.kineticSensitivity !== undefined ? visuals.kineticSensitivity : 1.0).toFixed(1)}x</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="0.2"
+                              max="2.5"
+                              step="0.1"
+                              value={visuals.kineticSensitivity !== undefined ? visuals.kineticSensitivity : 1.0}
+                              onChange={(e) => setVisuals(prev => ({ ...prev, kineticSensitivity: parseFloat(e.target.value) }))}
+                              className="w-full accent-brand-green cursor-pointer"
+                            />
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Real-Time Peak Level Indicators */}
+                      <div className="space-y-2 p-2.5 bg-[#07070d]/80 rounded border border-zinc-900">
+                        <div className="flex items-center justify-between">
+                          <div>
+                            <span className="font-semibold text-zinc-200 block font-sans text-[11px]">Real-Time Peak Indicators</span>
+                            <span className="text-[9px] text-zinc-400 block font-sans mt-0.5">
+                              Floating peak markers on frequency bars for visual intensity feedback.
+                            </span>
+                          </div>
+                          <button
+                            type="button"
+                            onClick={() => setVisuals(prev => ({ ...prev, showPeakHolders: !prev.showPeakHolders }))}
+                            className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                              visuals.showPeakHolders ? 'bg-brand-green' : 'bg-zinc-800'
+                            }`}
+                          >
+                            <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                              visuals.showPeakHolders ? 'translate-x-3.5' : 'translate-x-0'
+                            }`} />
+                          </button>
+                        </div>
+                        {visuals.showPeakHolders && (
+                          <div className="space-y-1 pt-1 border-t border-zinc-800/60">
+                            <div className="flex justify-between font-mono text-[9px] text-zinc-400 font-bold">
+                              <span>PEAK GRAVITY FALLOFF SPEED</span>
+                              <span className="text-white font-semibold">{(visuals.peakDecaySpeed !== undefined ? visuals.peakDecaySpeed : 1.8).toFixed(1)}</span>
+                            </div>
+                            <input
+                              type="range"
+                              min="0.5"
+                              max="5.0"
+                              step="0.1"
+                              value={visuals.peakDecaySpeed !== undefined ? visuals.peakDecaySpeed : 1.8}
+                              onChange={(e) => setVisuals(prev => ({ ...prev, peakDecaySpeed: parseFloat(e.target.value) }))}
+                              className="w-full accent-brand-green cursor-pointer"
+                            />
+                          </div>
+                        )}
+                      </div>
+
+                      {/* Waveform Beat Pulse / Radius Pumping */}
+                      <div className="flex items-center justify-between p-2.5 bg-[#07070d]/80 rounded border border-zinc-900">
+                        <div>
+                          <span className="font-semibold text-zinc-200 block font-sans text-[11px]">Waveform Beat Pulse / Radius Pumping</span>
+                          <span className="text-[9px] text-zinc-400 block font-sans mt-0.5">
+                            Expand and contract round waveform shapes dynamically on music beat transients.
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setVisuals(prev => ({ ...prev, enableWaveformBeatPulse: prev.enableWaveformBeatPulse === false ? true : false }))}
+                          className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                            visuals.enableWaveformBeatPulse !== false ? 'bg-brand-green' : 'bg-zinc-800'
+                          }`}
+                        >
+                          <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                            visuals.enableWaveformBeatPulse !== false ? 'translate-x-3.5' : 'translate-x-0'
+                          }`} />
+                        </button>
+                      </div>
+
+                      {/* Real-Time Performance & Diagnostics Overlay */}
+                      <div className="flex items-center justify-between p-2.5 bg-[#07070d]/80 rounded border border-zinc-900">
+                        <div>
+                          <span className="font-semibold text-zinc-200 block font-sans text-[11px]">Performance HUD Overlay (FPS & RAM)</span>
+                          <span className="text-[9px] text-zinc-400 block font-sans mt-0.5">
+                            Display live FPS rate and JS memory usage directly on the visualizer canvas.
+                          </span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setVisuals(prev => ({ ...prev, showPerformanceOverlay: !prev.showPerformanceOverlay }))}
+                          className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                            visuals.showPerformanceOverlay ? 'bg-brand-green' : 'bg-zinc-800'
+                          }`}
+                        >
+                          <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                            visuals.showPerformanceOverlay ? 'translate-x-3.5' : 'translate-x-0'
+                          }`} />
+                        </button>
+                      </div>
+                    </div>
+
                     <div className="space-y-1">
                       <div className="flex justify-between font-mono text-[9px] text-zinc-400 font-bold">
                         <span>DIGITAL GLITCH FREQUENCY</span>
@@ -9081,41 +9441,7 @@ export default function App() {
                       />
                     </div>
                     
-                    <div className="flex items-center justify-between p-2 bg-[#07070a]/40 rounded border border-zinc-950/40">
-                      <div>
-                        <span className="font-semibold text-zinc-300 block font-sans text-xs">Auto-Rotate Canvas</span>
-                        <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Slowly rotates the entire stage</span>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setVisuals(prev => ({ ...prev, autoRotateCanvas: !prev.autoRotateCanvas }))}
-                        className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
-                          visuals.autoRotateCanvas ? 'bg-brand-green' : 'bg-zinc-800'
-                        }`}
-                      >
-                        <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
-                          visuals.autoRotateCanvas ? 'translate-x-3.5' : 'translate-x-0'
-                        }`} />
-                      </button>
-                    </div>
 
-                    {visuals.autoRotateCanvas && (
-                      <div className="space-y-1 p-2.5 bg-[#07070a]/40 rounded border border-zinc-950/40 mt-1 animate-in fade-in duration-200">
-                        <div className="flex justify-between font-mono text-[9px] text-zinc-400 font-bold">
-                          <span>AUTO-ROTATE SPEED</span>
-                          <span className="text-white font-semibold">{(visuals.autoRotateSpeed !== undefined ? visuals.autoRotateSpeed : 1.0).toFixed(1)}x</span>
-                        </div>
-                        <input
-                          type="range"
-                          min="-10.0"
-                          max="10.0"
-                          step="0.1"
-                          value={visuals.autoRotateSpeed !== undefined ? visuals.autoRotateSpeed : 1.0}
-                          onChange={(e) => setVisuals(prev => ({ ...prev, autoRotateSpeed: parseFloat(e.target.value) }))}
-                          className="w-full accent-brand-green cursor-pointer"
-                        />
-                      </div>
-                    )}
 
                     <div className="grid grid-cols-1 gap-3 pt-1">
                       <div className="space-y-1">
@@ -9489,70 +9815,6 @@ export default function App() {
                           </button>
                         </div>
 
-                        {/* Suggestion 6: Neon Bloom Glow Filter Overlay */}
-                        <div className="flex items-center justify-between p-2.5 bg-[#07070a]/80 rounded border border-zinc-950/60 mt-2">
-                          <div className="text-left max-w-[78%]">
-                            <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Neon Bloom Filter</span>
-                            <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">High-performance double blurred bloom overlay simulating neon glow</span>
-                          </div>
-                          <button
-                            type="button"
-                            onClick={() => setVisuals(prev => ({ ...prev, glowBloom: !prev.glowBloom }))}
-                            className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
-                              visuals.glowBloom ? 'bg-brand-green' : 'bg-zinc-800'
-                            }`}
-                          >
-                            <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
-                              visuals.glowBloom ? 'translate-x-3.5' : 'translate-x-0'
-                            }`} />
-                          </button>
-                        </div>
-                        {visuals.glowBloom && (
-                          <div className="space-y-1.5 p-2.5 bg-[#07070a]/40 rounded border border-zinc-950/40 mt-1">
-                            <div className="flex justify-between font-mono text-[9px] text-zinc-400 font-bold">
-                              <span>BLOOM INTENSITY</span>
-                              <span className="text-white font-semibold">{((visuals.glowBloomIntensity ?? 0.6) * 100).toFixed(0)}%</span>
-                            </div>
-                            <input
-                              type="range"
-                              min="0.1"
-                              max="1.5"
-                              step="0.05"
-                              value={visuals.glowBloomIntensity ?? 0.6}
-                              onChange={(e) => setVisuals(prev => ({ ...prev, glowBloomIntensity: parseFloat(e.target.value) }))}
-                              className="w-full accent-brand-green cursor-pointer"
-                            />
-                            
-                            {/* Bloom Presets Button Group */}
-                            <div className="pt-2 mt-1.5 border-t border-zinc-900/60">
-                              <label className="block text-[8px] font-mono font-bold text-zinc-500 uppercase tracking-wide mb-1">Bloom Intensity Presets</label>
-                              <div className="grid grid-cols-3 gap-1">
-                                {[
-                                  { label: 'Subtle', value: 0.3 },
-                                  { label: 'Vibrant', value: 0.7 },
-                                  { label: 'Extreme', value: 1.3 }
-                                ].map((preset) => {
-                                  const currentIntensity = visuals.glowBloomIntensity ?? 0.6;
-                                  const isSelected = Math.abs(currentIntensity - preset.value) < 0.05;
-                                  return (
-                                    <button
-                                      key={preset.label}
-                                      type="button"
-                                      onClick={() => setVisuals(prev => ({ ...prev, glowBloomIntensity: preset.value }))}
-                                      className={`px-1 py-0.5 text-[9px] rounded font-mono font-bold transition-all cursor-pointer border text-center ${
-                                        isSelected 
-                                          ? 'bg-brand-green/10 border-brand-green text-brand-green' 
-                                          : 'bg-zinc-950/50 border-zinc-850 text-zinc-400 hover:text-zinc-200 hover:border-zinc-750'
-                                      }`}
-                                    >
-                                      {preset.label}
-                                    </button>
-                                  );
-                                })}
-                              </div>
-                            </div>
-                          </div>
-                        )}
                       </div>
 
                       {/* Audio-Reactive Waveform Ripple */}
@@ -10526,7 +10788,10 @@ export default function App() {
                           min="1"
                           max="10"
                           value={particlesSet.minSize}
-                          onChange={(e) => setParticlesSet(prev => ({ ...prev, minSize: parseInt(e.target.value) }))}
+                          onChange={(e) => setParticlesSet(prev => {
+                            const newMin = parseInt(e.target.value);
+                            return { ...prev, minSize: newMin, maxSize: Math.max(newMin + 1, prev.maxSize) };
+                          })}
                           className="w-full accent-brand-green"
                         />
                       </div>
@@ -10629,6 +10894,99 @@ export default function App() {
                         onChange={(e) => setParticlesSet(prev => ({ ...prev, movementSpeed: parseFloat(e.target.value) }))}
                         className="w-full accent-brand-green cursor-pointer"
                       />
+                    </div>
+
+                    {/* Chaos Multiplier */}
+                    <div className="space-y-2 bg-zinc-950/50 p-3 rounded-lg border border-zinc-850">
+                      <div className="flex items-center justify-between">
+                        <div className="flex items-center space-x-1.5 font-mono text-[10px]">
+                          <span className="font-semibold text-zinc-200 uppercase tracking-wide">Chaos Multiplier</span>
+                          <span className="bg-brand-green/15 text-brand-green-hover border border-brand-green/30 px-1.5 py-0.2 rounded font-bold">
+                            {(particlesSet.chaosMultiplier ?? 0.0).toFixed(1)}x
+                          </span>
+                        </div>
+                        {/* Randomize Button */}
+                        <button
+                          type="button"
+                          onClick={() => {
+                            const randVal = parseFloat((Math.random() * 5.0).toFixed(1));
+                            setParticlesSet(prev => ({ ...prev, chaosMultiplier: randVal }));
+                          }}
+                          className="flex items-center space-x-1 px-2 py-0.5 text-[9px] font-mono font-bold text-brand-green hover:text-white bg-brand-green/10 hover:bg-brand-green/20 border border-brand-green/30 rounded transition-all cursor-pointer shadow-sm active:scale-95"
+                          title="Generate random chaos multiplier between 0 and 5"
+                        >
+                          <Shuffle className="w-3 h-3" />
+                          <span>Randomize</span>
+                        </button>
+                      </div>
+
+                      <div className="space-y-1">
+                        <input
+                          type="range"
+                          id="chaos-multiplier-slider"
+                          min="0.0"
+                          max="5.0"
+                          step="0.1"
+                          value={particlesSet.chaosMultiplier ?? 0.0}
+                          onChange={(e) => setParticlesSet(prev => ({ ...prev, chaosMultiplier: parseFloat(e.target.value) }))}
+                          style={{ '--multiplier': particlesSet.chaosMultiplier ?? 0 } as React.CSSProperties}
+                          className="w-full h-1 bg-zinc-950 rounded-lg appearance-none cursor-pointer accent-brand-green"
+                        />
+                      </div>
+
+                      {/* Quick-Select Buttons: Calm (0.0), Organic (1.5), Storm (4.0) */}
+                      <div className="grid grid-cols-3 gap-1.5 pt-0.5">
+                        {[
+                          { label: 'Calm', value: 0.0 },
+                          { label: 'Organic', value: 1.5 },
+                          { label: 'Storm', value: 4.0 }
+                        ].map((preset) => {
+                          const currentChaos = particlesSet.chaosMultiplier ?? 0.0;
+                          const isSelected = Math.abs(currentChaos - preset.value) < 0.08;
+                          return (
+                            <button
+                              key={preset.label}
+                              type="button"
+                              onClick={() => setParticlesSet(prev => ({ ...prev, chaosMultiplier: preset.value }))}
+                              className={`px-2 py-1 text-[9px] rounded font-mono font-bold transition-all cursor-pointer border text-center ${
+                                isSelected
+                                  ? 'bg-brand-green/15 border-brand-green text-brand-green-hover shadow-sm ring-1 ring-brand-green/30'
+                                  : 'bg-zinc-900/80 border-zinc-800 text-zinc-400 hover:text-zinc-200 hover:border-zinc-700'
+                              }`}
+                            >
+                              {preset.label} ({preset.value.toFixed(1)})
+                            </button>
+                          );
+                        })}
+                      </div>
+
+                      {/* Beat-Reactive Chaos Toggle */}
+                      <div className="flex items-center justify-between p-2 mt-1.5 bg-zinc-900/60 rounded border border-zinc-850">
+                        <div className="text-left max-w-[78%]">
+                          <span className="font-semibold text-zinc-300 block font-sans text-[10px]">Beat-Reactive Chaos</span>
+                          <span className="text-[9px] text-zinc-500 block font-sans mt-0.5">Spikes chaos jitter intensity on heavy bass beats</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setParticlesSet(prev => ({ ...prev, beatReactiveChaos: !prev.beatReactiveChaos }))}
+                          className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                            particlesSet.beatReactiveChaos ? 'bg-brand-green' : 'bg-zinc-800'
+                          }`}
+                        >
+                          <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                            particlesSet.beatReactiveChaos ? 'translate-x-3.5' : 'translate-x-0'
+                          }`} />
+                        </button>
+                      </div>
+
+                      <p className="text-[9px] text-zinc-500 font-sans leading-relaxed pt-0.5">
+                        Applies a random jitter force to particle movement, creating a more organic, fluid, and less predictable trajectory.
+                        {(particlesSet.chaosMultiplier ?? 0) > 2.0 && (
+                          <span className="block text-brand-green-hover/90 font-mono mt-0.5 font-medium">
+                            ✨ Faint motion trail active (&gt; 2.0x chaos)
+                          </span>
+                        )}
+                      </p>
                     </div>
 
                     {/* Particle Trail Length */}
@@ -11810,6 +12168,26 @@ export default function App() {
                       </p>
                     </div>
                     
+                    {/* Background Animation Speed */}
+                    <div className="space-y-1">
+                      <div className="flex justify-between font-mono text-[9px] text-zinc-400 font-bold">
+                        <span>ANIMATION SPEED</span>
+                        <span className="text-white font-semibold">{((background.animationSpeed ?? 1.0) * 100).toFixed(0)} %</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="0.1"
+                        max="3.0"
+                        step="0.1"
+                        value={background.animationSpeed ?? 1.0}
+                        onChange={(e) => setBackground(prev => ({ ...prev, animationSpeed: parseFloat(e.target.value) }))}
+                        className="w-full accent-brand-green cursor-pointer"
+                      />
+                      <p className="text-[9px] text-zinc-500 font-sans leading-relaxed text-left">
+                        Controls the rate at which gradients, image movements, video playback, and backdrop visual effects shift over time.
+                      </p>
+                    </div>
+
                     {/* Background Parallax Sway */}
                     <div className="space-y-1">
                       <div className="flex justify-between font-mono text-[9px] text-zinc-400 font-bold">
@@ -15085,9 +15463,9 @@ export default function App() {
                   <div className="space-y-1">
                     <h3 className="text-xs font-semibold text-zinc-300 uppercase tracking-wider font-mono flex items-center space-x-1.5">
                       <FileVideo className="w-4 h-4 text-brand-green" />
-                      <span>Real-Time Export Engine</span>
+                      <span>Video Export Studio</span>
                     </h3>
-                    <p className="text-[11px] text-zinc-550 mt-1 font-sans">Render interactive canvas sequences with synchronized direct audio outputs.</p>
+                    <p className="text-[11px] text-zinc-550 mt-1 font-sans">Render interactive music visualizer videos with locked frame pacing and direct audio synchronization.</p>
                   </div>
                   <button
                     type="button"
@@ -15100,8 +15478,74 @@ export default function App() {
                   </button>
                 </div>
 
+                {/* Important Export Warning Notice */}
+                <div className="bg-amber-500/10 border border-amber-500/30 rounded-lg p-3 flex items-start space-x-2.5 text-amber-200 text-[11px] font-sans shadow-sm mb-4">
+                  <AlertTriangle className="w-4 h-4 text-amber-400 shrink-0 mt-0.5" />
+                  <div className="space-y-0.5 text-left">
+                    <span className="font-semibold text-amber-300 font-mono text-[10px] uppercase tracking-wider block">
+                      ⚠️ Important: Keep Tab Active & Focused
+                    </span>
+                    <p className="text-[10.5px] text-amber-200/90 leading-relaxed">
+                      Please remain on this browser tab while rendering and exporting video. Minimizing or switching tabs triggers browser frame throttling, which can cause video drops or audio desynchronization.
+                    </p>
+                  </div>
+                </div>
+
                 <div className="space-y-4">
                   
+                  {/* Export Render Engine Mode Selector */}
+                  <div className="bg-zinc-900 border border-zinc-805 p-3.5 rounded-lg space-y-3">
+                    <div className="flex items-center justify-between">
+                      <label className="text-[10px] font-semibold text-zinc-400 font-mono uppercase flex items-center space-x-1.5">
+                        <Zap className="w-3.5 h-3.5 text-brand-green" />
+                        <span>Export Render Engine Mode</span>
+                      </label>
+                      <span className="text-[9px] bg-brand-green/15 text-brand-green-hover border border-brand-green/30 px-2 py-0.5 rounded-full font-mono font-semibold">
+                        {(exportSettings.engine || 'offline') === 'offline' ? 'Locked 60 FPS Engine' : 'Fast Realtime Stream'}
+                      </span>
+                    </div>
+
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
+                      {/* Offline Step Render Engine */}
+                      <button
+                        type="button"
+                        onClick={() => setExportSettings(prev => ({ ...prev, engine: 'offline' }))}
+                        className={`p-3 rounded-lg text-left transition-all cursor-pointer border ${
+                          (exportSettings.engine || 'offline') === 'offline'
+                            ? 'bg-brand-green/10 border-brand-green text-white shadow-sm ring-1 ring-brand-green/30'
+                            : 'bg-zinc-950 border-zinc-900 text-zinc-400 hover:bg-zinc-850 hover:border-zinc-800'
+                        }`}
+                      >
+                        <div className="flex items-center space-x-2">
+                          <Zap className={`w-4 h-4 ${(exportSettings.engine || 'offline') === 'offline' ? 'text-brand-green' : 'text-zinc-500'}`} />
+                          <span className="font-mono text-xs font-bold text-zinc-100">Offline Step Render Engine</span>
+                        </div>
+                        <p className="text-[10px] text-zinc-400 font-sans mt-2 leading-relaxed">
+                          Pauses live playback. Decodes audio into an offline buffer and steps precisely frame-by-frame (1/60s intervals), calculating exact FFT audio windows for each slice. <strong className="text-lime-300 font-semibold">Guarantees silky-smooth 60 FPS output with zero lag or frame drops</strong> even on complex 4-waveform + particle scenes.
+                        </p>
+                      </button>
+
+                      {/* Real-Time Fast Export Engine */}
+                      <button
+                        type="button"
+                        onClick={() => setExportSettings(prev => ({ ...prev, engine: 'realtime' }))}
+                        className={`p-3 rounded-lg text-left transition-all cursor-pointer border ${
+                          exportSettings.engine === 'realtime'
+                            ? 'bg-brand-green/10 border-brand-green text-white shadow-sm ring-1 ring-brand-green/30'
+                            : 'bg-zinc-950 border-zinc-900 text-zinc-400 hover:bg-zinc-850 hover:border-zinc-800'
+                        }`}
+                      >
+                        <div className="flex items-center space-x-2">
+                          <Play className={`w-4 h-4 ${exportSettings.engine === 'realtime' ? 'text-brand-green' : 'text-zinc-500'}`} />
+                          <span className="font-mono text-xs font-bold text-zinc-100">Real-Time Fast Export</span>
+                        </div>
+                        <p className="text-[10px] text-zinc-400 font-sans mt-2 leading-relaxed">
+                          Captures interactive canvas sequences during live playback. Recommended for lightweight music videos with minimal effects for fast, standard recording speed.
+                        </p>
+                      </button>
+                    </div>
+                  </div>
+
                   {/* Selector Export Format */}
                   <div className="bg-zinc-900 border border-zinc-805 p-3.5 rounded-lg space-y-3">
                     <label className="block text-[10px] font-semibold text-zinc-400 font-mono uppercase">Output Container Suffix</label>
@@ -15371,6 +15815,17 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* THEMED SKINS GALLERY MODAL */}
+      <ThemedSkinsModal
+        isOpen={isSkinsModalOpen}
+        onClose={() => setIsSkinsModalOpen(false)}
+        onApplySkin={(skin) => {
+          loadPreset(skin);
+          setIsSkinsModalOpen(false);
+        }}
+        activeVisuals={visuals}
+      />
 
     </div>
   );
