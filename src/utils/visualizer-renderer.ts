@@ -123,6 +123,9 @@ const stylePhysicsCache: { [styleId: string]: PhysicsState } = {};
 const kineticCache: { [key: string]: Float32Array } = {};
 const peakHoldersCache: { [key: string]: Float32Array } = {};
 
+// Low-pass filtered Chaos Multiplier value for physical force ramp-up and decay
+let smoothedChaosMultiplier = 0.0;
+
 let perfFrameCount = 0;
 let perfCurrentFPS = 60;
 let perfLastFpsUpdate = typeof performance !== 'undefined' ? performance.now() : Date.now();
@@ -471,8 +474,23 @@ export function updateParticles(
   const particlePhysicsCollisionEnabled = !!settings.enablePhysics;
   const particleRadiusCollisionsEnabled = !!settings.enableParticleCollisions;
 
-  const floor = settings.sensitivityFloor !== undefined ? settings.sensitivityFloor : 0.0;
+  const sensitivityBoostMult = settings.sensitivityBoost ? 1.5 : 1.0;
+  const floor = (settings.sensitivityFloor !== undefined ? settings.sensitivityFloor : 0.0) * sensitivityBoostMult;
   const dynamicVolume = floor + (1.0 - floor) * overallVolume;
+
+  // Low-pass filter (smoothing) logic for Chaos Multiplier updates.
+  // Smooths rapid slider changes or beat-reactive spikes into physical force ramp-up and gradual relaxation.
+  const targetRawChaos = settings.chaosMultiplier !== undefined ? settings.chaosMultiplier : 0.0;
+  let targetChaosMultiplier = targetRawChaos;
+  if (settings.beatReactiveChaos && targetRawChaos > 0) {
+    const beatSpike = isBeat ? (1.8 + bassIntensity * 2.2) : (1.0 + bassIntensity * 0.4);
+    targetChaosMultiplier *= beatSpike;
+  }
+  // 1st-order IIR low-pass filter (exponential moving average):
+  // - Attack alpha (0.12) for smooth, responsive force ramp-up
+  // - Decay alpha (0.06) for organic force relaxation without digital stutter
+  const chaosAlpha = targetChaosMultiplier > smoothedChaosMultiplier ? 0.12 : 0.06;
+  smoothedChaosMultiplier += (targetChaosMultiplier - smoothedChaosMultiplier) * chaosAlpha;
 
   // Update active independent shockwaves
   for (let i = activeShockwaves.length - 1; i >= 0; i--) {
@@ -713,8 +731,12 @@ export function updateParticles(
       p.history = [];
     }
     const trailLen = settings.trailLength !== undefined ? settings.trailLength : 0;
-    const chaosValForTrail = settings.chaosMultiplier !== undefined ? settings.chaosMultiplier : 0.0;
-    const effectiveTrailLen = Math.max(trailLen, chaosValForTrail > 2.0 ? Math.min(12, Math.floor(chaosValForTrail * 2.5)) : 0);
+    const chaosValForTrail = smoothedChaosMultiplier;
+    const isFaintTrailEnabled = settings.enableFaintMotionTrail !== false;
+    const effectiveTrailLen = Math.max(
+      trailLen,
+      (isFaintTrailEnabled && chaosValForTrail > 2.0) ? Math.min(12, Math.floor(chaosValForTrail * 2.5)) : 0
+    );
 
     if (effectiveTrailLen > 0) {
       p.history.push({ x: p.x, y: p.y });
@@ -924,16 +946,9 @@ export function updateParticles(
       }
     }
 
-    // Apply Chaos Multiplier random jitter force for organic, fluid, and less predictable trajectory
-    const chaosMultiplier = settings.chaosMultiplier !== undefined ? settings.chaosMultiplier : 0.0;
-    if (chaosMultiplier > 0) {
-      let effectiveChaos = chaosMultiplier;
-      if (settings.beatReactiveChaos) {
-        // Spike in intensity on every heavy bass beat
-        const beatSpike = isBeat ? (1.8 + bassIntensity * 2.2) : (1.0 + bassIntensity * 0.4);
-        effectiveChaos *= beatSpike;
-      }
-      const jitterForce = effectiveChaos * (0.8 + dynamicVolume * 0.4);
+    // Apply Chaos Multiplier random jitter force using low-pass filtered smoothedChaosMultiplier
+    if (smoothedChaosMultiplier > 0.0001) {
+      const jitterForce = smoothedChaosMultiplier * (0.8 + dynamicVolume * 0.4);
       const jitterX = (Math.random() - 0.5) * jitterForce;
       const jitterY = (Math.random() - 0.5) * jitterForce;
       p.x += jitterX * 1.5;
@@ -1739,8 +1754,9 @@ export function drawParticles(
     }
 
     const trailLenValue = settings.trailLength !== undefined ? settings.trailLength : 0;
-    const chaosValForDraw = settings.chaosMultiplier !== undefined ? settings.chaosMultiplier : 0.0;
-    const isChaosTrailActive = chaosValForDraw > 2.0;
+    const chaosValForDraw = smoothedChaosMultiplier;
+    const isFaintTrailEnabled = settings.enableFaintMotionTrail !== false;
+    const isChaosTrailActive = isFaintTrailEnabled && (chaosValForDraw > 2.0);
     const isStandardTrailActive = trailLenValue > 0 && (settings.type === 'stars' || settings.type === 'sparks' || settings.type === 'spark-stars');
 
     if ((isStandardTrailActive || isChaosTrailActive) && p.history && p.history.length > 0) {
@@ -2288,6 +2304,12 @@ export function drawVisualizer(
   }
 
   let settings = { ...incomingSettings };
+  if (settings.sensitivityBoost) {
+    settings.sensitivity = (settings.sensitivity !== undefined ? settings.sensitivity : 1.2) * 1.5;
+    if (settings.sensitivityFloor !== undefined) {
+      settings.sensitivityFloor = settings.sensitivityFloor * 1.5;
+    }
+  }
   settings.lineThickness = (settings.lineThickness !== undefined ? settings.lineThickness : 2) * 2;
   
   if (settings.useCustomWaveformColor && settings.waveformColor) {
@@ -2747,9 +2769,10 @@ export function drawVisualizer(
     let width = originalWidth;
     let height = originalHeight;
 
+    const boostFactor = currentSettingsState.sensitivityBoost ? 1.5 : 1.0;
     const styleScale = styleSetting?.scale !== undefined 
-      ? styleSetting.scale 
-      : (stylePosition?.verticalScale !== undefined ? stylePosition.verticalScale : currentSettingsState.sensitivity);
+      ? styleSetting.scale * boostFactor
+      : (stylePosition?.verticalScale !== undefined ? stylePosition.verticalScale * boostFactor : currentSettingsState.sensitivity);
 
     const styleThickness = stylePosition?.horizontalScale !== undefined 
       ? stylePosition.horizontalScale 
@@ -2947,7 +2970,7 @@ export function drawVisualizer(
       
       const x = i * sliceWidth;
       
-      ctx.fillStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, distFromCenter);
+      ctx.fillStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, settings.frequencyBasedColoring ? Math.min(1.0, value / 255) : distFromCenter);
       ctx.fillRect(x, midY - barHeight, barWidth, barHeight * 2);
     }
   } else if (settings.style === 'bars') {
@@ -2964,6 +2987,15 @@ export function drawVisualizer(
     const totalWidth = totalBars * computedBarWidth + (totalBars - 1) * spacing;
     const startX = (width - totalWidth) / 2;
     const radius = settings.barRoundness;
+    const barAngle = settings.barAngle || 0;
+
+    if (barAngle !== 0) {
+      const angleRad = (barAngle * Math.PI) / 180;
+      ctx.save();
+      ctx.translate(0, midY);
+      ctx.transform(1, 0, -Math.tan(angleRad), 1, 0, 0);
+      ctx.translate(0, -midY);
+    }
 
     const maxIdx = Math.floor(dataLen * 0.65);
     for (let i = 0; i < totalBars; i++) {
@@ -3018,6 +3050,10 @@ export function drawVisualizer(
           ctx.shadowBlur = 0;
         }
       }
+    }
+
+    if (barAngle !== 0) {
+      ctx.restore();
     }
 
   } else if (settings.style === 'circular') {
@@ -3118,7 +3154,7 @@ export function drawVisualizer(
       const barH = (val / 255) * 150 * settings.sensitivity;
 
       // Dynamically resolve bar color based on selected Color Mode
-      const barColor = getDynamicColor(settings.primaryColor, settings.secondaryColor, ratio);
+      const barColor = getDynamicColor(settings.primaryColor, settings.secondaryColor, settings.frequencyBasedColoring ? Math.min(1.0, val / 255) : ratio);
       const xPos = startX + i * step;
 
       // Render Main Bar with custom Glow & Alpha
@@ -3142,7 +3178,7 @@ export function drawVisualizer(
       const val = analyserData[dataIdx] || 0;
       const barH = (val / 255) * 150 * settings.sensitivity;
 
-      const barColor = getDynamicColor(settings.primaryColor, settings.secondaryColor, ratio);
+      const barColor = getDynamicColor(settings.primaryColor, settings.secondaryColor, settings.frequencyBasedColoring ? Math.min(1.0, val / 255) : ratio);
       const xPos = startX + i * step;
 
       // Render Reflection Wave with dynamic colors matching the main bar and adjusted opacity
@@ -3516,7 +3552,7 @@ export function drawVisualizer(
       ctx.beginPath();
       const dotRadiusA = Math.max(0.5, settings.lineThickness * 1.5 + zOffset * 2.5);
       ctx.arc(x, y1, dotRadiusA, 0, Math.PI * 2);
-      ctx.fillStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, i / totalRungs);
+      ctx.fillStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, settings.frequencyBasedColoring ? Math.min(1.0, val / 255) : i / totalRungs);
       ctx.shadowBlur = dotRadiusA * 1.5;
       ctx.shadowColor = settings.primaryColor;
       ctx.fill();
@@ -3525,7 +3561,7 @@ export function drawVisualizer(
       ctx.beginPath();
       const dotRadiusB = Math.max(0.5, settings.lineThickness * 1.5 - zOffset * 2.5);
       ctx.arc(x, y2, dotRadiusB, 0, Math.PI * 2);
-      ctx.fillStyle = getDynamicColor(settings.secondaryColor, settings.primaryColor, i / totalRungs);
+      ctx.fillStyle = getDynamicColor(settings.secondaryColor, settings.primaryColor, settings.frequencyBasedColoring ? Math.min(1.0, val / 255) : i / totalRungs);
       ctx.shadowBlur = dotRadiusB * 1.5;
       ctx.shadowColor = settings.secondaryColor;
       ctx.fill();
@@ -3567,6 +3603,15 @@ export function drawVisualizer(
     const totalWidth = barCount * barWidth + (barCount - 1) * spacing;
     const startX = (width - totalWidth) / 2;
     const radius = settings.barRoundness !== undefined ? settings.barRoundness : 3;
+    const barAngle = settings.barAngle || 0;
+
+    if (barAngle !== 0) {
+      const angleRad = (barAngle * Math.PI) / 180;
+      ctx.save();
+      ctx.translate(0, midY);
+      ctx.transform(1, 0, -Math.tan(angleRad), 1, 0, 0);
+      ctx.translate(0, -midY);
+    }
 
     for (let i = 0; i < barCount; i++) {
        const idx = Math.floor(Math.pow(i / barCount, 1.3) * (dataLen * 0.7));
@@ -3594,6 +3639,10 @@ export function drawVisualizer(
         ctx.rect(x, midY, barWidth, barHeight);
       }
       ctx.fill();
+    }
+
+    if (barAngle !== 0) {
+      ctx.restore();
     }
 
   } else if (settings.style === 'circular-orbit') {
@@ -3626,7 +3675,7 @@ export function drawVisualizer(
       ctx.beginPath();
       ctx.moveTo(x1, y1);
       ctx.lineTo(x2, y2);
-      ctx.strokeStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, i / pointsCount);
+      ctx.strokeStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, settings.frequencyBasedColoring ? Math.min(1.0, val / 255) : i / pointsCount);
       ctx.lineWidth = settings.lineThickness + 1;
       ctx.stroke();
     }
@@ -3661,7 +3710,7 @@ export function drawVisualizer(
       ctx.beginPath();
       ctx.moveTo(x1, y1);
       ctx.lineTo(x2, y2);
-      ctx.strokeStyle = getDynamicColor(settings.secondaryColor, settings.primaryColor, i / pointsCount);
+      ctx.strokeStyle = getDynamicColor(settings.secondaryColor, settings.primaryColor, settings.frequencyBasedColoring ? Math.min(1.0, val / 255) : i / pointsCount);
       ctx.lineWidth = settings.lineThickness;
       ctx.stroke();
     }
@@ -3749,13 +3798,13 @@ export function drawVisualizer(
       // Strand point A
       ctx.beginPath();
       ctx.arc(x, y1, settings.lineThickness + 2, 0, Math.PI * 2);
-      ctx.fillStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, i / pointsCount);
+      ctx.fillStyle = getDynamicColor(settings.primaryColor, settings.secondaryColor, settings.frequencyBasedColoring ? Math.min(1.0, val / 255) : i / pointsCount);
       ctx.fill();
 
       // Strand point B
       ctx.beginPath();
       ctx.arc(x, y2, settings.lineThickness + 2, 0, Math.PI * 2);
-      ctx.fillStyle = getDynamicColor(settings.secondaryColor, settings.primaryColor, i / pointsCount);
+      ctx.fillStyle = getDynamicColor(settings.secondaryColor, settings.primaryColor, settings.frequencyBasedColoring ? Math.min(1.0, val / 255) : i / pointsCount);
       ctx.fill();
     }
     ctx.restore();
@@ -3865,8 +3914,16 @@ export function drawVisualizer(
     const totalWidth = barCount * barWidth + (barCount - 1) * spacing;
     const startX = (width - totalWidth) / 2;
     const radius = barWidth / 2;
+    const barAngle = settings.barAngle || 0;
 
     ctx.save();
+    if (barAngle !== 0) {
+      const angleRad = (barAngle * Math.PI) / 180;
+      ctx.translate(0, midY);
+      ctx.transform(1, 0, -Math.tan(angleRad), 1, 0, 0);
+      ctx.translate(0, -midY);
+    }
+
     for (let i = 0; i < barCount; i++) {
       const idx = Math.floor(Math.pow(i / barCount, 1.3) * (dataLen * 0.7));
       const value = analyserData[idx] || 0;
@@ -5173,7 +5230,7 @@ export function drawVisualizer(
         state.currentOpacity = Math.max(0, state.currentOpacity * 0.90 - 0.015);
       }
 
-      const circleColor = getDynamicColor(settings.primaryColor, settings.secondaryColor, i / totalCircles);
+      const circleColor = getDynamicColor(settings.primaryColor, settings.secondaryColor, settings.frequencyBasedColoring ? Math.min(1.0, value / 255) : i / totalCircles);
       const x = startX + i * step;
 
       const drawCircle = (cX: number, cY: number, r: number, alpha: number, col: string | CanvasGradient) => {
@@ -5237,10 +5294,9 @@ export function drawVisualizer(
             mirrorInvertedOffscreenCtx = mirrorInvertedOffscreenCanvas.getContext('2d');
             if (mirrorInvertedOffscreenCtx) {
               mirrorInvertedOffscreenCtx.clearRect(0, 0, segmentWidth, height);
+              mirrorInvertedOffscreenCtx.filter = 'invert(100%) hue-rotate(180deg)';
               mirrorInvertedOffscreenCtx.drawImage(mirrorOffscreenCanvas, 0, 0, segmentWidth, height, 0, 0, segmentWidth, height);
-              const imgData = mirrorInvertedOffscreenCtx.getImageData(0, 0, segmentWidth, height);
-              swapPrimarySecondaryPixels(imgData.data, imgData.data.length, settings.primaryColor, settings.secondaryColor);
-              mirrorInvertedOffscreenCtx.putImageData(imgData, 0, 0);
+              mirrorInvertedOffscreenCtx.filter = 'none';
             }
           }
 
@@ -5301,10 +5357,9 @@ export function drawVisualizer(
             mirrorInvertedOffscreenCtxY = mirrorInvertedOffscreenCanvasY.getContext('2d');
             if (mirrorInvertedOffscreenCtxY) {
               mirrorInvertedOffscreenCtxY.clearRect(0, 0, width, segmentHeight);
+              mirrorInvertedOffscreenCtxY.filter = 'invert(100%) hue-rotate(180deg)';
               mirrorInvertedOffscreenCtxY.drawImage(mirrorOffscreenCanvasY, 0, 0, width, segmentHeight, 0, 0, width, segmentHeight);
-              const imgData = mirrorInvertedOffscreenCtxY.getImageData(0, 0, width, segmentHeight);
-              swapPrimarySecondaryPixels(imgData.data, imgData.data.length, settings.primaryColor, settings.secondaryColor);
-              mirrorInvertedOffscreenCtxY.putImageData(imgData, 0, 0);
+              mirrorInvertedOffscreenCtxY.filter = 'none';
             }
           }
 

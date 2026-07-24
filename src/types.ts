@@ -80,6 +80,8 @@ export interface VisualizerSettings {
   glowStrength: number;
   lineThickness: number;
   sensitivity: number; // multiplier for Audio Analyser data
+  sensitivityFloor?: number; // baseline noise sensitivity floor
+  sensitivityBoost?: boolean; // global toggle that multiplies base sensitivity and sensitivityFloor by 1.5x across all presets
   noiseFloorThreshold?: number; // threshold to cut off silent background audio (0 to 100)
   kineticResponse?: boolean; // energy-proportional snappy decay back to zero for punchy transients
   kineticSensitivity?: number; // sensitivity multiplier for kinetic response decay
@@ -93,6 +95,7 @@ export interface VisualizerSettings {
   fftSize: number; // resolution of audio detail
   barRoundness: number; // border radius for bars
   barSpacing: number;
+  barAngle?: number; // angle in degrees (-45 to 45) to skew frequency bars horizontally
   spectrumAnalyzer?: boolean; // toggle to replace standard waveform with a frequency bar chart view
   smoothing?: number; // transition speed between frequency frames (0.0 to 1.0)
   cameraShake?: number; // intensity/multiplier slider for high-bass dynamic shake offsets
@@ -282,6 +285,7 @@ export interface ParticleSettings {
   trailLength?: number;
   lifetime?: number;
   sensitivityFloor?: number;
+  sensitivityBoost?: boolean;
   audioDriveTarget?: 'sub-bass' | 'kicks' | 'vocal' | 'high-end';
   useColorPalette?: boolean;
   particleColorPalette?: string[];
@@ -305,6 +309,7 @@ export interface ParticleSettings {
   forwardSpeedMultiplier?: number;
   chaosMultiplier?: number; // Random jitter force for organic fluid particle movement
   beatReactiveChaos?: boolean; // Spikes chaos jitter intensity on heavy bass beat
+  enableFaintMotionTrail?: boolean; // Toggles faint motion trail rendering when chaos > 2.0
 }
 
 export interface TitleOverlaySettings {

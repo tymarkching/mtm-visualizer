@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect } from 'react';
+import React, { useState, useRef, useEffect, useCallback } from 'react';
 import { motion, AnimatePresence, useSpring } from 'motion/react';
 import {
   Play,
@@ -58,7 +58,7 @@ import {
   FireworkRocket,
   ThemedSkin,
 } from './types';
-import { THEMED_SKINS } from './data/themed-skins';
+import { MAIN_PRESETS } from './data/themed-skins';
 import { ThemedSkinsModal } from './components/ThemedSkinsModal';
 
 import {
@@ -753,11 +753,13 @@ export default function App() {
     count: 100,
     minSize: 3,
     maxSize: 6,
-    speed: 0.5,
+    speed: 2.0,
+    movementSpeed: 2.0,
     color: '#ff3333',
     gravity: 0.5,
     wind: 0.1,
     beatReactive: true,
+    beatBurst: true,
     beatThreshold: 140,
     enabled: false,
     shatterEnabled: false,
@@ -768,6 +770,8 @@ export default function App() {
     useColorPalette: false,
     selectedPalettePreset: 'neon-synthwave',
     particleColorPalette: ['#ff007f', '#7f00ff', '#00ffff', '#ffaa00'],
+    sensitivityFloor: 0.1,
+    enableFaintMotionTrail: true,
   }));
   const [background, setBackground] = useState<BackgroundSettings>(PRESETS[0].background);
   const [titleOverlay, setTitleOverlay] = useState<TitleOverlaySettings>(PRESETS[0].title);
@@ -1581,12 +1585,12 @@ export default function App() {
   const projectFileRef = useRef<HTMLInputElement | null>(null);
 
   // Apply Preset / Skin Config
-  const loadPreset = (preset: ThemedSkin | typeof PRESETS[0]) => {
-    const visualsToSet = {
+  const loadPreset = useCallback((preset: ThemedSkin | typeof PRESETS[0]) => {
+    setVisuals(prevVisuals => ({
       ...preset.visuals,
+      sensitivityBoost: prevVisuals.sensitivityBoost,
       activeStyles: preset.visuals.activeStyles || [preset.visuals.style]
-    };
-    setVisuals(visualsToSet);
+    }));
     setBackground(preset.background);
     setTitleOverlay(preset.title);
 
@@ -1596,14 +1600,20 @@ export default function App() {
         ...preset.particles,
         speed: 2.0,
         movementSpeed: 2.0,
+        sensitivityFloor: preset.particles?.sensitivityFloor ?? 0.1,
+        enableFaintMotionTrail: preset.particles?.enableFaintMotionTrail ?? true,
         enabled: preset.particles?.enabled ?? true,
+        beatBurst: preset.particles?.beatBurst ?? true,
       }));
     } else {
       setParticlesSet(prev => ({
         ...prev,
         speed: 2.0,
         movementSpeed: 2.0,
+        sensitivityFloor: 0.1,
+        enableFaintMotionTrail: true,
         enabled: false,
+        beatBurst: true,
       }));
     }
     
@@ -1611,14 +1621,26 @@ export default function App() {
     setActiveTab('visuals');
     
     // Update track names to match preset titles if no file is uploaded
-    if (!audioTrack.file) {
-      setAudioTrack(prev => ({
-        ...prev,
-        name: preset.title.text,
-        artist: preset.title.artist,
-      }));
-    }
-  };
+    setAudioTrack(prev => {
+      if (!prev.file) {
+        return {
+          ...prev,
+          name: preset.title.text,
+          artist: preset.title.artist,
+        };
+      }
+      return prev;
+    });
+  }, []);
+
+  const handleCloseSkinsModal = useCallback(() => {
+    setIsSkinsModalOpen(false);
+  }, []);
+
+  const handleApplySkin = useCallback((skin: ThemedSkin) => {
+    loadPreset(skin);
+    setIsSkinsModalOpen(false);
+  }, [loadPreset]);
 
   const applyVoicePreset = (preset: 'none' | 'demon' | 'robot' | 'radio' | 'alien' | 'custom') => {
     initAudioSystem();
@@ -3400,11 +3422,12 @@ export default function App() {
       collisionDamping: 0.85,
       emittingDirection: 'float-up',
       enableApexAttractor: false,
-      movementSpeed: 1.0,
-      beatBurst: false,
+      movementSpeed: 2.0,
+      beatBurst: true,
       trailLength: 0,
       lifetime: 3.0,
-      sensitivityFloor: 0.0,
+      sensitivityFloor: 0.1,
+      enableFaintMotionTrail: true,
       audioDriveTarget: 'sub-bass',
       useColorPalette: false,
       particleColorPalette: ['#ff007f', '#7f00ff', '#00ffff', '#ffaa00'],
@@ -3818,7 +3841,6 @@ export default function App() {
   useEffect(() => {
     const handleBeat = () => {
       const sliders = [
-        document.getElementById('symmetry-mirror-multiplier-slider'),
         document.getElementById('chaos-multiplier-slider')
       ];
       sliders.forEach((slider) => {
@@ -4259,22 +4281,8 @@ export default function App() {
         ctx.translate(shakeX, shakeY);
       }
 
-      // Global Canvas Rotation (Subtle persistent rotation of the entire stage)
-      let rotDeg = visualsRef.current.canvasRotation || 0;
-      
-      const currentPerfTime = performance.now();
-      const deltaTime = (currentPerfTime - lastAutoRotateTime) / 1000;
-      lastAutoRotateTime = currentPerfTime;
-      
-      if (visualsRef.current.autoRotateCanvas) {
-        const speed = visualsRef.current.autoRotateSpeed !== undefined ? visualsRef.current.autoRotateSpeed : 1.0;
-        // 1.0 speed = 10 degrees per second
-        accumulatedAutoRotation += speed * 10 * deltaTime;
-        if (accumulatedAutoRotation > 360) accumulatedAutoRotation -= 360;
-        if (accumulatedAutoRotation < -360) accumulatedAutoRotation += 360;
-      }
-      
-      rotDeg += accumulatedAutoRotation;
+      // Global Canvas Rotation disabled
+      let rotDeg = 0;
 
       if (rotDeg !== 0) {
         const rad = (rotDeg * Math.PI) / 180;
@@ -4434,7 +4442,10 @@ export default function App() {
 
         particlesPoolRef.current = updateParticles(
           particlesPoolRef.current,
-          particlesSetRef.current,
+          {
+            ...particlesSetRef.current,
+            sensitivityBoost: visualsRef.current.sensitivityBoost
+          },
           canvas.width,
           canvas.height,
           isBeat,
@@ -7008,12 +7019,26 @@ export default function App() {
                   <Shuffle className="w-3 h-3" />
                   <span>🎲 RANDOM</span>
                 </button>
+
+                <button
+                  type="button"
+                  onClick={() => setVisuals(prev => ({ ...prev, sensitivityBoost: !prev.sensitivityBoost }))}
+                  className={`flex items-center space-x-1 px-2 py-0.5 rounded border transition-all text-[10px] font-mono font-bold cursor-pointer active:scale-95 shrink-0 ${
+                    visuals.sensitivityBoost
+                      ? 'bg-amber-500/20 text-amber-400 border-amber-500/50 shadow-[0_0_10px_rgba(245,158,11,0.35)]'
+                      : 'bg-zinc-950 text-zinc-400 border-zinc-800 hover:border-amber-500/50 hover:text-amber-400 hover:bg-amber-500/10'
+                  }`}
+                  title="Global Sensitivity Boost: Multiplies base Sensitivity and Sensitivity Floor by 1.5x across all presets"
+                >
+                  <Zap className={`w-3 h-3 ${visuals.sensitivityBoost ? 'fill-amber-400 text-amber-400' : ''}`} />
+                  <span>⚡ BOOST 1.5X {visuals.sensitivityBoost ? 'ON' : 'OFF'}</span>
+                </button>
               </div>
             </div>
             
             {/* THEMED SKINS QUICK SELECTOR BAR */}
             <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 w-full items-center">
-              {THEMED_SKINS.slice(0, 12).map((skin) => {
+              {MAIN_PRESETS.map((skin) => {
                 const isActive = visuals.style === skin.visuals.style && visuals.primaryColor === skin.visuals.primaryColor;
                 return (
                   <button
@@ -8629,6 +8654,36 @@ export default function App() {
                   {/* Spectrum Dimension & Sensitivity Controls */}
                   <div className="space-y-3.5 bg-zinc-900 border border-zinc-800 p-4 rounded-lg text-xs">
                     
+                    {/* Global Aggressive Mode: Sensitivity Boost Switch */}
+                    <div className="flex items-center justify-between p-2.5 rounded-lg bg-zinc-950/80 border border-zinc-800/80 my-1">
+                      <div>
+                        <div className="flex items-center space-x-1.5">
+                          <span className="font-semibold text-zinc-200 block font-sans text-[11px] uppercase tracking-wider">
+                            Sensitivity Boost
+                          </span>
+                          <span className={`px-1.5 py-0.5 text-[9px] font-mono font-bold rounded ${
+                            visuals.sensitivityBoost ? 'bg-amber-500/20 text-amber-400 border border-amber-500/30' : 'bg-zinc-800 text-zinc-400 border border-zinc-700'
+                          }`}>
+                            1.5x Multiplier
+                          </span>
+                        </div>
+                        <span className="text-[10px] text-zinc-400 block font-sans mt-0.5">
+                          Multiplies base Sensitivity & Sensitivity Floor by 1.5x across all presets for an Aggressive mode
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setVisuals(prev => ({ ...prev, sensitivityBoost: !prev.sensitivityBoost }))}
+                        className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                          visuals.sensitivityBoost ? 'bg-amber-500 shadow-[0_0_10px_rgba(245,158,11,0.5)]' : 'bg-zinc-800'
+                        }`}
+                      >
+                        <span className={`absolute top-[2px] left-[2px] bg-white rounded-full h-3.5 w-3.5 transition-all ${
+                          visuals.sensitivityBoost ? 'translate-x-3.5' : 'translate-x-0'
+                        }`} />
+                      </button>
+                    </div>
+
                     <div className="space-y-1 pb-2 mb-2 border-b border-zinc-800">
                       <label className="block text-[10px] text-zinc-400 font-mono uppercase tracking-wide">Dynamics / Sensitivity Presets</label>
                       <select
@@ -8657,7 +8712,12 @@ export default function App() {
                     <div className="space-y-1">
                       <div className="flex justify-between font-mono text-[9px] text-zinc-400 font-bold">
                         <span>MAX LINE HEIGHT / VERTICAL SCALE</span>
-                        <span className="text-white font-semibold">x{visuals.sensitivity}</span>
+                        <span className="text-white font-semibold">
+                          x{visuals.sensitivity}
+                          {visuals.sensitivityBoost ? (
+                            <span className="text-amber-400 text-[9px] ml-1.5 font-semibold">(x{(visuals.sensitivity * 1.5).toFixed(2)} boosted)</span>
+                          ) : null}
+                        </span>
                       </div>
                       <input
                         type="range"
@@ -8856,6 +8916,23 @@ export default function App() {
                         onChange={(e) => setVisuals(prev => ({ ...prev, barSpacing: parseInt(e.target.value) }))}
                         className="w-full accent-brand-green cursor-pointer"
                       />
+                    </div>
+
+                    <div className="space-y-1">
+                      <div className="flex justify-between font-mono text-[9px] text-zinc-400 font-bold">
+                        <span>FREQUENCY BAR SKEW / ANGLE</span>
+                        <span className="text-white font-semibold">{visuals.barAngle ?? 0}°</span>
+                      </div>
+                      <input
+                        type="range"
+                        min="-45"
+                        max="45"
+                        step="1"
+                        value={visuals.barAngle ?? 0}
+                        onChange={(e) => setVisuals(prev => ({ ...prev, barAngle: parseInt(e.target.value) }))}
+                        className="w-full accent-brand-green cursor-pointer"
+                      />
+                      <span className="text-[8px] text-zinc-500 block">Skews frequency bars horizontally for a slanted, dynamic look</span>
                     </div>
 
                     <div className="space-y-1 border-t border-zinc-850 pt-2 bg-transparent">
@@ -9277,24 +9354,6 @@ export default function App() {
 
                           <div className="space-y-1.5">
                             <div className="flex justify-between items-center text-[9px] font-mono">
-                              <span className="text-zinc-400 uppercase font-semibold">Symmetry Mirror Multiplier</span>
-                              <span className="text-brand-green-hover font-bold">{visuals.symmetryMultiplier || 1}x ({2 * (visuals.symmetryMultiplier || 1)} slices)</span>
-                            </div>
-                            <input
-                              type="range"
-                              id="symmetry-mirror-multiplier-slider"
-                              min="1"
-                              max="8"
-                              step="1"
-                              value={visuals.symmetryMultiplier || 1}
-                              onChange={(e) => setVisuals(prev => ({ ...prev, symmetryMultiplier: parseInt(e.target.value, 10) }))}
-                              style={{ '--multiplier': visuals.symmetryMultiplier || 1 } as React.CSSProperties}
-                              className="w-full h-1 bg-zinc-950 rounded-lg appearance-none cursor-pointer accent-brand-green"
-                            />
-                          </div>
-
-                          <div className="space-y-1.5">
-                            <div className="flex justify-between items-center text-[9px] font-mono">
                               <span className="text-zinc-400 uppercase font-semibold">Mirror Effect Opacity</span>
                               <span className="text-brand-green-hover font-bold">{visuals.mirrorOpacity !== undefined ? visuals.mirrorOpacity : 100}%</span>
                             </div>
@@ -9424,22 +9483,6 @@ export default function App() {
                         />
                       </div>
                     )}
-
-                    <div className="space-y-1 border-t border-zinc-850 pt-2 bg-transparent">
-                      <div className="flex justify-between font-mono text-[9px] text-zinc-400 font-bold">
-                        <span>GLOBAL CANVAS ROTATION</span>
-                        <span className="text-white font-semibold">{visuals.canvasRotation || 0}°</span>
-                      </div>
-                      <input
-                        type="range"
-                        min="-180"
-                        max="180"
-                        step="1"
-                        value={visuals.canvasRotation || 0}
-                        onChange={(e) => setVisuals(prev => ({ ...prev, canvasRotation: parseInt(e.target.value) }))}
-                        className="w-full accent-brand-green cursor-pointer"
-                      />
-                    </div>
                     
 
 
@@ -10979,11 +11022,30 @@ export default function App() {
                         </button>
                       </div>
 
+                      {/* Faint Motion Trail Toggle */}
+                      <div className="flex items-center justify-between p-2 mt-1 bg-zinc-900/60 rounded border border-zinc-850">
+                        <div className="text-left max-w-[78%]">
+                          <span className="font-semibold text-zinc-300 block font-sans text-[10px]">Faint Motion Trail</span>
+                          <span className="text-[9px] text-zinc-500 block font-sans mt-0.5">Renders subtle ghost trails during high chaos jitter (&gt; 2.0x)</span>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => setParticlesSet(prev => ({ ...prev, enableFaintMotionTrail: prev.enableFaintMotionTrail === false ? true : false }))}
+                          className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                            particlesSet.enableFaintMotionTrail !== false ? 'bg-brand-green' : 'bg-zinc-800'
+                          }`}
+                        >
+                          <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                            particlesSet.enableFaintMotionTrail !== false ? 'translate-x-3.5' : 'translate-x-0'
+                          }`} />
+                        </button>
+                      </div>
+
                       <p className="text-[9px] text-zinc-500 font-sans leading-relaxed pt-0.5">
                         Applies a random jitter force to particle movement, creating a more organic, fluid, and less predictable trajectory.
                         {(particlesSet.chaosMultiplier ?? 0) > 2.0 && (
-                          <span className="block text-brand-green-hover/90 font-mono mt-0.5 font-medium">
-                            ✨ Faint motion trail active (&gt; 2.0x chaos)
+                          <span className={`block font-mono mt-0.5 font-medium ${particlesSet.enableFaintMotionTrail !== false ? 'text-brand-green-hover/90' : 'text-zinc-500'}`}>
+                            {particlesSet.enableFaintMotionTrail !== false ? '✨ Faint motion trail active (> 2.0x chaos)' : '⏸️ Faint motion trail disabled'}
                           </span>
                         )}
                       </p>
@@ -11033,7 +11095,12 @@ export default function App() {
                     <div className="space-y-1 bg-zinc-950/40 p-2 rounded border border-zinc-900">
                       <div className="flex justify-between font-mono text-[9px] text-zinc-400">
                         <span>Sensitivity Floor</span>
-                        <span className="text-white font-semibold">{(particlesSet.sensitivityFloor ?? 0.0).toFixed(1)}x</span>
+                        <span className="text-white font-semibold">
+                          {(particlesSet.sensitivityFloor ?? 0.0).toFixed(1)}x
+                          {visuals.sensitivityBoost ? (
+                            <span className="text-amber-400 text-[9px] ml-1.5 font-semibold">(x{((particlesSet.sensitivityFloor ?? 0.0) * 1.5).toFixed(2)} boosted)</span>
+                          ) : null}
+                        </span>
                       </div>
                       <input
                         type="range"
@@ -15819,11 +15886,8 @@ export default function App() {
       {/* THEMED SKINS GALLERY MODAL */}
       <ThemedSkinsModal
         isOpen={isSkinsModalOpen}
-        onClose={() => setIsSkinsModalOpen(false)}
-        onApplySkin={(skin) => {
-          loadPreset(skin);
-          setIsSkinsModalOpen(false);
-        }}
+        onClose={handleCloseSkinsModal}
+        onApplySkin={handleApplySkin}
         activeVisuals={visuals}
       />
 
