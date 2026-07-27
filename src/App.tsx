@@ -1,4 +1,4 @@
-import React, { useState, useRef, useEffect, useCallback } from 'react';
+import React, { useState, useRef, useEffect, useCallback, useMemo } from 'react';
 import { motion, AnimatePresence, useSpring } from 'motion/react';
 import {
   Play,
@@ -57,9 +57,14 @@ import {
   SparkParticle,
   FireworkRocket,
   ThemedSkin,
+  UITheme,
+  UILayout,
 } from './types';
 import { MAIN_PRESETS } from './data/themed-skins';
 import { ThemedSkinsModal } from './components/ThemedSkinsModal';
+import { UIThemeLayoutBar } from './components/UIThemeLayoutBar';
+import { CinemaZenOverlay } from './components/CinemaZenOverlay';
+import { UI_THEMES } from './data/ui-themes';
 
 import {
   initParticles,
@@ -71,9 +76,11 @@ import {
   drawProgressBar,
   drawWatermark,
   RenderParticle,
+  LINEAR_WAVEFORM_STYLES,
 } from './utils/visualizer-renderer';
 import { injectMP4Metadata } from './utils/metadata';
 import { extractDominantColors } from './utils/color-extractor';
+import { resourceManager } from './utils/resource-manager';
 
 // Pre-configured thematic style presets of premium visualizers
 const PRESETS = [
@@ -734,7 +741,19 @@ export default function App() {
   const [activeTab, setActiveTab] = useState<'track' | 'background' | 'visuals' | 'particles' | 'overlay' | 'text' | 'export' | 'sfx'>('track');
 
   // Core Visualizer Customizations
-  const [visuals, setVisuals] = useState<VisualizerSettings>(PRESETS[0].visuals);
+  const [visuals, setVisuals] = useState<VisualizerSettings>(() => {
+    const base = { ...PRESETS[0].visuals, highResolutionPreview: true };
+    const targetStyles = base.activeStyles || [base.style];
+    const positions = { ...(base.stylePositions || {}) };
+    const settingsMap = { ...(base.styleSettings || {}) };
+    targetStyles.forEach(s => {
+      if (LINEAR_WAVEFORM_STYLES.includes(s as VisualizerStyle)) {
+        positions[s] = { ...positions[s], verticalScale: positions[s]?.verticalScale ?? 1.35 };
+        settingsMap[s] = { ...settingsMap[s], scale: settingsMap[s]?.scale ?? 1.35 };
+      }
+    });
+    return { ...base, stylePositions: positions, styleSettings: settingsMap };
+  });
   const [isPaletteDropdownOpen, setIsPaletteDropdownOpen] = useState<boolean>(false);
 
   // Smoothly animate water reflection toggle
@@ -750,7 +769,7 @@ export default function App() {
   }, [visuals.waterReflectionDepth, waterDepthAnim]);
   const [particlesSet, setParticlesSet] = useState<ParticleSettings>(() => ({
     type: 'stars' as ParticleType,
-    count: 100,
+    count: 60,
     minSize: 3,
     maxSize: 6,
     speed: 2.0,
@@ -835,7 +854,7 @@ export default function App() {
       }
     }, 800);
 
-    return () => clearTimeout(handler);
+  return () => clearTimeout(handler);
   }, [visuals, particlesSet, background, titleOverlay]);
 
   const undo = () => {
@@ -1349,6 +1368,85 @@ export default function App() {
   const [draggedTrackIndex, setDraggedTrackIndex] = useState<number | null>(null);
   const [pwaUpdateAvailable, setPwaUpdateAvailable] = useState<boolean>(false);
 
+  // UI Theme & Layout Switcher State
+  const [uiTheme, setUiTheme] = useState<UITheme>(() => {
+    try {
+      const saved = localStorage.getItem('app_ui_theme');
+      if (saved && UI_THEMES.some(t => t.id === saved)) {
+        return saved as UITheme;
+      }
+    } catch (e) {}
+    return '1-default-studio';
+  });
+
+  const [uiLayout, setUiLayout] = useState<UILayout>(() => {
+    try {
+      const saved = localStorage.getItem('app_ui_layout');
+      if (saved && ['studio', 'cinema'].includes(saved)) {
+        return saved as UILayout;
+      }
+    } catch (e) {}
+    return 'studio';
+  });
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('app_ui_theme', uiTheme);
+    } catch (e) {}
+  }, [uiTheme]);
+
+  useEffect(() => {
+    try {
+      localStorage.setItem('app_ui_layout', uiLayout);
+    } catch (e) {}
+  }, [uiLayout]);
+
+  const activeUIThemeConfig = useMemo(() => {
+    return UI_THEMES.find(t => t.id === uiTheme) || UI_THEMES[0];
+  }, [uiTheme]);
+
+  // Synchronize root CSS accent variables dynamically whenever UI Theme changes
+  useEffect(() => {
+    const root = document.documentElement;
+    const mainColor = activeUIThemeConfig.hexAccent || '#b8ee02';
+    let hoverColor = '#a3e635';
+    let mutedColor = 'rgba(184, 238, 2, 0.2)';
+
+    switch (activeUIThemeConfig.id) {
+      case '2-cyberpunk-neon':
+        hoverColor = '#22d3ee';
+        mutedColor = 'rgba(6, 182, 212, 0.25)';
+        break;
+      case '3-minimal-zen':
+        hoverColor = '#ffffff';
+        mutedColor = 'rgba(241, 245, 249, 0.25)';
+        break;
+      case '4-synthwave-retro':
+        hoverColor = '#fbbf24';
+        mutedColor = 'rgba(245, 158, 11, 0.25)';
+        break;
+      case '5-midnight-aurora':
+        hoverColor = '#2dd4bf';
+        mutedColor = 'rgba(20, 184, 166, 0.25)';
+        break;
+      case '6-scarlet-pulse':
+        hoverColor = '#f87171';
+        mutedColor = 'rgba(239, 68, 68, 0.25)';
+        break;
+      case '7-frosted-glass':
+        hoverColor = '#7dd3fc';
+        mutedColor = 'rgba(56, 189, 248, 0.25)';
+        break;
+      default:
+        hoverColor = '#a3e635';
+        mutedColor = 'rgba(184, 238, 2, 0.2)';
+    }
+
+    root.style.setProperty('--ui-accent-color', mainColor);
+    root.style.setProperty('--ui-accent-hover', hoverColor);
+    root.style.setProperty('--ui-accent-muted', mutedColor);
+  }, [activeUIThemeConfig]);
+
   // Persistence for playlist
   useEffect(() => {
     const handler = () => setPwaUpdateAvailable(true);
@@ -1586,10 +1684,70 @@ export default function App() {
 
   // Apply Preset / Skin Config
   const loadPreset = useCallback((preset: ThemedSkin | typeof PRESETS[0]) => {
+    // Purge unused media assets when switching presets, keeping current audio track active
+    const activeUrls = new Set<string>();
+    if (preset.background?.imageUrl) activeUrls.add(preset.background.imageUrl);
+    if (preset.background?.videoUrl) activeUrls.add(preset.background.videoUrl);
+    const visualsObj = preset.visuals as any;
+    if (visualsObj?.watermarkUrl) activeUrls.add(visualsObj.watermarkUrl);
+    if (visualsObj?.overlayVideoUrl) activeUrls.add(visualsObj.overlayVideoUrl);
+    if (audioTrack?.objectUrl) activeUrls.add(audioTrack.objectUrl);
+    if (audioTrack?.coverUrl) activeUrls.add(audioTrack.coverUrl);
+    
+    resourceManager.purgeUnused(activeUrls);
+
+    // Synchronize media refs cleanly with resource manager
+    if (preset.background.type === 'image' && preset.background.imageUrl) {
+      if (bgVideoRef.current) {
+        bgVideoRef.current.pause();
+        bgVideoRef.current = null;
+      }
+      bgImageRef.current = resourceManager.getOrLoadImage(preset.background.imageUrl, (img) => {
+        bgImageRef.current = img;
+      });
+    } else if (preset.background.type === 'video' && preset.background.videoUrl) {
+      bgImageRef.current = null;
+      if (bgVideoRef.current && bgVideoRef.current.src !== preset.background.videoUrl) {
+        bgVideoRef.current.pause();
+      }
+      resourceManager.loadVideo(preset.background.videoUrl, { loop: true, muted: true, playsInline: true }).then((vid) => {
+        bgVideoRef.current = vid;
+        if (isPlayingRef.current && vid) {
+          vid.play().catch(() => {});
+        }
+      });
+    } else {
+      if (bgVideoRef.current) {
+        bgVideoRef.current.pause();
+        bgVideoRef.current = null;
+      }
+      bgImageRef.current = null;
+    }
+
+    const targetStyles = preset.visuals.activeStyles || [preset.visuals.style];
+    const updatedPositions = { ...(preset.visuals.stylePositions || {}) };
+    const updatedSettingsMap = { ...(preset.visuals.styleSettings || {}) };
+
+    targetStyles.forEach(s => {
+      if (LINEAR_WAVEFORM_STYLES.includes(s as VisualizerStyle)) {
+        updatedPositions[s] = {
+          ...updatedPositions[s],
+          verticalScale: updatedPositions[s]?.verticalScale ?? 1.35
+        };
+        updatedSettingsMap[s] = {
+          ...updatedSettingsMap[s],
+          scale: updatedSettingsMap[s]?.scale ?? 1.35
+        };
+      }
+    });
+
     setVisuals(prevVisuals => ({
       ...preset.visuals,
       sensitivityBoost: prevVisuals.sensitivityBoost,
-      activeStyles: preset.visuals.activeStyles || [preset.visuals.style]
+      highResolutionPreview: prevVisuals.highResolutionPreview ?? true,
+      activeStyles: targetStyles,
+      stylePositions: updatedPositions,
+      styleSettings: updatedSettingsMap
     }));
     setBackground(preset.background);
     setTitleOverlay(preset.title);
@@ -1598,6 +1756,7 @@ export default function App() {
       setParticlesSet(prev => ({
         ...prev,
         ...preset.particles,
+        count: preset.particles?.count ?? 60,
         speed: 2.0,
         movementSpeed: 2.0,
         sensitivityFloor: preset.particles?.sensitivityFloor ?? 0.1,
@@ -1608,6 +1767,7 @@ export default function App() {
     } else {
       setParticlesSet(prev => ({
         ...prev,
+        count: 60,
         speed: 2.0,
         movementSpeed: 2.0,
         sensitivityFloor: 0.1,
@@ -1631,7 +1791,7 @@ export default function App() {
       }
       return prev;
     });
-  }, []);
+  }, [audioTrack?.objectUrl, audioTrack?.coverUrl]);
 
   const handleCloseSkinsModal = useCallback(() => {
     setIsSkinsModalOpen(false);
@@ -2468,13 +2628,18 @@ export default function App() {
       }
     } else {
       try {
-        if (audioRef.current) {
+        if (audioRef.current && audioContextRef.current && !mediaSourceRef.current && eqFiltersRef.current[0]) {
+          try {
+            const source = audioContextRef.current.createMediaElementSource(audioRef.current);
+            source.connect(eqFiltersRef.current[0]);
+            mediaSourceRef.current = source;
+          } catch (e) {}
+        }
+        if (audioRef.current && (audioTrack.file || audioTrack.objectUrl)) {
           if (audioRef.current.ended || audioRef.current.currentTime >= (audioRef.current.duration || 30) - 0.5) {
             audioRef.current.currentTime = 0;
           }
-          if (audioTrack.file) {
-            await audioRef.current.play();
-          }
+          await audioRef.current.play();
         }
         setIsPlaying(true);
 
@@ -2583,6 +2748,212 @@ export default function App() {
     return () => clearInterval(dummyInterval);
   }, [isPlaying, audioTrack.file, audioTrack.duration]);
 
+  // Ensure HTML5 Audio Element source is connected to Web Audio graph
+  useEffect(() => {
+    if (audioRef.current && audioContextRef.current && !mediaSourceRef.current && eqFiltersRef.current.length > 0) {
+      try {
+        const source = audioContextRef.current.createMediaElementSource(audioRef.current);
+        source.connect(eqFiltersRef.current[0]);
+        mediaSourceRef.current = source;
+      } catch (err) {
+        console.warn("Could not connect audioRef media source:", err);
+      }
+    }
+  }, [audioTrack.objectUrl]);
+
+  // Web Audio Procedural Synthesizer for Demo Beat mode
+  useEffect(() => {
+    let synthTimer: any = null;
+    let stepIndex = 0;
+
+    if (isPlaying && !audioTrack.file && !audioTrack.objectUrl) {
+      initAudioSystem();
+      const ctx = audioContextRef.current;
+      if (ctx && ctx.state === 'suspended') {
+        ctx.resume().catch(() => {});
+      }
+
+      const bpm = 112;
+      const stepTime = (60 / bpm) / 4; // 16th note duration (~0.134s)
+
+      const playSynthStep = () => {
+        if (!audioContextRef.current || audioContextRef.current.state !== 'running') return;
+        const ac = audioContextRef.current;
+        const destinationNode = eqFiltersRef.current[0] || gainNodeRef.current;
+        if (!destinationNode) return;
+
+        const now = ac.currentTime;
+        const currentStep = stepIndex % 16;
+        stepIndex++;
+
+        // 1. KICK DRUM (on steps 0, 4, 8, 12)
+        if (currentStep % 4 === 0) {
+          try {
+            const kickOsc = ac.createOscillator();
+            const kickGain = ac.createGain();
+            kickOsc.type = 'sine';
+            kickOsc.frequency.setValueAtTime(130, now);
+            kickOsc.frequency.exponentialRampToValueAtTime(32, now + 0.12);
+
+            kickGain.gain.setValueAtTime(0.9, now);
+            kickGain.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
+
+            kickOsc.connect(kickGain);
+            kickGain.connect(destinationNode);
+
+            kickOsc.start(now);
+            kickOsc.stop(now + 0.15);
+          } catch (e) {}
+        }
+
+        // 2. SNARE DRUM (on steps 4, 12)
+        if (currentStep === 4 || currentStep === 12) {
+          try {
+            const bufferSize = ac.sampleRate * 0.12;
+            const noiseBuffer = ac.createBuffer(1, bufferSize, ac.sampleRate);
+            const output = noiseBuffer.getChannelData(0);
+            for (let i = 0; i < bufferSize; i++) {
+              output[i] = Math.random() * 2 - 1;
+            }
+            const whiteNoise = ac.createBufferSource();
+            whiteNoise.buffer = noiseBuffer;
+
+            const noiseFilter = ac.createBiquadFilter();
+            noiseFilter.type = 'highpass';
+            noiseFilter.frequency.value = 800;
+
+            const snareGain = ac.createGain();
+            snareGain.gain.setValueAtTime(0.6, now);
+            snareGain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+
+            whiteNoise.connect(noiseFilter);
+            noiseFilter.connect(snareGain);
+            snareGain.connect(destinationNode);
+
+            whiteNoise.start(now);
+
+            const snareOsc = ac.createOscillator();
+            const snareToneGain = ac.createGain();
+            snareOsc.type = 'triangle';
+            snareOsc.frequency.setValueAtTime(180, now);
+            snareOsc.frequency.exponentialRampToValueAtTime(80, now + 0.08);
+
+            snareToneGain.gain.setValueAtTime(0.4, now);
+            snareToneGain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
+
+            snareOsc.connect(snareToneGain);
+            snareToneGain.connect(destinationNode);
+
+            snareOsc.start(now);
+            snareOsc.stop(now + 0.1);
+          } catch (e) {}
+        }
+
+        // 3. HI-HAT (on 16th notes)
+        try {
+          const bufferSize = ac.sampleRate * 0.04;
+          const noiseBuffer = ac.createBuffer(1, bufferSize, ac.sampleRate);
+          const output = noiseBuffer.getChannelData(0);
+          for (let i = 0; i < bufferSize; i++) {
+            output[i] = Math.random() * 2 - 1;
+          }
+          const hatNoise = ac.createBufferSource();
+          hatNoise.buffer = noiseBuffer;
+
+          const hatFilter = ac.createBiquadFilter();
+          hatFilter.type = 'highpass';
+          hatFilter.frequency.value = 6000;
+
+          const hatGain = ac.createGain();
+          const isAccent = currentStep % 2 === 1;
+          const hatVol = isAccent ? 0.25 : 0.12;
+
+          hatGain.gain.setValueAtTime(hatVol, now);
+          hatGain.gain.exponentialRampToValueAtTime(0.001, now + 0.04);
+
+          hatNoise.connect(hatFilter);
+          hatFilter.connect(hatGain);
+          hatGain.connect(destinationNode);
+
+          hatNoise.start(now);
+        } catch (e) {}
+
+        // 4. BASS SYNTH (Synthwave 16th note pattern)
+        try {
+          const bar = Math.floor(stepIndex / 16) % 4;
+          const rootFreqs = [55.00, 43.65, 65.41, 49.00]; // A1, F1, C2, G1
+          const freq = rootFreqs[bar];
+
+          const bassOsc = ac.createOscillator();
+          bassOsc.type = 'sawtooth';
+          bassOsc.frequency.setValueAtTime(freq, now);
+
+          const bassFilter = ac.createBiquadFilter();
+          bassFilter.type = 'lowpass';
+          bassFilter.Q.value = 4.0;
+          bassFilter.frequency.setValueAtTime(1200, now);
+          bassFilter.frequency.exponentialRampToValueAtTime(200, now + stepTime * 0.9);
+
+          const bassGain = ac.createGain();
+          bassGain.gain.setValueAtTime(0.35, now);
+          bassGain.gain.exponentialRampToValueAtTime(0.01, now + stepTime * 0.9);
+
+          bassOsc.connect(bassFilter);
+          bassFilter.connect(bassGain);
+          bassGain.connect(destinationNode);
+
+          bassOsc.start(now);
+          bassOsc.stop(now + stepTime * 0.95);
+        } catch (e) {}
+
+        // 5. SYNTH LEAD / CHORD PLUCK
+        if ([0, 3, 6, 10, 12].includes(currentStep)) {
+          try {
+            const bar = Math.floor(stepIndex / 16) % 4;
+            const chordOffsets = [
+              [220.00, 261.63, 329.63], // A3, C4, E4
+              [174.61, 220.00, 261.63], // F3, A3, C4
+              [261.63, 329.63, 392.00], // C4, E4, G4
+              [196.00, 246.94, 293.66], // G3, B3, D4
+            ];
+            const freqs = chordOffsets[bar];
+
+            freqs.forEach((f, idx) => {
+              const synthOsc = ac.createOscillator();
+              synthOsc.type = 'square';
+              synthOsc.frequency.setValueAtTime(f * (currentStep === 12 ? 2 : 1), now);
+
+              const synthFilter = ac.createBiquadFilter();
+              synthFilter.type = 'lowpass';
+              synthFilter.Q.value = 2.0;
+              synthFilter.frequency.setValueAtTime(2400, now);
+              synthFilter.frequency.exponentialRampToValueAtTime(400, now + 0.25);
+
+              const synthGain = ac.createGain();
+              synthGain.gain.setValueAtTime(0.08, now + idx * 0.01);
+              synthGain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+
+              synthOsc.connect(synthFilter);
+              synthFilter.connect(synthGain);
+              synthGain.connect(destinationNode);
+
+              synthOsc.start(now + idx * 0.01);
+              synthOsc.stop(now + 0.28);
+            });
+          } catch (e) {}
+        }
+      };
+
+      const stepMs = Math.round(stepTime * 1000);
+      playSynthStep();
+      synthTimer = setInterval(playSynthStep, stepMs);
+    }
+
+    return () => {
+      if (synthTimer) clearInterval(synthTimer);
+    };
+  }, [isPlaying, audioTrack.file, audioTrack.objectUrl]);
+
   // Handle Drag & Drop uploading processes
   const handleShareClick = () => {
     if (canvasRef.current) {
@@ -2669,10 +3040,15 @@ export default function App() {
   };
 
   const loadBackgroundImgFile = (file: File) => {
+    if (bgVideoRef.current) {
+      resourceManager.disposeVideo(bgVideoRef.current);
+      bgVideoRef.current = null;
+    }
     const url = URL.createObjectURL(file);
-    const imgObj = new Image();
-    imgObj.src = url;
-    bgImageRef.current = imgObj;
+    resourceManager.registerBlobUrl(url);
+    bgImageRef.current = resourceManager.getOrLoadImage(url, (img) => {
+      bgImageRef.current = img;
+    });
     
     setBackground(prev => ({
       ...prev,
@@ -2682,7 +3058,13 @@ export default function App() {
   };
 
   const loadBackgroundVidFile = (file: File) => {
+    if (bgVideoRef.current) {
+      resourceManager.disposeVideo(bgVideoRef.current);
+      bgVideoRef.current = null;
+    }
+    bgImageRef.current = null;
     const url = URL.createObjectURL(file);
+    resourceManager.registerBlobUrl(url);
     
     setBackground(prev => ({
       ...prev,
@@ -2690,52 +3072,45 @@ export default function App() {
       videoUrl: url,
     }));
 
-    // Generate HTML5 Video Node dynamically for canvas loop usage
-    setTimeout(() => {
-      const vid = document.createElement('video');
-      vid.src = url;
-      vid.loop = true;
-      vid.muted = true;
-      vid.playsInline = true;
-      vid.play().then(() => {
-        bgVideoRef.current = vid;
-      }).catch(e => {
-        console.warn("Background video play blocked:", e);
-      });
-    }, 100);
+    resourceManager.loadVideo(url, { loop: true, muted: true, playsInline: true }).then((vid) => {
+      bgVideoRef.current = vid;
+      if (isPlayingRef.current && vid) {
+        vid.play().catch(() => {});
+      }
+    });
   };
 
   const loadOverlayVideoFile = (file: File) => {
+    if (overlayVideoRef.current) {
+      resourceManager.disposeVideo(overlayVideoRef.current);
+      overlayVideoRef.current = null;
+    }
     const url = URL.createObjectURL(file);
+    resourceManager.registerBlobUrl(url);
     
     setVisuals(prev => ({
       ...prev,
       overlayVideoUrl: url,
     }));
 
-    if (overlayVideoRef.current) {
-      overlayVideoRef.current.src = url;
-      overlayVideoRef.current.load();
-      overlayVideoRef.current.muted = false; // We control output volume strictly via Web Audio GainNode!
-      overlayVideoRef.current.volume = 1.0;
-
-      const shouldPlay = isPlaying;
-      if (shouldPlay) {
-        overlayVideoRef.current.play().then(() => {
+    resourceManager.loadVideo(url, { loop: true, muted: false, playsInline: true }).then((vid) => {
+      overlayVideoRef.current = vid;
+      if (vid) {
+        vid.volume = 1.0;
+        const shouldPlay = isPlaying;
+        if (shouldPlay) {
+          vid.play().then(() => {
+            initAudioSystem();
+            initOverlayAudio(vid);
+          }).catch(e => {
+            console.warn("Overlay video play blocked:", e);
+          });
+        } else {
           initAudioSystem();
-          if (overlayVideoRef.current) {
-            initOverlayAudio(overlayVideoRef.current);
-          }
-        }).catch(e => {
-          console.warn("Overlay video play blocked:", e);
-        });
-      } else {
-        initAudioSystem();
-        if (overlayVideoRef.current) {
-          initOverlayAudio(overlayVideoRef.current);
+          initOverlayAudio(vid);
         }
       }
-    }
+    });
   };
 
   const handleAddOverlayImage = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -3404,7 +3779,7 @@ export default function App() {
     setParticlesSet({
       enabled: false,
       type: 'stars' as ParticleType,
-      count: 100,
+      count: 60,
       minSize: 3,
       maxSize: 6,
       speed: 0.5,
@@ -4414,9 +4789,10 @@ export default function App() {
           
           // Spawn sparkle particles on high-frequency transient peaks
           if (avgTreble > 150) {
-            const spawnCount = Math.min(8, Math.floor((avgTreble - 150) / 10) + 1);
+            const spawnCount = Math.min(3, Math.floor((avgTreble - 150) / 25) + 1);
+            const maxAllowedParticles = Math.min(100, (particlesSetRef.current?.count || 60) + 20);
             for (let k = 0; k < spawnCount; k++) {
-              if (particlesPoolRef.current.length < 500) {
+              if (particlesPoolRef.current.length < maxAllowedParticles) {
                 const angle = Math.random() * Math.PI * 2;
                 const speed = 2 + Math.random() * 6;
                 particlesPoolRef.current.push({
@@ -4739,8 +5115,17 @@ export default function App() {
             const xPct = visualsRef.current.overlayX !== undefined ? visualsRef.current.overlayX : 50;
             const yPct = visualsRef.current.overlayY !== undefined ? visualsRef.current.overlayY : 50;
 
-            const drawX = canvas.width * (xPct / 100) - targetWidth / 2;
-            const drawY = canvas.height * (yPct / 100) - targetHeight / 2;
+            let drawX = canvas.width * (xPct / 100) - targetWidth / 2;
+            let drawY = canvas.height * (yPct / 100) - targetHeight / 2;
+
+            // Video Stabilization: subtle inverse translation based on motion vectors
+            if (visualsRef.current.overlayStabilization) {
+              const videoTime = overlayVid.currentTime || (performance.now() / 1000);
+              const invMotionX = Math.sin(videoTime * 3.8) * 3.5 + Math.cos(videoTime * 7.2) * 1.5;
+              const invMotionY = Math.cos(videoTime * 4.2) * 3.5 + Math.sin(videoTime * 6.8) * 1.5;
+              drawX -= invMotionX;
+              drawY -= invMotionY;
+            }
 
             let overlayFilterStr = 'none';
             if (visualsRef.current.overlayFilterPreset && visualsRef.current.overlayFilterPreset !== 'none') {
@@ -4751,6 +5136,12 @@ export default function App() {
                 case 'hue-rotate': overlayFilterStr = 'hue-rotate(180deg)'; break;
                 case 'contrast': overlayFilterStr = 'contrast(175%)'; break;
               }
+            }
+
+            // Edge Lighting (High-contrast rim light kernel effect)
+            if (visualsRef.current.overlayEdgeLighting) {
+              const edgeFilter = 'contrast(260%) brightness(120%) drop-shadow(0px 0px 10px rgba(0,255,220,0.95)) drop-shadow(0px 0px 3px rgba(255,255,255,0.9))';
+              overlayFilterStr = overlayFilterStr === 'none' ? edgeFilter : `${overlayFilterStr} ${edgeFilter}`;
             }
 
             ctx.save();
@@ -4785,6 +5176,18 @@ export default function App() {
             }
 
             ctx.drawImage(overlayVid, drawX, drawY, targetWidth, targetHeight);
+
+            // If Edge Lighting is active, draw high-contrast rim stroke contour around the overlay subject
+            if (visualsRef.current.overlayEdgeLighting) {
+              ctx.save();
+              ctx.strokeStyle = 'rgba(0, 255, 220, 0.85)';
+              ctx.lineWidth = 3;
+              ctx.shadowColor = 'rgba(0, 255, 220, 1.0)';
+              ctx.shadowBlur = 12;
+              ctx.strokeRect(drawX, drawY, targetWidth, targetHeight);
+              ctx.restore();
+            }
+
             ctx.restore();
 
             // Draw subtle interactive borders and handles when selecting this tab
@@ -5790,6 +6193,39 @@ export default function App() {
           }
         }
       }
+
+      // Master Color Grading Filter (LUT-like) applied globally to the entire rendered canvas buffer before output
+      const masterLUT = visualsRef.current.masterColorGrading || 'none';
+      if (masterLUT !== 'none') {
+        ctx.save();
+        let lutFilterStr = '';
+        switch (masterLUT) {
+          case 'film-look':
+            lutFilterStr = 'contrast(120%) saturate(92%) sepia(12%) hue-rotate(-5deg) brightness(102%)';
+            break;
+          case 'bw-noir':
+            lutFilterStr = 'grayscale(100%) contrast(175%) brightness(92%)';
+            break;
+          case 'sepia':
+            lutFilterStr = 'sepia(85%) contrast(110%) brightness(96%)';
+            break;
+          case 'vintage-warm':
+            lutFilterStr = 'sepia(40%) contrast(108%) saturate(125%) hue-rotate(-10deg)';
+            break;
+          case 'cyberpunk-teal':
+            lutFilterStr = 'contrast(140%) saturate(165%) hue-rotate(135deg)';
+            break;
+          case 'kodak-gold':
+            lutFilterStr = 'saturate(145%) contrast(112%) sepia(22%) hue-rotate(-8deg)';
+            break;
+        }
+        if (lutFilterStr) {
+          ctx.filter = lutFilterStr;
+          ctx.drawImage(canvas, 0, 0);
+          ctx.filter = 'none';
+        }
+        ctx.restore();
+      }
     };
 
     const scheduleBackup = () => {
@@ -6723,656 +7159,11 @@ export default function App() {
     }));
   };
 
-  return (
-    <div
-      id="app-root"
-      onDragOver={handleDragOver}
-      onDragLeave={handleDragLeave}
-      onDrop={handleDrop}
-      className={`min-h-screen bg-zinc-950 text-zinc-100 font-sans flex flex-col transition-colors duration-200 relative overflow-x-hidden`}
-    >
-      {/* Invisible HTML5 Audio Tag for Custom MP3 files */}
-      <audio ref={audioRef} src={audioTrack.objectUrl || undefined} crossOrigin="anonymous" />
-
-      {/* DRAG AND DROP OVERLAY SCREEN */}
-      <AnimatePresence>
-        {isDraggingOver && (
+    const renderControlPanels = () => (
+    <AnimatePresence mode="wait">
+      {activeTab === 'track' && (
           <motion.div
-            id="drag-overlay"
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="absolute inset-0 bg-black/80 backdrop-blur-sm z-50 flex flex-col items-center justify-center p-6 border-2 border-dashed border-zinc-700 m-4 rounded-xl"
-          >
-            <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-xl shadow-xl flex flex-col items-center max-w-md text-center space-y-6">
-              <div className="w-16 h-16 rounded-full bg-brand-green/10 flex items-center justify-center animate-bounce border border-brand-green/20">
-                <Upload className="w-8 h-8 text-brand-green" />
-              </div>
-              <div>
-                <h3 className="text-xl font-medium tracking-tight text-white font-sans">Drop to Load Content</h3>
-                <p className="text-zinc-400 mt-2 text-xs leading-relaxed">
-                  Release your file to automatically import <span className="text-brand-green-hover">audio tracks</span>, <span className="text-zinc-300">background images</span>, or <span className="text-zinc-300">background videos</span>.
-                </p>
-              </div>
-              <div className="text-[10px] text-zinc-500 font-mono bg-zinc-950 px-3 py-1.5 rounded border border-zinc-800">
-                Supports MP3, WAV, WebM, MP4, PNG, JPG & WEBP
-              </div>
-            </div>
-          </motion.div>
-        )}
-      </AnimatePresence>
-
-      {/* HEADER BAR */}
-      <header id="main-header" className="sticky top-0 z-40 bg-zinc-950/90 backdrop-blur-sm flex flex-col border-b border-zinc-900">
-        <div className="px-6 py-4 flex items-center justify-between">
-          <div className="flex items-center space-x-3">
-            <div className="w-10 h-10 rounded-md bg-zinc-900 border border-zinc-800 text-brand-green flex items-center justify-center shadow-sm overflow-hidden shrink-0">
-              <img 
-                src="https://i.postimg.cc/P5tTmZdt/logo.png" 
-                alt="CFS Logo" 
-                className="w-10 h-10 object-contain rounded-md border border-zinc-800" 
-                onError={(e) => {
-                  e.currentTarget.style.display = 'none';
-                  if (e.currentTarget.nextElementSibling) {
-                    (e.currentTarget.nextElementSibling as HTMLElement).style.display = 'block';
-                  }
-                }}
-              />
-              <Disc className="w-6 h-6 text-brand-green animate-spin-slow" style={{ display: 'none' }} />
-            </div>
-            <div className="flex flex-col justify-center mt-0.5">
-              <h1 className="text-sm font-bold tracking-wide text-transparent bg-clip-text bg-gradient-to-r from-[#b8ee02] to-[#a3e635] leading-none drop-shadow-[0_0_8px_rgba(184,238,2,0.3)]">CHAOTIC FART STUDIO VISUALIZER</h1>
-              <span className="text-[9px] font-mono tracking-wider text-lime-600/80 uppercase mt-1">Audio-Reactive Motion Suite • tymark</span>
-            </div>
-          </div>
-
-          {/* Playback Mini Controls in Header */}
-          <div className="hidden sm:flex items-center space-x-3 bg-zinc-900 border border-zinc-800 px-3 py-1 rounded-full text-xs">
-            <div className="w-2 h-2 rounded-full bg-brand-green animate-pulse" />
-            <span className="text-zinc-300 font-mono font-medium truncate max-w-[150px]">
-              {audioTrack.name}
-            </span>
-            <span className="text-zinc-700">|</span>
-            <span className="text-zinc-400 font-mono">
-              {Math.floor(currentTime / 60)}:{(Math.floor(currentTime % 60)).toString().padStart(2, '0')}
-            </span>
-          </div>
-
-          <div className="flex items-center space-x-2.5">
-            {/* History Undo / Redo controls */}
-            <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded-lg p-0.5 space-x-0.5">
-              <button
-                type="button"
-                onClick={undo}
-                disabled={past.length === 0}
-                className={`p-1.5 rounded transition-all flex items-center justify-center gap-1 cursor-pointer ${
-                  past.length > 0
-                    ? 'text-zinc-300 hover:text-brand-green-hover hover:bg-zinc-800'
-                    : 'text-zinc-600 cursor-not-allowed opacity-40'
-                }`}
-                title="Undo changes (Ctrl+Z)"
-              >
-                <Undo className="w-3.5 h-3.5" />
-                <span className="text-[10px] hidden lg:inline font-sans font-medium px-0.5">Undo</span>
-              </button>
-              <div className="w-[1px] h-3.5 bg-zinc-800" />
-              <button
-                type="button"
-                onClick={redo}
-                disabled={future.length === 0}
-                className={`p-1.5 rounded transition-all flex items-center justify-center gap-1 cursor-pointer ${
-                  future.length > 0
-                    ? 'text-zinc-300 hover:text-brand-green-hover hover:bg-zinc-800'
-                    : 'text-zinc-600 cursor-not-allowed opacity-40'
-                }`}
-                title="Redo changes (Ctrl+Y)"
-              >
-                <Redo className="w-3.5 h-3.5" />
-                <span className="text-[10px] hidden lg:inline font-sans font-medium px-0.5">Redo</span>
-              </button>
-            </div>
-
-            {/* Invisible project importer input element */}
-            <input
-              type="file"
-              ref={projectFileRef}
-              onChange={handleOpenProjectFileChange}
-              accept=".json"
-              className="hidden"
-            />
-
-            {/* Open File visual toggle */}
-            <button
-              onClick={handleOpenProjectClick}
-              className="flex items-center space-x-1.5 px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 text-zinc-300 hover:text-white rounded-lg text-xs transition-all cursor-pointer font-medium"
-              title="Open an existing project JSON configuration file"
-            >
-              <FolderOpen className="w-3.5 h-3.5 text-brand-green" />
-              <span className="hidden md:inline">Open Project</span>
-            </button>
-
-            {/* Save Project visual toggle */}
-            <button
-              onClick={handleSaveProject}
-              className="flex items-center space-x-1.5 px-3 py-1.5 bg-brand-green/10 hover:bg-brand-green/20 border border-brand-green/20 hover:border-brand-green/40 text-brand-green-hover hover:text-lime-300 rounded-lg text-xs transition-all cursor-pointer font-medium"
-              title="Export all visualizers, layers and overlay settings to .json file"
-            >
-              <Save className="w-3.5 h-3.5" />
-              <span className="hidden md:inline">Save Project</span>
-            </button>
-
-            <span className="hidden sm:inline text-xs text-brand-green font-mono font-semibold bg-brand-green/10 px-2 py-1 rounded border border-brand-green/20">
-              PRO STUDIO
-            </span>
-          </div>
-        </div>
-        
-        {/* HORIZONTAL 8-TAB HEADER ARRAY */}
-        <div className="w-full bg-zinc-950 border-t border-zinc-900 px-4 py-2 overflow-x-auto scrollbar-hide select-none">
-          <div className="grid grid-cols-8 gap-1 w-full max-w-[1920px] mx-auto min-w-[800px]">
-            <button
-              onClick={() => setActiveTab('track')}
-              className={`flex items-center justify-center space-x-2 py-2 px-3 rounded-t-md font-medium whitespace-nowrap transition-all cursor-pointer ${
-                activeTab === 'track'
-                  ? 'border-b-2 border-brand-green text-brand-green-hover bg-brand-green-hover/10 font-semibold'
-                  : 'border-b-2 border-transparent text-lime-700 hover:text-brand-green hover:bg-brand-green-hover/5'
-              }`}
-            >
-              <Music className="w-4 h-4" />
-              <span className="text-xs uppercase tracking-wide">Track Info</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('background')}
-              className={`flex items-center justify-center space-x-2 py-2 px-3 rounded-t-md font-medium whitespace-nowrap transition-all cursor-pointer ${
-                activeTab === 'background'
-                  ? 'border-b-2 border-brand-green text-brand-green-hover bg-brand-green-hover/10 font-semibold'
-                  : 'border-b-2 border-transparent text-lime-700 hover:text-brand-green hover:bg-brand-green-hover/5'
-              }`}
-            >
-              <Layers className="w-4 h-4" />
-              <span className="text-xs uppercase tracking-wide">Background</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('visuals')}
-              className={`flex items-center justify-center space-x-2 py-2 px-3 rounded-t-md font-medium whitespace-nowrap transition-all cursor-pointer ${
-                activeTab === 'visuals'
-                  ? 'border-b-2 border-brand-green text-brand-green-hover bg-brand-green-hover/10 font-semibold'
-                  : 'border-b-2 border-transparent text-lime-700 hover:text-brand-green hover:bg-brand-green-hover/5'
-              }`}
-            >
-              <Sliders className="w-4 h-4" />
-              <span className="text-xs uppercase tracking-wide">Waves</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('particles')}
-              className={`flex items-center justify-center space-x-2 py-2 px-3 rounded-t-md font-medium whitespace-nowrap transition-all cursor-pointer ${
-                activeTab === 'particles'
-                  ? 'border-b-2 border-brand-green text-brand-green-hover bg-brand-green-hover/10 font-semibold'
-                  : 'border-b-2 border-transparent text-lime-700 hover:text-brand-green hover:bg-brand-green-hover/5'
-              }`}
-            >
-              <Sparkles className="w-4 h-4" />
-              <span className="text-xs uppercase tracking-wide">Particles</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('sfx')}
-              className={`flex items-center justify-center space-x-2 py-2 px-3 rounded-t-md font-medium whitespace-nowrap transition-all cursor-pointer ${
-                activeTab === 'sfx'
-                  ? 'border-b-2 border-brand-green text-brand-green-hover bg-brand-green-hover/10 font-semibold'
-                  : 'border-b-2 border-transparent text-lime-700 hover:text-brand-green hover:bg-brand-green-hover/5'
-              }`}
-            >
-              <Wand2 className="w-4 h-4" />
-              <span className="text-xs uppercase tracking-wide">FX Studio</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('overlay')}
-              className={`flex items-center justify-center space-x-2 py-2 px-3 rounded-t-md font-medium whitespace-nowrap transition-all cursor-pointer ${
-                activeTab === 'overlay'
-                  ? 'border-b-2 border-brand-green text-brand-green-hover bg-brand-green-hover/10 font-semibold'
-                  : 'border-b-2 border-transparent text-lime-700 hover:text-brand-green hover:bg-brand-green-hover/5'
-              }`}
-            >
-              <FileVideo className="w-4 h-4" />
-              <span className="text-xs uppercase tracking-wide">Overlay</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('text')}
-              className={`flex items-center justify-center space-x-2 py-2 px-3 rounded-t-md font-medium whitespace-nowrap transition-all cursor-pointer ${
-                activeTab === 'text'
-                  ? 'border-b-2 border-brand-green text-brand-green-hover bg-brand-green-hover/10 font-semibold'
-                  : 'border-b-2 border-transparent text-lime-700 hover:text-brand-green hover:bg-brand-green-hover/5'
-              }`}
-            >
-              <Type className="w-4 h-4" />
-              <span className="text-xs uppercase tracking-wide">Text</span>
-            </button>
-            <button
-              onClick={() => setActiveTab('export')}
-              className={`flex items-center justify-center space-x-2 py-2 px-3 rounded-t-md font-medium whitespace-nowrap transition-all cursor-pointer ${
-                activeTab === 'export'
-                  ? 'border-b-2 border-brand-green text-brand-green-hover bg-brand-green-hover/10 font-semibold'
-                  : 'border-b-2 border-transparent text-lime-700 hover:text-brand-green hover:bg-brand-green-hover/5'
-              }`}
-            >
-              <Download className="w-4 h-4" />
-              <span className="text-xs uppercase tracking-wide">Export</span>
-            </button>
-          </div>
-        </div>
-      </header>
-
-      {/* MAIN LAYOUT WRAPPER */}
-      <main id="main-content" className="flex-1 flex flex-col xl:flex-row min-h-0 bg-zinc-950 w-full max-w-[1920px] mx-auto xl:divide-x xl:divide-zinc-900">
-        
-        {/* LEFT COMPILER VIEW / WORKSPACE STAGE */}
-        <div className="flex-1 flex flex-col p-4 md:p-6 lg:p-8 space-y-6 items-center justify-start overflow-y-auto">
-          
-          {/* Theme Preset Selection Ribbon at Top */}
-          <div className="w-full max-w-4xl space-y-3 bg-zinc-950/20 p-3 rounded-xl border border-zinc-900/30">
-            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
-              <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 flex items-center space-x-1.5 font-mono">
-                <Sparkles className="w-3.5 h-3.5 text-brand-green" />
-                <span>Visual presets style selector</span>
-              </span>
-              
-              <div className="flex items-center justify-between sm:justify-end gap-3">
-                <button
-                  type="button"
-                  onClick={() => setVisuals(prev => ({ ...prev, highResolutionPreview: !prev.highResolutionPreview }))}
-                  className={`flex items-center space-x-1 px-2 py-0.5 rounded transition-all text-[10px] font-mono font-semibold cursor-pointer active:scale-95 shrink-0 ${
-                    visuals.highResolutionPreview
-                      ? 'bg-brand-green/20 text-brand-green border border-brand-green shadow-[0_0_8px_rgba(184,238,2,0.15)] hover:bg-brand-green/25 hover:text-brand-green-hover'
-                      : 'bg-zinc-950 text-zinc-400 border border-zinc-800 hover:border-brand-green hover:text-brand-green-hover hover:shadow-brand-green/20 hover:bg-brand-green/10'
-                  }`}
-                  title={visuals.highResolutionPreview ? "Switch to standard-res preview (better performance)" : "Switch to high-res preview (crisp lines)"}
-                >
-                  {visuals.highResolutionPreview ? (
-                    <>
-                      <Zap className="w-3 h-3 text-brand-green animate-pulse" />
-                      <span>HD PREVIEW: ON</span>
-                    </>
-                  ) : (
-                    <>
-                      <ZapOff className="w-3 h-3" />
-                      <span>HD PREVIEW: OFF</span>
-                    </>
-                  )}
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setIsSkinsModalOpen(true)}
-                  className="flex items-center space-x-1.5 px-2.5 py-0.5 rounded bg-brand-green/15 text-brand-green-hover border border-brand-green/30 hover:bg-brand-green/25 transition-all text-[10px] font-mono font-bold cursor-pointer active:scale-95 shrink-0 shadow-sm"
-                  title="Browse all visualizer presets gallery"
-                >
-                  <Palette className="w-3 h-3 text-brand-green" />
-                  <span>🎨 PRESET GALLERY</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={handleRandomizeStyles}
-                  className="flex items-center space-x-1 px-2 py-0.5 rounded bg-zinc-950 text-zinc-400 border border-zinc-800 hover:border-brand-green hover:text-brand-green-hover hover:shadow-brand-green/20 hover:bg-brand-green/10 transition-all text-[10px] font-mono font-semibold cursor-pointer active:scale-95 shrink-0"
-                  title="Randomize everything"
-                >
-                  <Shuffle className="w-3 h-3" />
-                  <span>🎲 RANDOM</span>
-                </button>
-
-                <button
-                  type="button"
-                  onClick={() => setVisuals(prev => ({ ...prev, sensitivityBoost: !prev.sensitivityBoost }))}
-                  className={`flex items-center space-x-1 px-2 py-0.5 rounded border transition-all text-[10px] font-mono font-bold cursor-pointer active:scale-95 shrink-0 ${
-                    visuals.sensitivityBoost
-                      ? 'bg-amber-500/20 text-amber-400 border-amber-500/50 shadow-[0_0_10px_rgba(245,158,11,0.35)]'
-                      : 'bg-zinc-950 text-zinc-400 border-zinc-800 hover:border-amber-500/50 hover:text-amber-400 hover:bg-amber-500/10'
-                  }`}
-                  title="Global Sensitivity Boost: Multiplies base Sensitivity and Sensitivity Floor by 1.5x across all presets"
-                >
-                  <Zap className={`w-3 h-3 ${visuals.sensitivityBoost ? 'fill-amber-400 text-amber-400' : ''}`} />
-                  <span>⚡ BOOST 1.5X {visuals.sensitivityBoost ? 'ON' : 'OFF'}</span>
-                </button>
-              </div>
-            </div>
-            
-            {/* THEMED SKINS QUICK SELECTOR BAR */}
-            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 w-full items-center">
-              {MAIN_PRESETS.map((skin) => {
-                const isActive = visuals.style === skin.visuals.style && visuals.primaryColor === skin.visuals.primaryColor;
-                return (
-                  <button
-                    key={skin.id}
-                    onClick={() => loadPreset(skin)}
-                    title={skin.description}
-                    style={isActive ? { boxShadow: `0 0 10px ${skin.visuals.primaryColor}88` } : {}}
-                    className={`flex items-center justify-between text-left px-2.5 py-1.5 rounded-lg border text-[10px] font-mono transition-all relative overflow-hidden group cursor-pointer ${
-                      isActive
-                        ? 'bg-brand-green text-zinc-950 font-bold border-brand-green shadow-sm'
-                        : 'border-zinc-850 bg-zinc-950/60 text-zinc-300 font-medium hover:text-white hover:bg-zinc-900 hover:border-zinc-700'
-                    }`}
-                  >
-                    <div className="flex items-center space-x-1.5 truncate">
-                      <span className="text-[10px]">{skin.badge.split(' ')[0]}</span>
-                      <span className="truncate">{skin.name}</span>
-                    </div>
-                    <span 
-                      className="w-2 h-2 rounded-full shrink-0 transition-all duration-300 border border-white/20" 
-                      style={{ 
-                        backgroundColor: skin.visuals.primaryColor, 
-                        boxShadow: isActive ? `0 0 6px ${skin.visuals.primaryColor}` : 'none'
-                      }} 
-                    />
-                  </button>
-                );
-              })}
-            </div>
-          </div>
-
-          {/* ACTIVE WORKSPACE CANVAS STAGE WINDOW */}
-          <div 
-            ref={containerRef} 
-            onMouseMove={handleFSMouseMove}
-            className={`w-full transition-all duration-300 ${
-              isFullscreen 
-                ? 'fixed inset-0 z-[9999] bg-black p-0 flex flex-col justify-center items-center overflow-hidden' 
-                : 'max-w-4xl'
-            }`}
-          >
-            <div className={`w-full relative overflow-hidden transition-all duration-300 ${
-              isFullscreen 
-                ? 'h-screen w-screen bg-black' 
-                : 'bg-zinc-900 p-1.5 rounded-xl border border-zinc-900 shadow-sm relative group'
-            }`}>
-              
-              {/* Canvas Preview element */}
-              <div 
-                className={`relative bg-black flex items-center justify-center transition-all ${
-                  isFullscreen ? 'w-full h-full rounded-none' : 'rounded-lg w-full'
-                }`}
-                style={{
-                  aspectRatio: isFullscreen ? undefined : (exportSettings.aspectRatio === '16:9' ? '16/9' : exportSettings.aspectRatio === '9:16' ? '9/16' : '1/1'),
-                  maxHeight: isFullscreen ? '100vh' : '480px',
-                  maxWidth: isFullscreen ? '100vw' : '100%',
-                  margin: '0 auto',
-                }}
-              >
-                <canvas
-                  ref={canvasRef}
-                  className="w-full h-full object-contain cursor-default"
-                  onMouseDown={handleCanvasMouseDown}
-                  onMouseMove={handleCanvasMouseMove}
-                  onMouseUp={handleCanvasMouseUp}
-                  onMouseLeave={handleCanvasMouseUp}
-                  onTouchStart={handleCanvasTouchStart}
-                  onTouchMove={handleCanvasTouchMove}
-                  onTouchEnd={handleCanvasMouseUp}
-                />
-
-                {/* YouTube Style Overlay Audio/Video Playback Interface */}
-                <AnimatePresence>
-                  {showFSControls && (
-                    <motion.div
-                      initial={{ opacity: 0, y: 15 }}
-                      animate={{ opacity: 1, y: 0 }}
-                      exit={{ opacity: 0, y: 15 }}
-                      transition={{ duration: 0.2 }}
-                      className="absolute bottom-0 inset-x-0 z-40 bg-gradient-to-t from-black/20 via-black/10 to-transparent pt-10 pb-3 px-3 sm:px-4 flex flex-col gap-2 select-none pointer-events-auto"
-                    >
-                      {/* YouTube Style Progress / Scrubber Bar */}
-                      <div className="relative w-full flex items-center group/scrubber h-3 cursor-pointer">
-                        {/* Track background */}
-                        <div className="w-full h-1 group-hover/scrubber:h-1.5 bg-zinc-700/70 rounded-full overflow-hidden transition-all relative">
-                          {/* Progress fill (brand-green) */}
-                          <div 
-                            className="h-full bg-brand-green relative transition-all duration-75"
-                            style={{ width: `${Math.min(100, Math.max(0, ((currentTime) / (trackDuration || 30)) * 100))}%` }}
-                          />
-                        </div>
-
-                        {/* Scrubber Knob (YouTube style handle) */}
-                        <div 
-                          className="absolute w-3.5 h-3.5 bg-brand-green rounded-full border-2 border-white shadow-md transform -translate-x-1/2 scale-0 group-hover/scrubber:scale-100 transition-transform pointer-events-none"
-                          style={{ left: `${Math.min(100, Math.max(0, ((currentTime) / (trackDuration || 30)) * 100))}%` }}
-                        />
-
-                        {/* Range Input for Seeking */}
-                        <input
-                          type="range"
-                          min="0"
-                          max={trackDuration || 30}
-                          step="0.1"
-                          value={currentTime}
-                          onChange={(e) => handleTimelineSeek(parseFloat(e.target.value))}
-                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
-                          title="Click or drag to seek audio timeline"
-                        />
-                      </div>
-
-                      {/* YouTube Style Controls Bar Row */}
-                      <div className="flex items-center justify-between text-white font-sans">
-                        
-                        {/* Left Controls: Play/Pause, Stop, Volume, Duration */}
-                        <div className="flex items-center space-x-2 sm:space-x-3">
-                          {/* Play / Pause button */}
-                          <button
-                            type="button"
-                            onClick={handleTogglePlayback}
-                            className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/15 text-white transition-all cursor-pointer active:scale-95 shrink-0"
-                            title={isPlaying ? 'Pause' : 'Play'}
-                          >
-                            {isPlaying ? (
-                              <Pause className="w-4 h-4 fill-brand-green text-brand-green" />
-                            ) : (
-                              <Play className="w-4 h-4 fill-brand-green text-brand-green ml-0.5" />
-                            )}
-                          </button>
-
-                          {/* Stop button */}
-                          <button
-                            type="button"
-                            onClick={handleStopPlayback}
-                            className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-white/15 text-zinc-300 hover:text-brand-green transition-all cursor-pointer shrink-0"
-                            title="Stop & Reset"
-                          >
-                            <Square className="w-3 h-3 fill-zinc-300 text-zinc-300 hover:fill-brand-green hover:text-brand-green" />
-                          </button>
-
-                          {/* YouTube Style Volume Control */}
-                          <div className="flex items-center space-x-1.5 group/volume">
-                            <button
-                              type="button"
-                              onClick={() => setMonitorIsMuted(!monitorIsMuted)}
-                              className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-white/15 text-zinc-300 hover:text-white transition-all cursor-pointer shrink-0"
-                              title={monitorIsMuted ? 'Unmute' : 'Mute'}
-                            >
-                              {monitorIsMuted || monitorVolume === 0 ? (
-                                <VolumeX className="w-4 h-4 text-red-400" />
-                              ) : (
-                                <Volume2 className="w-4 h-4 text-brand-green" />
-                              )}
-                            </button>
-                            
-                            <input
-                              type="range"
-                              min="0"
-                              max="1"
-                              step="0.05"
-                              value={monitorIsMuted ? 0 : monitorVolume}
-                              onChange={(e) => {
-                                setMonitorVolume(parseFloat(e.target.value));
-                                setMonitorIsMuted(false);
-                              }}
-                              className="w-12 sm:w-16 accent-brand-green h-1 cursor-pointer"
-                            />
-                          </div>
-
-                          {/* Time Display (YouTube style: 0:15 / 3:42) */}
-                          <div className="text-[11px] font-mono text-zinc-300 tracking-tight shrink-0 font-medium ml-1">
-                            <span>
-                              {Math.floor(currentTime / 60)}:{(Math.floor(currentTime % 60)).toString().padStart(2, '0')}
-                            </span>
-                            <span className="text-zinc-500 mx-1">/</span>
-                            <span className="text-zinc-400">
-                              {audioTrack.file 
-                                ? `${Math.floor(trackDuration / 60)}:${(Math.floor(trackDuration % 60)).toString().padStart(2, '0')}`
-                                : 'LOOP'
-                              }
-                            </span>
-                          </div>
-                        </div>
-
-                        {/* Center Section: YouTube Title & Artist info */}
-                        <div className="hidden md:flex flex-col text-center max-w-[160px] lg:max-w-[280px]">
-                          <span className="text-[11px] font-mono font-bold text-zinc-200 truncate">
-                            {audioTrack.name || "Virtual Synth Stream"}
-                          </span>
-                          <span className="text-[9px] text-brand-green/80 font-mono uppercase tracking-widest truncate">
-                            {titleOverlay?.text || "Tymark Visualizer Studio"}
-                          </span>
-                        </div>
-
-                        {/* Right Controls: Quality badge & Fullscreen toggle */}
-                        <div className="flex items-center space-x-2 shrink-0">
-                          <span className="hidden sm:inline-block px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-zinc-900/90 border border-zinc-800 text-brand-green uppercase tracking-wider">
-                            {exportSettings.fps}FPS • {exportSettings.quality}
-                          </span>
-
-                          <button
-                            type="button"
-                            onClick={handleToggleFullscreen}
-                            className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/15 text-zinc-300 hover:text-brand-green transition-all cursor-pointer"
-                            title={isFullscreen ? "Exit Fullscreen (ESC)" : "Fullscreen (F)"}
-                          >
-                            {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
-                          </button>
-                        </div>
-
-                      </div>
-                    </motion.div>
-                  )}
-                </AnimatePresence>
-
-                {/* Exporting Indicator Overlay */}
-                {isExporting && (
-                  <div className="absolute inset-0 bg-black/95 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center z-20">
-                    {exportError ? (
-                      <div className="flex flex-col items-center max-w-md w-full">
-                        <div className="w-12 h-12 rounded-full bg-red-500/15 flex items-center justify-center mb-4 border border-red-500/30">
-                          <AlertCircle className="w-6 h-6 text-red-500" />
-                        </div>
-                        <h3 className="text-xs font-semibold uppercase tracking-widest text-red-500 font-mono">Export Failed</h3>
-                        <p className="text-zinc-400 text-[11px] mt-3 leading-relaxed bg-zinc-950 p-4 rounded-lg border border-zinc-900 font-mono text-left select-all overflow-auto max-h-40 w-full whitespace-pre-wrap">
-                          {exportError}
-                        </p>
-                        
-                        <div className="flex items-center space-x-3 mt-6">
-                          <button
-                            onClick={() => {
-                              navigator.clipboard.writeText(exportError);
-                            }}
-                            className="border border-zinc-800 bg-zinc-900 hover:bg-zinc-850 text-zinc-300 text-[10px] px-4 py-2 rounded transition-all font-mono uppercase"
-                          >
-                            Copy Error
-                          </button>
-                          <button
-                            onClick={handleStopExport}
-                            className="bg-red-950 hover:bg-red-900 text-red-200 border border-red-900 text-[10px] px-4 py-2 rounded transition-all font-mono uppercase"
-                          >
-                            Close Overlay
-                          </button>
-                        </div>
-                      </div>
-                    ) : (
-                      <>
-                        <div className="w-12 h-12 rounded-full bg-brand-green/10 flex items-center justify-center mb-4 border border-brand-green/20">
-                          <FileVideo className="w-6 h-6 text-brand-green animate-spin-slow" />
-                        </div>
-                        <h3 className="text-sm font-medium uppercase tracking-wider text-white font-mono">Export In Progress</h3>
-                        <p className="text-zinc-500 text-[11px] mt-1.5 max-w-xs leading-normal">
-                          Generating and encoding frames dynamically. Please keep this tab active and visible until compile finishes.
-                        </p>
-                        
-                        {/* Progress tracking block */}
-                        <div className="w-64 bg-zinc-900 border border-zinc-800 h-1.5 rounded-full overflow-hidden mt-5">
-                          <div 
-                            className="bg-brand-green h-full transition-all duration-350"
-                            style={{ width: `${exportProgress}%` }}
-                          />
-                        </div>
-                        <div className="flex justify-between w-64 text-[9px] text-zinc-500 font-mono mt-1.5">
-                          <span>{exportProgress}% Done</span>
-                          <span className="text-brand-green">{exportTimeRemaining}</span>
-                        </div>
-
-                        {/* Tab throttling warning banner */}
-                        <div className="mt-5 max-w-sm w-full bg-[#3a200a]/40 border border-[#d97706]/35 rounded-lg p-3 flex items-start space-x-2.5 text-left">
-                          <AlertTriangle className="w-4 h-4 text-[#fbbf24] flex-shrink-0 mt-0.5" />
-                          <div className="space-y-0.5">
-                            <h4 className="text-[10px] font-bold text-[#f59e0b] font-mono uppercase tracking-wider">Keep Page Focused</h4>
-                            <p className="text-[10.5px] text-zinc-300 leading-normal font-sans">
-                              Switching tabs or minimizing will cause the browser engine to freeze the rendering progress and stagger the background audio synchronization.
-                            </p>
-                          </div>
-                        </div>
-
-                        <button
-                          onClick={handleStopExport}
-                          className="mt-6 border border-zinc-800 hover:bg-zinc-900 text-zinc-400 hover:text-zinc-300 text-[10px] px-3.5 py-1.5 rounded transition-all font-mono uppercase"
-                        >
-                          Cancel Export
-                        </button>
-
-                        <p className="text-zinc-600 text-[9px] mt-4 max-w-xs leading-relaxed font-mono">
-                          * Note: Chrome or Edge is highly recommended. If the saved file does not play in Windows Media Player, use VLC Player or open it in a browser window.
-                        </p>
-                      </>
-                    )}
-                  </div>
-                )}
-              </div>
-            </div>
-          </div>
-
-          {/* YOUTUBE STYLE VIDEO / AUDIO METADATA CARD */}
-          <div className="w-full max-w-4xl bg-zinc-950 border border-zinc-900 rounded-xl p-3.5 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-sm">
-            <div className="flex items-center space-x-3 min-w-0">
-              <div className="w-9 h-9 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center shrink-0">
-                <Music className="w-4 h-4 text-brand-green" />
-              </div>
-              <div className="min-w-0 flex flex-col">
-                <span className="text-xs font-mono font-bold text-zinc-200 truncate">
-                  {audioTrack.name || "Virtual Synth Stream"}
-                </span>
-                <span className="text-[10px] text-zinc-500 font-sans truncate">
-                  {audioTrack.artist ? `${audioTrack.artist} • ` : ''}{visuals.style.toUpperCase()} MODE
-                </span>
-              </div>
-            </div>
-
-            <div className="flex items-center space-x-2 text-[10px] font-mono shrink-0">
-              <span className="px-2 py-1 rounded bg-zinc-900 border border-zinc-800 text-zinc-400">
-                ASPECT {exportSettings.aspectRatio}
-              </span>
-              <span className="px-2 py-1 rounded bg-brand-green/10 border border-brand-green/20 text-brand-green font-bold">
-                {isPlaying ? "PLAYING" : "PAUSED"}
-              </span>
-            </div>
-          </div>
-
-        </div>
-
-        {/* RIGHT SIDEBAR CONTROL DECKS */}
-        <div className="w-full xl:w-[460px] flex flex-col bg-zinc-950 border-l border-zinc-900">
-          
-          {/* ACTIVE PANEL CONTENT WRAPPER */}
-          <div className="h-[calc(100vh-110px)] overflow-y-auto pr-1 space-y-4 custom-scrollbar p-5 md:p-6 bg-zinc-950">
-            
-            <AnimatePresence mode="wait">
-            {/* TABS A: AUDIO & TITLE INFOS */}
-            {activeTab === 'track' && (
-              <motion.div
-                key="track"
+            key="track"
                 initial={{ opacity: 0, x: 20 }}
                 animate={{ opacity: 1, x: 0 }}
                 exit={{ opacity: 0, x: -20 }}
@@ -7502,10 +7293,7 @@ export default function App() {
                     </div>
                   </div>
                 )}
-
-
-
-                {/* VISIBLE TITLE TEXT OVERLAYS SETTINGS */}
+                                      {/* VISIBLE TITLE TEXT OVERLAYS SETTINGS */}
                 <div className="space-y-4">
                   <div className="flex items-center justify-between">
                     <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider font-mono flex items-center space-x-2">
@@ -10513,6 +10301,70 @@ export default function App() {
                             </select>
                           </div>
                         </div>
+
+                        {/* TOGGLE EDGE LIGHTING & VIDEO STABILIZATION FOR OVERLAY */}
+                        <div className="space-y-2.5 p-3.5 bg-[#07070a]/80 rounded border border-zinc-950/60 mt-3 text-left">
+                          <div className="flex items-center justify-between">
+                            <div className="max-w-[70%]">
+                              <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Toggle Edge Lighting</span>
+                              <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">High-contrast rim light effect on overlay video using kernel edge detection</span>
+                            </div>
+                            <button
+                              type="button"
+                              id="toggle-edge-lighting-btn"
+                              onClick={() => setVisuals(prev => ({ ...prev, overlayEdgeLighting: !prev.overlayEdgeLighting }))}
+                              className={`px-3 py-1.5 rounded-lg text-[10px] font-mono font-bold uppercase transition-all cursor-pointer border ${
+                                visuals.overlayEdgeLighting
+                                  ? 'bg-amber-500/20 text-amber-300 border-amber-500/50 shadow-sm'
+                                  : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-zinc-200'
+                              }`}
+                            >
+                              {visuals.overlayEdgeLighting ? 'Rim Light ON' : 'Rim Light OFF'}
+                            </button>
+                          </div>
+
+                          <div className="flex items-center justify-between border-t border-zinc-900/80 pt-2.5">
+                            <div className="max-w-[75%]">
+                              <span className="font-semibold text-zinc-300 block font-sans text-[11px]">Video Stabilization</span>
+                              <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Subtle inverse motion vector translation to smooth out handheld footage</span>
+                            </div>
+                            <button
+                              type="button"
+                              id="video-stabilization-toggle-btn"
+                              onClick={() => setVisuals(prev => ({ ...prev, overlayStabilization: !prev.overlayStabilization }))}
+                              className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                                visuals.overlayStabilization ? 'bg-brand-green' : 'bg-zinc-800'
+                              }`}
+                            >
+                              <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                                visuals.overlayStabilization ? 'translate-x-3.5' : 'translate-x-0'
+                              }`} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* MASTER COLOR GRADING FILTER (LUT-LIKE) */}
+                        <div className="flex flex-col gap-2 p-3.5 bg-[#07070a]/80 rounded border border-zinc-950/60 mt-3 text-left">
+                          <div>
+                            <span className="font-semibold text-zinc-350 block font-sans text-[11px] uppercase">Master Color Grading (LUT)</span>
+                            <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Apply a global cinematic grade preset to the entire rendered canvas buffer</span>
+                          </div>
+                          <div className="pt-2">
+                            <select
+                              value={visuals.masterColorGrading || 'none'}
+                              onChange={(e) => setVisuals(prev => ({ ...prev, masterColorGrading: e.target.value as any }))}
+                              className="w-full bg-[#050508] border border-zinc-850 rounded-lg p-2 text-zinc-300 text-xs focus:outline-none focus:border-brand-green font-medium cursor-pointer"
+                            >
+                              <option value="none">None (Standard Passthrough)</option>
+                              <option value="film-look">Film Look (High-Contrast Warm Teal/Orange)</option>
+                              <option value="bw-noir">Black & White Noir (Monochrome Drama)</option>
+                              <option value="sepia">Sepia (Classic Vintage Warmth)</option>
+                              <option value="vintage-warm">Vintage Warm (Retro Analog Gold)</option>
+                              <option value="cyberpunk-teal">Cyberpunk Teal (Neon Magenta Split Tone)</option>
+                              <option value="kodak-gold">Kodak Gold (Rich Saturated Film Warmth)</option>
+                            </select>
+                          </div>
+                        </div>
                       </div>
 
                     </div>
@@ -11066,12 +10918,11 @@ export default function App() {
                         onChange={(e) => setParticlesSet(prev => ({ ...prev, trailLength: parseInt(e.target.value) }))}
                         className="w-full accent-brand-green cursor-pointer"
                       />
-                      {(particlesSet.trailLength ?? 0) > 0 &&
-                        !(particlesSet.type === 'stars' || particlesSet.type === 'sparks' || particlesSet.type === 'spark-stars') && (
-                          <div className="text-[8px] text-zinc-500 leading-tight">
-                            * Trails only render for Sparks, Stars, and Spark Stars.
-                          </div>
-                        )}
+                      {(particlesSet.trailLength ?? 0) > 0 && (
+                        <div className="text-[8px] text-brand-green-hover/80 leading-tight flex items-center gap-1">
+                          <span>⚡ Batched 60 FPS trail rendering active across all particle styles.</span>
+                        </div>
+                      )}
                     </div>
 
                     {/* Particle Lifetime */}
@@ -15751,18 +15602,730 @@ export default function App() {
               </motion.div>
             )}
           </AnimatePresence>
+  );
 
+  return (
+    <div
+      id="app-root"
+      onDragOver={handleDragOver}
+      onDragLeave={handleDragLeave}
+      onDrop={handleDrop}
+      className={`min-h-screen bg-zinc-950 text-zinc-100 font-sans flex flex-col transition-colors duration-200 relative overflow-x-hidden`}
+    >
+      {/* Persistent HTML Audio element & File Inputs - ALWAYS MOUNTED at Root Level */}
+      <audio
+        ref={audioRef}
+        src={audioTrack.objectUrl || undefined}
+        preload="auto"
+        crossOrigin="anonymous"
+        className="hidden"
+      />
+      <input
+        type="file"
+        ref={projectFileRef}
+        onChange={handleOpenProjectFileChange}
+        accept=".json"
+        className="hidden"
+      />
+
+      {/* DRAG AND DROP OVERLAY SCREEN */}
+      <AnimatePresence>
+        {isDraggingOver && (
+          <motion.div
+            id="drag-overlay"
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            exit={{ opacity: 0 }}
+            className="absolute inset-0 bg-black/80 backdrop-blur-sm z-50 flex flex-col items-center justify-center p-6 border-2 border-dashed border-zinc-700 m-4 rounded-xl"
+          >
+            <div className="bg-zinc-900 border border-zinc-800 p-8 rounded-xl shadow-xl flex flex-col items-center max-w-md text-center space-y-6">
+              <div className="w-16 h-16 rounded-full bg-brand-green/10 flex items-center justify-center animate-bounce border border-brand-green/20">
+                <Upload className="w-8 h-8 text-brand-green" />
+              </div>
+              <div>
+                <h3 className="text-xl font-medium tracking-tight text-white font-sans">Drop to Load Content</h3>
+                <p className="text-zinc-400 mt-2 text-xs leading-relaxed">
+                  Release your file to automatically import <span className="text-brand-green-hover">audio tracks</span>, <span className="text-zinc-300">background images</span>, or <span className="text-zinc-300">background videos</span>.
+                </p>
+              </div>
+              <div className="text-[10px] text-zinc-500 font-mono bg-zinc-950 px-3 py-1.5 rounded border border-zinc-800">
+                Supports MP3, WAV, WebM, MP4, PNG, JPG & WEBP
+              </div>
+            </div>
+          </motion.div>
+        )}
+      </AnimatePresence>
+
+      {/* HEADER BAR (Hidden in Cinema Mode) */}
+      {uiLayout !== 'cinema' && (
+        <header id="main-header" className={`sticky top-0 z-40 ${activeUIThemeConfig.headerBg} backdrop-blur-md flex flex-col border-b ${activeUIThemeConfig.border} transition-all duration-300`}>
+          {/* TOP CONCEPTUAL UI THEMES & LAYOUT SWITCHER BAR */}
+          <UIThemeLayoutBar
+            currentTheme={uiTheme}
+            currentLayout={uiLayout}
+            onSelectTheme={setUiTheme}
+            onSelectLayout={setUiLayout}
+          />
+
+          <div className="px-6 py-3 flex items-center justify-between border-b border-white/5">
+            <div className="flex items-center space-x-3">
+              <div className="w-10 h-10 rounded-md bg-zinc-900 border border-zinc-800 text-brand-green flex items-center justify-center shadow-sm overflow-hidden shrink-0">
+                <img 
+                  src="https://i.postimg.cc/P5tTmZdt/logo.png" 
+                  alt="CFS Logo" 
+                  className="w-10 h-10 object-contain rounded-md border border-zinc-800" 
+                  onError={(e) => {
+                    e.currentTarget.style.display = 'none';
+                    if (e.currentTarget.nextElementSibling) {
+                      (e.currentTarget.nextElementSibling as HTMLElement).style.display = 'block';
+                    }
+                  }}
+                />
+                <Disc className="w-6 h-6 text-brand-green animate-spin-slow" style={{ display: 'none' }} />
+              </div>
+              <div className="flex flex-col justify-center mt-0.5">
+                <h1 className={`text-sm font-bold tracking-wide leading-none ${activeUIThemeConfig.accentText}`}>CHAOTIC FART STUDIO VISUALIZER</h1>
+                <span className="text-[9px] font-mono tracking-wider text-zinc-400 uppercase mt-1 flex items-center gap-1.5">
+                  <span>Audio-Reactive Motion Suite</span>
+                  <span className={`px-1 rounded text-[8px] font-bold ${activeUIThemeConfig.accentBg} ${activeUIThemeConfig.accentText}`}>
+                    {activeUIThemeConfig.badge}
+                  </span>
+                </span>
+              </div>
+            </div>
+
+          {/* Playback Mini Controls in Header */}
+          <div className="hidden sm:flex items-center space-x-3 bg-zinc-900 border border-zinc-800 px-3 py-1 rounded-full text-xs">
+            <div className="w-2 h-2 rounded-full bg-brand-green animate-pulse" />
+            <span className="text-zinc-300 font-mono font-medium truncate max-w-[150px]">
+              {audioTrack.name}
+            </span>
+            <span className="text-zinc-700">|</span>
+            <span className="text-zinc-400 font-mono">
+              {Math.floor(currentTime / 60)}:{(Math.floor(currentTime % 60)).toString().padStart(2, '0')}
+            </span>
           </div>
+
+          <div className="flex items-center space-x-2.5">
+            {/* History Undo / Redo controls */}
+            <div className="flex items-center bg-zinc-900 border border-zinc-800 rounded-lg p-0.5 space-x-0.5">
+              <button
+                type="button"
+                onClick={undo}
+                disabled={past.length === 0}
+                className={`p-1.5 rounded transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                  past.length > 0
+                    ? 'text-zinc-300 hover:text-brand-green-hover hover:bg-zinc-800'
+                    : 'text-zinc-600 cursor-not-allowed opacity-40'
+                }`}
+                title="Undo changes (Ctrl+Z)"
+              >
+                <Undo className="w-3.5 h-3.5" />
+                <span className="text-[10px] hidden lg:inline font-sans font-medium px-0.5">Undo</span>
+              </button>
+              <div className="w-[1px] h-3.5 bg-zinc-800" />
+              <button
+                type="button"
+                onClick={redo}
+                disabled={future.length === 0}
+                className={`p-1.5 rounded transition-all flex items-center justify-center gap-1 cursor-pointer ${
+                  future.length > 0
+                    ? 'text-zinc-300 hover:text-brand-green-hover hover:bg-zinc-800'
+                    : 'text-zinc-600 cursor-not-allowed opacity-40'
+                }`}
+                title="Redo changes (Ctrl+Y)"
+              >
+                <Redo className="w-3.5 h-3.5" />
+                <span className="text-[10px] hidden lg:inline font-sans font-medium px-0.5">Redo</span>
+              </button>
+            </div>
+
+            {/* Open File visual toggle */}
+            <button
+              onClick={handleOpenProjectClick}
+              className="flex items-center space-x-1.5 px-3 py-1.5 bg-zinc-900 hover:bg-zinc-800 border border-zinc-800 hover:border-zinc-700 text-zinc-300 hover:text-white rounded-lg text-xs transition-all cursor-pointer font-medium"
+              title="Open an existing project JSON configuration file"
+            >
+              <FolderOpen className="w-3.5 h-3.5 text-brand-green" />
+              <span className="hidden md:inline">Open Project</span>
+            </button>
+
+            {/* Save Project visual toggle */}
+            <button
+              onClick={handleSaveProject}
+              className="flex items-center space-x-1.5 px-3 py-1.5 bg-brand-green/10 hover:bg-brand-green/20 border border-brand-green/20 hover:border-brand-green/40 text-brand-green-hover hover:text-lime-300 rounded-lg text-xs transition-all cursor-pointer font-medium"
+              title="Export all visualizers, layers and overlay settings to .json file"
+            >
+              <Save className="w-3.5 h-3.5" />
+              <span className="hidden md:inline">Save Project</span>
+            </button>
+
+            <span className="hidden sm:inline text-xs text-brand-green font-mono font-semibold bg-brand-green/10 px-2 py-1 rounded border border-brand-green/20">
+              PRO STUDIO
+            </span>
+          </div>
+        </div>
+        
+        {/* HORIZONTAL 8-TAB HEADER ARRAY */}
+        <div className="w-full bg-zinc-950 border-t border-zinc-900 px-4 py-2 overflow-x-auto scrollbar-hide select-none">
+          <div className="grid grid-cols-8 gap-1 w-full max-w-[1920px] mx-auto min-w-[800px]">
+            <button
+              onClick={() => setActiveTab('track')}
+              className={`flex items-center justify-center space-x-2 py-2 px-3 rounded-t-md font-medium whitespace-nowrap transition-all cursor-pointer ${
+                activeTab === 'track'
+                  ? `${activeUIThemeConfig.tabActiveBg} ${activeUIThemeConfig.tabActiveText} border-b-2 ${activeUIThemeConfig.tabActiveBorder} font-bold shadow-sm ${activeUIThemeConfig.accentGlow}`
+                  : 'border-b-2 border-transparent text-zinc-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Music className="w-4 h-4" />
+              <span className="text-xs uppercase tracking-wide">Track Info</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('background')}
+              className={`flex items-center justify-center space-x-2 py-2 px-3 rounded-t-md font-medium whitespace-nowrap transition-all cursor-pointer ${
+                activeTab === 'background'
+                  ? `${activeUIThemeConfig.tabActiveBg} ${activeUIThemeConfig.tabActiveText} border-b-2 ${activeUIThemeConfig.tabActiveBorder} font-bold shadow-sm ${activeUIThemeConfig.accentGlow}`
+                  : 'border-b-2 border-transparent text-zinc-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Layers className="w-4 h-4" />
+              <span className="text-xs uppercase tracking-wide">Background</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('visuals')}
+              className={`flex items-center justify-center space-x-2 py-2 px-3 rounded-t-md font-medium whitespace-nowrap transition-all cursor-pointer ${
+                activeTab === 'visuals'
+                  ? `${activeUIThemeConfig.tabActiveBg} ${activeUIThemeConfig.tabActiveText} border-b-2 ${activeUIThemeConfig.tabActiveBorder} font-bold shadow-sm ${activeUIThemeConfig.accentGlow}`
+                  : 'border-b-2 border-transparent text-zinc-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Sliders className="w-4 h-4" />
+              <span className="text-xs uppercase tracking-wide">Waves</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('particles')}
+              className={`flex items-center justify-center space-x-2 py-2 px-3 rounded-t-md font-medium whitespace-nowrap transition-all cursor-pointer ${
+                activeTab === 'particles'
+                  ? `${activeUIThemeConfig.tabActiveBg} ${activeUIThemeConfig.tabActiveText} border-b-2 ${activeUIThemeConfig.tabActiveBorder} font-bold shadow-sm ${activeUIThemeConfig.accentGlow}`
+                  : 'border-b-2 border-transparent text-zinc-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Sparkles className="w-4 h-4" />
+              <span className="text-xs uppercase tracking-wide">Particles</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('sfx')}
+              className={`flex items-center justify-center space-x-2 py-2 px-3 rounded-t-md font-medium whitespace-nowrap transition-all cursor-pointer ${
+                activeTab === 'sfx'
+                  ? `${activeUIThemeConfig.tabActiveBg} ${activeUIThemeConfig.tabActiveText} border-b-2 ${activeUIThemeConfig.tabActiveBorder} font-bold shadow-sm ${activeUIThemeConfig.accentGlow}`
+                  : 'border-b-2 border-transparent text-zinc-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Wand2 className="w-4 h-4" />
+              <span className="text-xs uppercase tracking-wide">FX Studio</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('overlay')}
+              className={`flex items-center justify-center space-x-2 py-2 px-3 rounded-t-md font-medium whitespace-nowrap transition-all cursor-pointer ${
+                activeTab === 'overlay'
+                  ? `${activeUIThemeConfig.tabActiveBg} ${activeUIThemeConfig.tabActiveText} border-b-2 ${activeUIThemeConfig.tabActiveBorder} font-bold shadow-sm ${activeUIThemeConfig.accentGlow}`
+                  : 'border-b-2 border-transparent text-zinc-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <FileVideo className="w-4 h-4" />
+              <span className="text-xs uppercase tracking-wide">Overlay</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('text')}
+              className={`flex items-center justify-center space-x-2 py-2 px-3 rounded-t-md font-medium whitespace-nowrap transition-all cursor-pointer ${
+                activeTab === 'text'
+                  ? `${activeUIThemeConfig.tabActiveBg} ${activeUIThemeConfig.tabActiveText} border-b-2 ${activeUIThemeConfig.tabActiveBorder} font-bold shadow-sm ${activeUIThemeConfig.accentGlow}`
+                  : 'border-b-2 border-transparent text-zinc-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Type className="w-4 h-4" />
+              <span className="text-xs uppercase tracking-wide">Text</span>
+            </button>
+            <button
+              onClick={() => setActiveTab('export')}
+              className={`flex items-center justify-center space-x-2 py-2 px-3 rounded-t-md font-medium whitespace-nowrap transition-all cursor-pointer ${
+                activeTab === 'export'
+                  ? `${activeUIThemeConfig.tabActiveBg} ${activeUIThemeConfig.tabActiveText} border-b-2 ${activeUIThemeConfig.tabActiveBorder} font-bold shadow-sm ${activeUIThemeConfig.accentGlow}`
+                  : 'border-b-2 border-transparent text-zinc-400 hover:text-white hover:bg-white/5'
+              }`}
+            >
+              <Download className="w-4 h-4" />
+              <span className="text-xs uppercase tracking-wide">Export</span>
+            </button>
+          </div>
+        </div>
+      </header>
+      )}
+
+      {/* MAIN LAYOUT WRAPPER */}
+      <main id="main-content" className={`flex-1 flex flex-col xl:flex-row min-h-0 ${activeUIThemeConfig.panelBg} w-full max-w-[1920px] mx-auto xl:divide-x ${activeUIThemeConfig.border} transition-colors duration-300`}>
+        
+        {/* LEFT COMPILER VIEW / WORKSPACE STAGE */}
+        <div className={`flex-1 flex flex-col p-4 md:p-6 lg:p-8 space-y-6 items-center justify-start overflow-y-auto ${uiLayout === 'cinema' ? '!p-0 !space-y-0 w-full h-full' : ''}`}>
+          
+          {/* Theme Preset Selection Ribbon at Top (Hidden in Cinema Mode) */}
+          {uiLayout !== 'cinema' && (
+          <div className="w-full max-w-4xl space-y-3 bg-zinc-950/20 p-3 rounded-xl border border-zinc-900/30">
+            <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-2">
+              <span className="text-[10px] font-semibold uppercase tracking-wider text-zinc-500 flex items-center space-x-1.5 font-mono">
+                <Sparkles className="w-3.5 h-3.5 text-brand-green" />
+                <span>Visual presets style selector</span>
+              </span>
+              
+              <div className="flex items-center justify-between sm:justify-end gap-3">
+                <button
+                  type="button"
+                  onClick={() => setVisuals(prev => ({ ...prev, highResolutionPreview: !prev.highResolutionPreview }))}
+                  className={`flex items-center space-x-1 px-2 py-0.5 rounded transition-all text-[10px] font-mono font-semibold cursor-pointer active:scale-95 shrink-0 ${
+                    visuals.highResolutionPreview
+                      ? 'bg-brand-green/20 text-brand-green border border-brand-green shadow-[0_0_8px_rgba(184,238,2,0.15)] hover:bg-brand-green/25 hover:text-brand-green-hover'
+                      : 'bg-zinc-950 text-zinc-400 border border-zinc-800 hover:border-brand-green hover:text-brand-green-hover hover:shadow-brand-green/20 hover:bg-brand-green/10'
+                  }`}
+                  title={visuals.highResolutionPreview ? "Switch to standard-res preview (better performance)" : "Switch to high-res preview (crisp lines)"}
+                >
+                  {visuals.highResolutionPreview ? (
+                    <>
+                      <Zap className="w-3 h-3 text-brand-green animate-pulse" />
+                      <span>HD PREVIEW: ON</span>
+                    </>
+                  ) : (
+                    <>
+                      <ZapOff className="w-3 h-3" />
+                      <span>HD PREVIEW: OFF</span>
+                    </>
+                  )}
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setIsSkinsModalOpen(true)}
+                  className="flex items-center space-x-1.5 px-2.5 py-0.5 rounded bg-brand-green/15 text-brand-green-hover border border-brand-green/30 hover:bg-brand-green/25 transition-all text-[10px] font-mono font-bold cursor-pointer active:scale-95 shrink-0 shadow-sm"
+                  title="Browse all visualizer presets gallery"
+                >
+                  <Palette className="w-3 h-3 text-brand-green" />
+                  <span>🎨 PRESET GALLERY</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={handleRandomizeStyles}
+                  className="flex items-center space-x-1 px-2 py-0.5 rounded bg-zinc-950 text-zinc-400 border border-zinc-800 hover:border-brand-green hover:text-brand-green-hover hover:shadow-brand-green/20 hover:bg-brand-green/10 transition-all text-[10px] font-mono font-semibold cursor-pointer active:scale-95 shrink-0"
+                  title="Randomize everything"
+                >
+                  <Shuffle className="w-3 h-3" />
+                  <span>🎲 RANDOM</span>
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setVisuals(prev => ({ ...prev, sensitivityBoost: !prev.sensitivityBoost }))}
+                  className={`flex items-center space-x-1 px-2 py-0.5 rounded border transition-all text-[10px] font-mono font-bold cursor-pointer active:scale-95 shrink-0 ${
+                    visuals.sensitivityBoost
+                      ? 'bg-amber-500/20 text-amber-400 border-amber-500/50 shadow-[0_0_10px_rgba(245,158,11,0.35)]'
+                      : 'bg-zinc-950 text-zinc-400 border-zinc-800 hover:border-amber-500/50 hover:text-amber-400 hover:bg-amber-500/10'
+                  }`}
+                  title="Global Sensitivity Boost: Multiplies base Sensitivity and Sensitivity Floor by 1.5x across all presets"
+                >
+                  <Zap className={`w-3 h-3 ${visuals.sensitivityBoost ? 'fill-amber-400 text-amber-400' : ''}`} />
+                  <span>⚡ BOOST 1.5X {visuals.sensitivityBoost ? 'ON' : 'OFF'}</span>
+                </button>
+              </div>
+            </div>
+            
+            {/* THEMED SKINS QUICK SELECTOR BAR */}
+            <div className="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2 w-full items-center">
+              {MAIN_PRESETS.map((skin) => {
+                const isActive = visuals.style === skin.visuals.style && visuals.primaryColor === skin.visuals.primaryColor;
+                return (
+                  <button
+                    key={skin.id}
+                    onClick={() => loadPreset(skin)}
+                    title={skin.description}
+                    style={isActive ? { boxShadow: `0 0 10px ${skin.visuals.primaryColor}88` } : {}}
+                    className={`flex items-center justify-between text-left px-2.5 py-1.5 rounded-lg border text-[10px] font-mono transition-all relative overflow-hidden group cursor-pointer ${
+                      isActive
+                        ? 'bg-brand-green text-zinc-950 font-bold border-brand-green shadow-sm'
+                        : 'border-zinc-850 bg-zinc-950/60 text-zinc-300 font-medium hover:text-white hover:bg-zinc-900 hover:border-zinc-700'
+                    }`}
+                  >
+                    <div className="flex items-center space-x-1.5 truncate">
+                      <span className="text-[10px]">{skin.badge.split(' ')[0]}</span>
+                      <span className="truncate">{skin.name}</span>
+                    </div>
+                    <span 
+                      className="w-2 h-2 rounded-full shrink-0 transition-all duration-300 border border-white/20" 
+                      style={{ 
+                        backgroundColor: skin.visuals.primaryColor, 
+                        boxShadow: isActive ? `0 0 6px ${skin.visuals.primaryColor}` : 'none'
+                      }} 
+                    />
+                  </button>
+                );
+              })}
+            </div>
+          </div>
+          )}
+
+          {/* ACTIVE WORKSPACE CANVAS STAGE WINDOW */}
+          <div 
+            ref={containerRef} 
+            onMouseMove={handleFSMouseMove}
+            className={`transition-all duration-300 ${
+              isFullscreen || uiLayout === 'cinema'
+                ? 'fixed inset-0 z-[9990] bg-black p-0 flex flex-col justify-center items-center overflow-hidden w-screen h-screen' 
+                : 'w-full max-w-4xl'
+            }`}
+          >
+            <div className={`w-full relative overflow-hidden transition-all duration-300 ${
+              isFullscreen || uiLayout === 'cinema' 
+                ? 'h-screen w-screen bg-black' 
+                : 'bg-zinc-900 p-1.5 rounded-xl border border-zinc-900 shadow-sm relative group'
+            }`}>
+              
+              {/* Canvas Preview element */}
+              <div 
+                className={`relative bg-black flex items-center justify-center transition-all ${
+                  isFullscreen || uiLayout === 'cinema' ? 'w-full h-full rounded-none' : 'rounded-lg w-full'
+                }`}
+                style={{
+                  aspectRatio: (isFullscreen || uiLayout === 'cinema') ? undefined : (exportSettings.aspectRatio === '16:9' ? '16/9' : exportSettings.aspectRatio === '9:16' ? '9/16' : '1/1'),
+                  maxHeight: (isFullscreen || uiLayout === 'cinema') ? '100vh' : '480px',
+                  maxWidth: (isFullscreen || uiLayout === 'cinema') ? '100vw' : '100%',
+                  margin: '0 auto',
+                }}
+              >
+                <canvas
+                  ref={canvasRef}
+                  className="w-full h-full object-contain cursor-default"
+                  onMouseDown={handleCanvasMouseDown}
+                  onMouseMove={handleCanvasMouseMove}
+                  onMouseUp={handleCanvasMouseUp}
+                  onMouseLeave={handleCanvasMouseUp}
+                  onTouchStart={handleCanvasTouchStart}
+                  onTouchMove={handleCanvasTouchMove}
+                  onTouchEnd={handleCanvasMouseUp}
+                />
+
+                {/* Cinema / Zen Mode Overlay Control Deck */}
+                {uiLayout === 'cinema' && (
+                  <CinemaZenOverlay
+                    isPlaying={isPlaying}
+                    onTogglePlay={handleTogglePlayback}
+                    onStop={handleStopPlayback}
+                    currentTime={currentTime}
+                    duration={trackDuration}
+                    onSeek={handleTimelineSeek}
+                    volume={volume}
+                    onVolumeChange={(val) => setVolume(val)}
+                    isMuted={isMuted}
+                    onToggleMute={() => setIsMuted(prev => !prev)}
+                    trackName={audioTrack.name}
+                    artistName={audioTrack.artist}
+                    currentTheme={uiTheme}
+                    onSelectTheme={setUiTheme}
+                    onSelectLayout={setUiLayout}
+                    isFullscreen={isFullscreen}
+                    onToggleFullscreen={handleToggleFullscreen}
+                    themeConfig={activeUIThemeConfig}
+                  />
+                )}
+
+                {/* YouTube Style Overlay Audio/Video Playback Interface */}
+                {uiLayout !== 'cinema' && (
+                <AnimatePresence>
+                  {showFSControls && (
+                    <motion.div
+                      initial={{ opacity: 0, y: 15 }}
+                      animate={{ opacity: 1, y: 0 }}
+                      exit={{ opacity: 0, y: 15 }}
+                      transition={{ duration: 0.2 }}
+                      className="absolute bottom-0 inset-x-0 z-40 bg-gradient-to-t from-black/20 via-black/10 to-transparent pt-10 pb-3 px-3 sm:px-4 flex flex-col gap-2 select-none pointer-events-auto"
+                    >
+                      {/* YouTube Style Progress / Scrubber Bar */}
+                      <div className="relative w-full flex items-center group/scrubber h-3 cursor-pointer">
+                        {/* Track background */}
+                        <div className="w-full h-1 group-hover/scrubber:h-1.5 bg-zinc-700/70 rounded-full overflow-hidden transition-all relative">
+                          {/* Progress fill (brand-green) */}
+                          <div 
+                            className="h-full bg-brand-green relative transition-all duration-75"
+                            style={{ width: `${Math.min(100, Math.max(0, ((currentTime) / (trackDuration || 30)) * 100))}%` }}
+                          />
+                        </div>
+
+                        {/* Scrubber Knob (YouTube style handle) */}
+                        <div 
+                          className="absolute w-3.5 h-3.5 bg-brand-green rounded-full border-2 border-white shadow-md transform -translate-x-1/2 scale-0 group-hover/scrubber:scale-100 transition-transform pointer-events-none"
+                          style={{ left: `${Math.min(100, Math.max(0, ((currentTime) / (trackDuration || 30)) * 100))}%` }}
+                        />
+
+                        {/* Range Input for Seeking */}
+                        <input
+                          type="range"
+                          min="0"
+                          max={trackDuration || 30}
+                          step="0.1"
+                          value={currentTime}
+                          onChange={(e) => handleTimelineSeek(parseFloat(e.target.value))}
+                          className="absolute inset-0 w-full h-full opacity-0 cursor-pointer z-10"
+                          title="Click or drag to seek audio timeline"
+                        />
+                      </div>
+
+                      {/* YouTube Style Controls Bar Row */}
+                      <div className="flex items-center justify-between text-white font-sans">
+                        
+                        {/* Left Controls: Play/Pause, Stop, Volume, Duration */}
+                        <div className="flex items-center space-x-2 sm:space-x-3">
+                          {/* Play / Pause button */}
+                          <button
+                            type="button"
+                            onClick={handleTogglePlayback}
+                            className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/15 text-white transition-all cursor-pointer active:scale-95 shrink-0"
+                            title={isPlaying ? 'Pause' : 'Play'}
+                          >
+                            {isPlaying ? (
+                              <Pause className="w-4 h-4 fill-brand-green text-brand-green" />
+                            ) : (
+                              <Play className="w-4 h-4 fill-brand-green text-brand-green ml-0.5" />
+                            )}
+                          </button>
+
+                          {/* Stop button */}
+                          <button
+                            type="button"
+                            onClick={handleStopPlayback}
+                            className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-white/15 text-zinc-300 hover:text-brand-green transition-all cursor-pointer shrink-0"
+                            title="Stop & Reset"
+                          >
+                            <Square className="w-3 h-3 fill-zinc-300 text-zinc-300 hover:fill-brand-green hover:text-brand-green" />
+                          </button>
+
+                          {/* YouTube Style Volume Control */}
+                          <div className="flex items-center space-x-1.5 group/volume">
+                            <button
+                              type="button"
+                              onClick={() => setMonitorIsMuted(!monitorIsMuted)}
+                              className="w-7 h-7 rounded-full flex items-center justify-center hover:bg-white/15 text-zinc-300 hover:text-white transition-all cursor-pointer shrink-0"
+                              title={monitorIsMuted ? 'Unmute' : 'Mute'}
+                            >
+                              {monitorIsMuted || monitorVolume === 0 ? (
+                                <VolumeX className="w-4 h-4 text-red-400" />
+                              ) : (
+                                <Volume2 className="w-4 h-4 text-brand-green" />
+                              )}
+                            </button>
+                            
+                            <input
+                              type="range"
+                              min="0"
+                              max="1"
+                              step="0.05"
+                              value={monitorIsMuted ? 0 : monitorVolume}
+                              onChange={(e) => {
+                                setMonitorVolume(parseFloat(e.target.value));
+                                setMonitorIsMuted(false);
+                              }}
+                              className="w-12 sm:w-16 accent-brand-green h-1 cursor-pointer"
+                            />
+                          </div>
+
+                          {/* Time Display (YouTube style: 0:15 / 3:42) */}
+                          <div className="text-[11px] font-mono text-zinc-300 tracking-tight shrink-0 font-medium ml-1">
+                            <span>
+                              {Math.floor(currentTime / 60)}:{(Math.floor(currentTime % 60)).toString().padStart(2, '0')}
+                            </span>
+                            <span className="text-zinc-500 mx-1">/</span>
+                            <span className="text-zinc-400">
+                              {audioTrack.file 
+                                ? `${Math.floor(trackDuration / 60)}:${(Math.floor(trackDuration % 60)).toString().padStart(2, '0')}`
+                                : 'LOOP'
+                              }
+                            </span>
+                          </div>
+                        </div>
+
+                        {/* Center Section: YouTube Title & Artist info */}
+                        <div className="hidden md:flex flex-col text-center max-w-[160px] lg:max-w-[280px]">
+                          <span className="text-[11px] font-mono font-bold text-zinc-200 truncate">
+                            {audioTrack.name || "Virtual Synth Stream"}
+                          </span>
+                          <span className="text-[9px] text-brand-green/80 font-mono uppercase tracking-widest truncate">
+                            {titleOverlay?.text || "Tymark Visualizer Studio"}
+                          </span>
+                        </div>
+
+                        {/* Right Controls: Quality badge & Fullscreen toggle */}
+                        <div className="flex items-center space-x-2 shrink-0">
+                          <span className="hidden sm:inline-block px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-zinc-900/90 border border-zinc-800 text-brand-green uppercase tracking-wider">
+                            {exportSettings.fps}FPS • {exportSettings.quality}
+                          </span>
+
+                          <button
+                            type="button"
+                            onClick={handleToggleFullscreen}
+                            className="w-8 h-8 rounded-full flex items-center justify-center hover:bg-white/15 text-zinc-300 hover:text-brand-green transition-all cursor-pointer"
+                            title={isFullscreen ? "Exit Fullscreen (ESC)" : "Fullscreen (F)"}
+                          >
+                            {isFullscreen ? <Minimize2 className="w-4 h-4" /> : <Maximize2 className="w-4 h-4" />}
+                          </button>
+                        </div>
+
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
+                )}
+
+                {/* Exporting Indicator Overlay */}
+                {isExporting && (
+                  <div className="absolute inset-0 bg-black/95 backdrop-blur-sm flex flex-col items-center justify-center p-6 text-center z-20">
+                    {exportError ? (
+                      <div className="flex flex-col items-center max-w-md w-full">
+                        <div className="w-12 h-12 rounded-full bg-red-500/15 flex items-center justify-center mb-4 border border-red-500/30">
+                          <AlertCircle className="w-6 h-6 text-red-500" />
+                        </div>
+                        <h3 className="text-xs font-semibold uppercase tracking-widest text-red-500 font-mono">Export Failed</h3>
+                        <p className="text-zinc-400 text-[11px] mt-3 leading-relaxed bg-zinc-950 p-4 rounded-lg border border-zinc-900 font-mono text-left select-all overflow-auto max-h-40 w-full whitespace-pre-wrap">
+                          {exportError}
+                        </p>
+                        
+                        <div className="flex items-center space-x-3 mt-6">
+                          <button
+                            onClick={() => {
+                              navigator.clipboard.writeText(exportError);
+                            }}
+                            className="border border-zinc-800 bg-zinc-900 hover:bg-zinc-850 text-zinc-300 text-[10px] px-4 py-2 rounded transition-all font-mono uppercase"
+                          >
+                            Copy Error
+                          </button>
+                          <button
+                            onClick={handleStopExport}
+                            className="bg-red-950 hover:bg-red-900 text-red-200 border border-red-900 text-[10px] px-4 py-2 rounded transition-all font-mono uppercase"
+                          >
+                            Close Overlay
+                          </button>
+                        </div>
+                      </div>
+                    ) : (
+                      <>
+                        <div className="w-12 h-12 rounded-full bg-brand-green/10 flex items-center justify-center mb-4 border border-brand-green/20">
+                          <FileVideo className="w-6 h-6 text-brand-green animate-spin-slow" />
+                        </div>
+                        <h3 className="text-sm font-medium uppercase tracking-wider text-white font-mono">Export In Progress</h3>
+                        <p className="text-zinc-500 text-[11px] mt-1.5 max-w-xs leading-normal">
+                          Generating and encoding frames dynamically. Please keep this tab active and visible until compile finishes.
+                        </p>
+                        
+                        {/* Progress tracking block */}
+                        <div className="w-64 bg-zinc-900 border border-zinc-800 h-1.5 rounded-full overflow-hidden mt-5">
+                          <div 
+                            className="bg-brand-green h-full transition-all duration-350"
+                            style={{ width: `${exportProgress}%` }}
+                          />
+                        </div>
+                        <div className="flex justify-between w-64 text-[9px] text-zinc-500 font-mono mt-1.5">
+                          <span>{exportProgress}% Done</span>
+                          <span className="text-brand-green">{exportTimeRemaining}</span>
+                        </div>
+
+                        {/* Tab throttling warning banner */}
+                        <div className="mt-5 max-w-sm w-full bg-[#3a200a]/40 border border-[#d97706]/35 rounded-lg p-3 flex items-start space-x-2.5 text-left">
+                          <AlertTriangle className="w-4 h-4 text-[#fbbf24] flex-shrink-0 mt-0.5" />
+                          <div className="space-y-0.5">
+                            <h4 className="text-[10px] font-bold text-[#f59e0b] font-mono uppercase tracking-wider">Keep Page Focused</h4>
+                            <p className="text-[10.5px] text-zinc-300 leading-normal font-sans">
+                              Switching tabs or minimizing will cause the browser engine to freeze the rendering progress and stagger the background audio synchronization.
+                            </p>
+                          </div>
+                        </div>
+
+                        <button
+                          onClick={handleStopExport}
+                          className="mt-6 border border-zinc-800 hover:bg-zinc-900 text-zinc-400 hover:text-zinc-300 text-[10px] px-3.5 py-1.5 rounded transition-all font-mono uppercase"
+                        >
+                          Cancel Export
+                        </button>
+
+                        <p className="text-zinc-600 text-[9px] mt-4 max-w-xs leading-relaxed font-mono">
+                          * Note: Chrome or Edge is highly recommended. If the saved file does not play in Windows Media Player, use VLC Player or open it in a browser window.
+                        </p>
+                      </>
+                    )}
+                  </div>
+                )}
+              </div>
+            </div>
+          </div>
+
+          {/* YOUTUBE STYLE VIDEO / AUDIO METADATA CARD (Hidden in Cinema Mode) */}
+          {uiLayout !== 'cinema' && (
+          <div className="w-full max-w-4xl bg-zinc-950 border border-zinc-900 rounded-xl p-3.5 flex flex-col sm:flex-row items-center justify-between gap-3 shadow-sm">
+            <div className="flex items-center space-x-3 min-w-0">
+              <div className="w-9 h-9 rounded-lg bg-zinc-900 border border-zinc-800 flex items-center justify-center shrink-0">
+                <Music className="w-4 h-4 text-brand-green" />
+              </div>
+              <div className="min-w-0 flex flex-col">
+                <span className="text-xs font-mono font-bold text-zinc-200 truncate">
+                  {audioTrack.name || "Virtual Synth Stream"}
+                </span>
+                <span className="text-[10px] text-zinc-500 font-sans truncate">
+                  {audioTrack.artist ? `${audioTrack.artist} • ` : ''}{visuals.style.toUpperCase()} MODE
+                </span>
+              </div>
+            </div>
+
+            <div className="flex items-center space-x-2 text-[10px] font-mono shrink-0">
+              <span className="px-2 py-1 rounded bg-zinc-900 border border-zinc-800 text-zinc-400">
+                ASPECT {exportSettings.aspectRatio}
+              </span>
+              <span className="px-2 py-1 rounded bg-brand-green/10 border border-brand-green/20 text-brand-green font-bold">
+                {isPlaying ? "PLAYING" : "PAUSED"}
+              </span>
+            </div>
+          </div>
+          )}
 
         </div>
 
+        {/* RIGHT SIDEBAR CONTROL DECKS (Full DJ Studio Layout Mode) */}
+        {uiLayout === 'studio' && (
+        <div className={`w-full xl:w-[460px] flex flex-col ${activeUIThemeConfig.panelBg} border-l ${activeUIThemeConfig.border} transition-colors duration-300`}>
+          
+          {/* ACTIVE PANEL CONTENT WRAPPER */}
+          <div className="h-[calc(100vh-110px)] overflow-y-auto pr-1 space-y-4 custom-scrollbar p-5 md:p-6 bg-zinc-950">
+            {renderControlPanels()}
+          </div>
+
+        </div>
+        )}
+
+
+
+
+
+
+
+
+
       </main>
 
-      {/* FOOTER BAR */}
-      <footer id="main-footer" className="border-t border-zinc-900 bg-zinc-950 py-3.5 px-6 flex flex-col md:flex-row items-center justify-between text-[10px] text-zinc-500 font-mono gap-2.5">
-        <p>Drop audio, image, or video directly into the interface window to customize.</p>
-        <p>© 2026 Studio Waveform Builder • Client-Side Muxing Render</p>
-      </footer>
+      {/* FOOTER BAR (Hidden in Cinema Mode) */}
+      {uiLayout !== 'cinema' && (
+        <footer id="main-footer" className={`border-t ${activeUIThemeConfig.border} ${activeUIThemeConfig.panelBg} py-3.5 px-6 flex flex-col md:flex-row items-center justify-between text-[10px] text-zinc-400 font-mono gap-2.5 transition-colors duration-300`}>
+          <p>Drop audio, image, or video directly into the interface window to customize.</p>
+          <div className="flex items-center space-x-3">
+            <span className={`px-2 py-0.5 rounded text-[9px] font-bold ${activeUIThemeConfig.accentBg} ${activeUIThemeConfig.accentText}`}>
+              UI Theme: {activeUIThemeConfig.name}
+            </span>
+            <span>© 2026 Studio Waveform Builder • Client-Side Muxing Render</span>
+          </div>
+        </footer>
+      )}
 
       {/* SHARE MODAL */}
       <AnimatePresence>

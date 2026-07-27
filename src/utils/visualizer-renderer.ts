@@ -3,7 +3,36 @@ import {
   ParticleSettings,
   TitleOverlaySettings,
   BackgroundSettings,
+  VisualizerStyle,
 } from '../types';
+
+export const LINEAR_WAVEFORM_STYLES: VisualizerStyle[] = [
+  'bars',
+  'waveform',
+  'heartbeat-ekg',
+  'fresnel-wave',
+  'double-mirror-bars',
+  'digital-vu-blocks',
+  'dna-helix-thread',
+  'smooth-area-silhouette',
+  'symmetrical-waveform',
+  'rounded-pill-bars',
+  'neon-glow-string',
+  'mirrored-wave-silhouette',
+  'retro-arcade-dot-grid',
+  'modern-sleek',
+  'cyber-laser-horizon',
+  'retro-arcade-stack',
+  'prism-laser-scanner',
+  'floating-wave-echo',
+  'digital-matrix-blocks',
+  'plasma-glow-ribbon',
+  'shaded-mirror-silhouette',
+  'reflected-glow-ribbon',
+  'reflected-matrix-dots',
+  'reflected-mountain-silhouette',
+  'reflected-center-split-pins'
+];
 
 let activeSettings: VisualizerSettings | null = null;
 let activeYPercent: number = 50;
@@ -1757,28 +1786,48 @@ export function drawParticles(
     const chaosValForDraw = smoothedChaosMultiplier;
     const isFaintTrailEnabled = settings.enableFaintMotionTrail !== false;
     const isChaosTrailActive = isFaintTrailEnabled && (chaosValForDraw > 2.0);
-    const isStandardTrailActive = trailLenValue > 0 && (settings.type === 'stars' || settings.type === 'sparks' || settings.type === 'spark-stars');
+    const isStandardTrailActive = trailLenValue > 0;
 
     if ((isStandardTrailActive || isChaosTrailActive) && p.history && p.history.length > 0) {
       ctx.save();
       ctx.lineCap = 'round';
       ctx.lineJoin = 'round';
       const hLen = p.history.length;
-      const totalSegs = hLen + 1;
-      for (let i = 0; i < totalSegs - 1; i++) {
-        const pStart = p.history[i];
-        const pEnd = (i === hLen - 1) ? p : p.history[i + 1];
-        
+      const trailAlphaScale = (isChaosTrailActive && !isStandardTrailActive) ? 0.35 : 1.0;
+
+      if (hLen <= 2) {
         ctx.beginPath();
-        ctx.moveTo(pStart.x, pStart.y);
-        ctx.lineTo(pEnd.x, pEnd.y);
-        
-        const ratio = (i + 1) / totalSegs;
-        // Faint trail for chaos jitter visualization (faint alpha, thinner line)
-        const trailAlphaScale = (isChaosTrailActive && !isStandardTrailActive) ? 0.35 : 1.0;
-        ctx.globalAlpha = Math.min(1, finalAlpha * ratio * trailAlphaScale);
+        ctx.moveTo(p.history[0].x, p.history[0].y);
+        for (let i = 1; i < hLen; i++) {
+          ctx.lineTo(p.history[i].x, p.history[i].y);
+        }
+        ctx.lineTo(p.x, p.y);
+        ctx.globalAlpha = Math.min(1, finalAlpha * 0.7 * trailAlphaScale);
         ctx.strokeStyle = finalColor;
-        ctx.lineWidth = Math.max(0.5, p.size * ratio * ((isChaosTrailActive && !isStandardTrailActive) ? 0.6 : 0.9));
+        ctx.lineWidth = Math.max(0.6, p.size * 0.75);
+        ctx.stroke();
+      } else {
+        const midIdx = Math.floor(hLen / 2);
+
+        ctx.beginPath();
+        ctx.moveTo(p.history[0].x, p.history[0].y);
+        for (let i = 1; i <= midIdx; i++) {
+          ctx.lineTo(p.history[i].x, p.history[i].y);
+        }
+        ctx.globalAlpha = Math.min(1, finalAlpha * 0.35 * trailAlphaScale);
+        ctx.strokeStyle = finalColor;
+        ctx.lineWidth = Math.max(0.5, p.size * 0.45);
+        ctx.stroke();
+
+        ctx.beginPath();
+        ctx.moveTo(p.history[midIdx].x, p.history[midIdx].y);
+        for (let i = midIdx + 1; i < hLen; i++) {
+          ctx.lineTo(p.history[i].x, p.history[i].y);
+        }
+        ctx.lineTo(p.x, p.y);
+        ctx.globalAlpha = Math.min(1, finalAlpha * 0.85 * trailAlphaScale);
+        ctx.strokeStyle = finalColor;
+        ctx.lineWidth = Math.max(0.8, p.size * 0.85);
         ctx.stroke();
       }
       ctx.restore();
@@ -2018,19 +2067,22 @@ export function drawParticles(
       ctx.arc(p.x, p.y, p.size * 0.4, 0, Math.PI * 2);
       ctx.fill();
 
-      // Render plexus connections
+      // Render plexus connections efficiently
       for (const p2 of particles) {
-        if (p === p2) continue;
-        let dx = p.x - p2.x;
-        let dy = p.y - p2.y;
-        let distance = Math.sqrt(dx * dx + dy * dy);
+        if (p === p2 || p.x >= p2.x) continue;
+        const dx = p.x - p2.x;
+        if (Math.abs(dx) >= 75) continue;
+        const dy = p.y - p2.y;
+        if (Math.abs(dy) >= 75) continue;
+        const distSq = dx * dx + dy * dy;
         
-        if (distance < 75) {
+        if (distSq < 5625) {
+          const distance = Math.sqrt(distSq);
           ctx.beginPath();
           ctx.moveTo(p.x, p.y);
           ctx.lineTo(p2.x, p2.y);
           ctx.lineWidth = 0.5;
-          let opacity = (1.0 - (distance / 75)) * finalAlpha;
+          const opacity = (1.0 - (distance / 75)) * finalAlpha;
           ctx.globalAlpha = opacity;
           ctx.strokeStyle = finalColor;
           ctx.stroke();
@@ -2770,9 +2822,12 @@ export function drawVisualizer(
     let height = originalHeight;
 
     const boostFactor = currentSettingsState.sensitivityBoost ? 1.5 : 1.0;
+    const isLinearWave = LINEAR_WAVEFORM_STYLES.includes(styleId as VisualizerStyle);
+    const defaultLinearScale = isLinearWave ? 1.35 : currentSettingsState.sensitivity;
+
     const styleScale = styleSetting?.scale !== undefined 
       ? styleSetting.scale * boostFactor
-      : (stylePosition?.verticalScale !== undefined ? stylePosition.verticalScale * boostFactor : currentSettingsState.sensitivity);
+      : (stylePosition?.verticalScale !== undefined ? stylePosition.verticalScale * boostFactor : defaultLinearScale * boostFactor);
 
     const styleThickness = stylePosition?.horizontalScale !== undefined 
       ? stylePosition.horizontalScale 

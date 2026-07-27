@@ -220,6 +220,9 @@ export interface VisualizerSettings {
   kaleidoscope?: boolean;
   kaleidoscopeSegments?: number;
   chromaticAberration?: boolean;
+  overlayEdgeLighting?: boolean;
+  overlayStabilization?: boolean;
+  masterColorGrading?: 'none' | 'film-look' | 'bw-noir' | 'sepia' | 'vintage-warm' | 'cyberpunk-teal' | 'kodak-gold';
   earthquakeCameraShake?: boolean;
   phosphorTrails?: number;
   clippingThreshold?: number;
@@ -454,6 +457,51 @@ export interface ExportSettings {
 }
 
 export type SkinCategory = 'all' | 'cyber' | 'cosmic' | 'zen' | 'bass' | 'luxury' | 'retro' | 'ocean' | 'minimal';
+
+export type UITheme = 
+  | '1-default-studio'
+  | '2-cyberpunk-neon'
+  | '3-minimal-zen'
+  | '4-synthwave-retro'
+  | '5-midnight-aurora'
+  | '6-scarlet-pulse'
+  | '7-frosted-glass';
+
+export type UILayout = 
+  | 'studio'
+  | 'cinema';
+
+export interface UIThemeConfig {
+  id: UITheme;
+  name: string;
+  badge: string;
+  description: string;
+  headerBg: string;
+  panelBg: string;
+  cardBg: string;
+  border: string;
+  accentText: string;
+  accentBg: string;
+  accentBorder: string;
+  accentGlow: string;
+  buttonBg: string;
+  buttonHover: string;
+  tabActiveBg: string;
+  tabActiveText: string;
+  tabActiveBorder: string;
+  sliderAccent: string;
+  badgeBg: string;
+  toggleActiveBg: string;
+  toggleCircle: string;
+  focusBorder: string;
+  activeCardBg: string;
+  primaryButtonBg: string;
+  iconText: string;
+  progressBarBg: string;
+  hexAccent: string;
+  ringFocus: string;
+  fontClass?: string;
+}
 
 export interface ThemedSkin {
   id: string;
