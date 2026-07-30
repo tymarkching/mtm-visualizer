@@ -36,7 +36,9 @@ import {
   ArrowRight,
   ArrowDownRight,
   ArrowUpRight,
-  Share2, ChevronDown, Mic, Radio, HelpCircle, Undo, Redo, Maximize2, Minimize2, Clock, Zap, ZapOff, Palette
+  Images,
+  Film,
+  ChevronDown, ChevronUp, Mic, Radio, HelpCircle, Undo, Redo, Maximize2, Minimize2, Clock, Zap, ZapOff, Palette, PictureInPicture2
 } from 'lucide-react';
 import localforage from 'localforage';
 import GIF from 'gif.js';
@@ -51,6 +53,8 @@ import {
   SubtitleEffect,
   LyricLine,
   BackgroundSettings,
+  SlideshowItem,
+  SlideshowSettings,
   AudioTrack,
   ExportSettings,
   OverlayImage,
@@ -61,9 +65,11 @@ import {
   UILayout,
 } from './types';
 import { MAIN_PRESETS } from './data/themed-skins';
+import { DEFAULT_SLIDESHOW_SETTINGS, SAMPLE_STOCK_MEDIA } from './data/default-slideshow';
 import { ThemedSkinsModal } from './components/ThemedSkinsModal';
 import { UIThemeLayoutBar } from './components/UIThemeLayoutBar';
 import { CinemaZenOverlay } from './components/CinemaZenOverlay';
+import { StandaloneMiniPlayer } from './components/StandaloneMiniPlayer';
 import { UI_THEMES } from './data/ui-themes';
 
 import {
@@ -81,6 +87,15 @@ import {
 import { injectMP4Metadata } from './utils/metadata';
 import { extractDominantColors } from './utils/color-extractor';
 import { resourceManager } from './utils/resource-manager';
+
+const EQ_PRESETS: { [key: string]: { name: string; bands: number[] } } = {
+  flat: { name: 'Flat (Default)', bands: [0, 0, 0, 0, 0, 0, 0, 0, 0, 0] },
+  'bass-boost': { name: 'Bass Boost', bands: [8, 7, 6, 4, 2, 0, 0, 0, 0, 0] },
+  'voice-clarity': { name: 'Voice Clarity', bands: [-4, -3, -2, 0, 3, 5, 4, 2, 1, 0] },
+  'v-shape': { name: 'V-Shape', bands: [6, 5, 4, 1, -2, -3, -2, 2, 5, 6] },
+  electronic: { name: 'Electronic / EDM', bands: [7, 6, 3, 0, -1, 1, 3, 5, 6, 5] },
+  'treble-boost': { name: 'Treble Boost', bands: [0, 0, 0, 0, 1, 2, 4, 6, 7, 8] },
+};
 
 // Pre-configured thematic style presets of premium visualizers
 const PRESETS = [
@@ -172,13 +187,13 @@ const PRESETS = [
       }
     },
     background: {
-      type: 'gradient' as const,
+      type: 'image' as const,
       color: '#000000',
       gradientStart: '#0d001a',
       gradientEnd: '#000211',
-      imageUrl: null,
+      imageUrl: 'https://i.postimg.cc/rmn2dhkQ/Wallpaper-Green.png',
       videoUrl: null,
-      blur: 2,
+      blur: 0,
       opacity: 0.9,
     },
     title: {
@@ -196,6 +211,20 @@ const PRESETS = [
       colorBlend: true,
       colorBlendEnd: '#00ffff',
       colorBlendMode: 'normal' as const,
+    },
+    particles: {
+      enabled: true,
+      type: 'stars' as const,
+      count: 60,
+      speed: 2.0,
+      movementSpeed: 2.0,
+      color: '#ff007f',
+      beatReactive: true,
+      beatBurst: true,
+      chaosMultiplier: 1.2,
+      beatReactiveChaos: true,
+      sensitivityFloor: 0.1,
+      enableFaintMotionTrail: true,
     }
   },
   {
@@ -767,31 +796,34 @@ export default function App() {
   useEffect(() => {
     waterDepthAnim.set(visuals.waterReflectionDepth !== undefined ? visuals.waterReflectionDepth : 0.4);
   }, [visuals.waterReflectionDepth, waterDepthAnim]);
-  const [particlesSet, setParticlesSet] = useState<ParticleSettings>(() => ({
-    type: 'stars' as ParticleType,
-    count: 60,
-    minSize: 3,
-    maxSize: 6,
-    speed: 2.0,
-    movementSpeed: 2.0,
-    color: '#ff3333',
-    gravity: 0.5,
-    wind: 0.1,
-    beatReactive: true,
-    beatBurst: true,
-    beatThreshold: 140,
-    enabled: false,
-    shatterEnabled: false,
-    shatterRadius: 150,
-    shatterSpeed: 5,
-    forwardVelocityRamp: 1.0,
-    forwardSpeedMultiplier: 1.0,
-    useColorPalette: false,
-    selectedPalettePreset: 'neon-synthwave',
-    particleColorPalette: ['#ff007f', '#7f00ff', '#00ffff', '#ffaa00'],
-    sensitivityFloor: 0.1,
-    enableFaintMotionTrail: true,
-  }));
+  const [particlesSet, setParticlesSet] = useState<ParticleSettings>(() => {
+    const initP = MAIN_PRESETS[0]?.particles || (PRESETS[0] as any)?.particles;
+    return {
+      type: (initP?.type as ParticleType) || ('stars' as ParticleType),
+      count: initP?.count ?? 60,
+      minSize: 3,
+      maxSize: 6,
+      speed: initP?.speed ?? 2.0,
+      movementSpeed: initP?.movementSpeed ?? 2.0,
+      color: initP?.color || '#ff007f',
+      gravity: 0.5,
+      wind: 0.1,
+      beatReactive: initP?.beatReactive ?? true,
+      beatBurst: initP?.beatBurst ?? true,
+      beatThreshold: 140,
+      enabled: initP?.enabled ?? true,
+      shatterEnabled: false,
+      shatterRadius: 150,
+      shatterSpeed: 5,
+      forwardVelocityRamp: 1.0,
+      forwardSpeedMultiplier: 1.0,
+      useColorPalette: false,
+      selectedPalettePreset: 'neon-synthwave',
+      particleColorPalette: ['#ff007f', '#7f00ff', '#00ffff', '#ffaa00'],
+      sensitivityFloor: initP?.sensitivityFloor ?? 0.1,
+      enableFaintMotionTrail: initP?.enableFaintMotionTrail ?? true,
+    };
+  });
   const [background, setBackground] = useState<BackgroundSettings>(PRESETS[0].background);
   const [titleOverlay, setTitleOverlay] = useState<TitleOverlaySettings>(PRESETS[0].title);
 
@@ -923,7 +955,10 @@ export default function App() {
       const isMac = navigator.platform.toUpperCase().indexOf('MAC') >= 0;
       const isCmdOrCtrl = isMac ? e.metaKey : e.ctrlKey;
 
-      if (isCmdOrCtrl && e.key.toLowerCase() === 'z') {
+      if (e.code === 'Space' || e.key === ' ') {
+        e.preventDefault();
+        handleTogglePlaybackRef.current();
+      } else if (isCmdOrCtrl && e.key.toLowerCase() === 'z') {
         e.preventDefault();
         if (e.shiftKey) {
           redo();
@@ -975,6 +1010,49 @@ export default function App() {
       applyDominantColorsFromImage(background.imageUrl);
     }
   }, [background.imageUrl, background.type, autoSyncColors]);
+
+  // Synchronize bgImageRef immediately whenever background.imageUrl or background.type changes
+  useEffect(() => {
+    if (background.type === 'image' && background.imageUrl) {
+      bgImageRef.current = resourceManager.getOrLoadImage(background.imageUrl, (img) => {
+        bgImageRef.current = img;
+      });
+    } else if (background.type !== 'image') {
+      bgImageRef.current = null;
+    }
+  }, [background.imageUrl, background.type]);
+
+  // Preload stock wallpapers eagerly on mount for instant visual feedback
+  useEffect(() => {
+    SAMPLE_STOCK_MEDIA.forEach((stock) => {
+      if (stock.url && stock.type === 'image') {
+        resourceManager.loadImage(stock.url);
+      }
+    });
+  }, []);
+
+  // Synchronize slideshow media items immediately when background.slideshow changes
+  useEffect(() => {
+    const slideshow = background.slideshow || DEFAULT_SLIDESHOW_SETTINGS;
+    const items = slideshow.items || [];
+    items.forEach((item) => {
+      if (item.url) {
+        const existing = slideshowMediaMapRef.current.get(item.id);
+        const existingUrl = existing ? (existing.src || '') : '';
+        if (!existing || existingUrl !== item.url) {
+          if (item.type === 'image') {
+            resourceManager.loadImage(item.url).then((img) => {
+              if (img) slideshowMediaMapRef.current.set(item.id, img);
+            });
+          } else if (item.type === 'video') {
+            resourceManager.loadVideo(item.url, { loop: true, muted: true, playsInline: true }).then((vid) => {
+              if (vid) slideshowMediaMapRef.current.set(item.id, vid);
+            });
+          }
+        }
+      }
+    });
+  }, [background.slideshow, background.type]);
 
   const [subtitles, setSubtitles] = useState<SubtitleSettings>({
     enabled: false,
@@ -1350,8 +1428,8 @@ export default function App() {
   }, [dspVocalAttenuator]);
 
   const [audioTrack, setAudioTrack] = useState<AudioTrack>({
-    name: 'Dynamic Visualizer Peak',
-    artist: 'tymark',
+    name: 'Stage Soundcheck & Audio DSP Test',
+    artist: 'tymark sound lab',
     duration: 30, // Default fallback
     file: null,
     objectUrl: null,
@@ -1437,6 +1515,18 @@ export default function App() {
         hoverColor = '#7dd3fc';
         mutedColor = 'rgba(56, 189, 248, 0.25)';
         break;
+      case '8-solar-gold':
+        hoverColor = '#fde047';
+        mutedColor = 'rgba(251, 191, 36, 0.25)';
+        break;
+      case '9-toxic-emerald':
+        hoverColor = '#6ee7b7';
+        mutedColor = 'rgba(52, 211, 153, 0.25)';
+        break;
+      case '10-cosmic-ultramarine':
+        hoverColor = '#93c5fd';
+        mutedColor = 'rgba(96, 165, 250, 0.25)';
+        break;
       default:
         hoverColor = '#a3e635';
         mutedColor = 'rgba(184, 238, 2, 0.2)';
@@ -1486,6 +1576,8 @@ export default function App() {
   }, []);
 
   const [isPlaying, setIsPlaying] = useState<boolean>(false);
+  const [screenFeedback, setScreenFeedback] = useState<{ type: 'play' | 'pause'; id: number } | null>(null);
+  const canvasClickStartRef = useRef<{ x: number; y: number; time: number } | null>(null);
   const [volume, setVolume] = useState<number>(0.8);
   const [isMuted, setIsMuted] = useState<boolean>(false);
   const [monitorVolume, setMonitorVolume] = useState<number>(0.8);
@@ -1501,12 +1593,11 @@ export default function App() {
   // 10-Band Graphic Equalizer Gains (dB, from -12 to +12)
   // Frequencies: 32Hz, 64Hz, 125Hz, 250Hz, 500Hz, 1kHz, 2kHz, 4kHz, 8kHz, 16kHz
   const [eqBands, setEqBands] = useState<number[]>([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+  const [selectedEqPreset, setSelectedEqPreset] = useState<string>('flat');
 
   // Drag-and-drop state
   const [isDraggingOver, setIsDraggingOver] = useState<boolean>(false);
-  const [isShareModalOpen, setIsShareModalOpen] = useState<boolean>(false);
   const [isSkinsModalOpen, setIsSkinsModalOpen] = useState<boolean>(false);
-  const [shareThumbnail, setShareThumbnail] = useState<string | null>(null);
 
   // Export State
   const [exportSettings, setExportSettings] = useState<ExportSettings>({
@@ -1522,6 +1613,66 @@ export default function App() {
   const [exportedVideoUrl, setExportedVideoUrl] = useState<string | null>(null);
   const [exportError, setExportError] = useState<string | null>(null);
 
+  // Auto-revoke previous exported video Blob URLs to prevent memory accumulation
+  useEffect(() => {
+    return () => {
+      if (exportedVideoUrl) {
+        URL.revokeObjectURL(exportedVideoUrl);
+      }
+    };
+  }, [exportedVideoUrl]);
+
+  // Standalone Mini Player State
+  const [isStandalonePlayerOpen, setIsStandalonePlayerOpen] = useState<boolean>(false);
+
+  // Auto-Responsive Mobile & Tablet Drawer / Orientation States
+  const [isMobileDrawerExpanded, setIsMobileDrawerExpanded] = useState<boolean>(false);
+  const [isLandscapeMobile, setIsLandscapeMobile] = useState<boolean>(false);
+  const touchStartYRef = useRef<number | null>(null);
+
+  useEffect(() => {
+    const handleCheckMobileOrientation = () => {
+      const width = window.innerWidth;
+      const height = window.innerHeight;
+      const isTouch = ('ontouchstart' in window) || (navigator.maxTouchPoints > 0);
+      const isLandscape = width > height && height <= 580 && isTouch;
+      setIsLandscapeMobile(isLandscape);
+
+      // Auto-Landscape Cinema Mode: Automatically trigger cinema presentation when device is rotated horizontally
+      if (isLandscape && uiLayout !== 'cinema') {
+        setUiLayout('cinema');
+      }
+    };
+
+    handleCheckMobileOrientation();
+    window.addEventListener('resize', handleCheckMobileOrientation);
+    window.addEventListener('orientationchange', handleCheckMobileOrientation);
+    return () => {
+      window.removeEventListener('resize', handleCheckMobileOrientation);
+      window.removeEventListener('orientationchange', handleCheckMobileOrientation);
+    };
+  }, [uiLayout]);
+
+  const handleDrawerTouchStart = (e: React.TouchEvent) => {
+    if (e.touches && e.touches.length > 0) {
+      touchStartYRef.current = e.touches[0].clientY;
+    }
+  };
+
+  const handleDrawerTouchEnd = (e: React.TouchEvent) => {
+    if (touchStartYRef.current !== null && e.changedTouches && e.changedTouches.length > 0) {
+      const deltaY = e.changedTouches[0].clientY - touchStartYRef.current;
+      if (deltaY < -35) {
+        // Swiping UP -> Expand drawer
+        setIsMobileDrawerExpanded(true);
+      } else if (deltaY > 35) {
+        // Swiping DOWN -> Collapse drawer
+        setIsMobileDrawerExpanded(false);
+      }
+      touchStartYRef.current = null;
+    }
+  };
+
   // Tap Tempo history state
   const [tapTimestamps, setTapTimestamps] = useState<number[]>([]);
 
@@ -1536,6 +1687,7 @@ export default function App() {
   const bgVideoRef = useRef<HTMLVideoElement | null>(null);
   const overlayVideoRef = useRef<HTMLVideoElement | null>(null);
   const watermarkImageRef = useRef<HTMLImageElement | null>(null);
+  const slideshowMediaMapRef = useRef<Map<string, HTMLImageElement | HTMLVideoElement>>(new Map());
 
   // Web Audio Context & Nodes refs
   const audioContextRef = useRef<AudioContext | null>(null);
@@ -1555,6 +1707,7 @@ export default function App() {
 
   // Active playing & volume envelope tracking references
   const isPlayingRef = useRef<boolean>(isPlaying);
+  const handleTogglePlaybackRef = useRef<() => void>(() => {});
   const isMutedRef = useRef<boolean>(isMuted);
   const volumeRef = useRef<number>(volume);
   const monitorIsMutedRef = useRef<boolean>(monitorIsMuted);
@@ -1863,7 +2016,7 @@ export default function App() {
     };
     
     const waveStyles: VisualizerStyle[] = ['waveform', 'bars', 'circular', 'radial-bars', 'retro', 'neon-tunnel', 'laser-orbit', 'wave-matrix', 'heartbeat-ekg', 'fresnel-wave', 'dna-helix', 'double-mirror-bars', 'circular-orbit', 'radial-inside-out', 'digital-vu-blocks', 'dna-helix-thread', 'smooth-area-silhouette', 'floating-matrix-particles', 'symmetrical-waveform', 'rounded-pill-bars', 'neon-glow-string', 'floating-bubble-particles', 'mirrored-wave-silhouette', 'retro-arcade-dot-grid'];
-    const partTypes: ParticleType[] = ['stars', 'bubbles', 'sparks', 'sakura', 'dust', 'digital', 'hearts', 'glow-circles', 'spark-stars', 'snowflakes', 'cosmic-starfield-3d', 'raindrops-on-glass', 'ambient-bokeh-bubbles'];
+    const partTypes: ParticleType[] = ['stars', 'bubbles', 'sparks', 'sakura', 'dust', 'digital', 'hearts', 'glow-circles', 'spark-stars', 'snowflakes', 'cosmic-starfield-3d', 'raindrops-on-glass', 'ambient-bokeh-bubbles', 'vortex'];
     const bgTypes = ['color', 'gradient'];
     
     setVisuals(prev => ({
@@ -2610,12 +2763,18 @@ export default function App() {
   const handleTogglePlayback = async () => {
     initAudioSystem();
 
+    const currentlyPlaying = isPlayingRef.current;
+
+    // Trigger YouTube style screen play/pause animated feedback badge
+    const nextPlayState = !currentlyPlaying;
+    setScreenFeedback({ type: nextPlayState ? 'play' : 'pause', id: Date.now() });
+
     // Ensure AudioContext is resumed (browser protection check)
     if (audioContextRef.current?.state === 'suspended') {
       await audioContextRef.current.resume();
     }
 
-    if (isPlaying) {
+    if (currentlyPlaying) {
       if (audioRef.current) {
         audioRef.current.pause();
       }
@@ -2690,6 +2849,7 @@ export default function App() {
       } catch (e) {}
     }
   };
+  handleTogglePlaybackRef.current = handleTogglePlayback;
 
   // HTML audio progress triggers updating times
   useEffect(() => {
@@ -2761,7 +2921,7 @@ export default function App() {
     }
   }, [audioTrack.objectUrl]);
 
-  // Web Audio Procedural Synthesizer for Demo Beat mode
+  // Web Audio Procedural Synthesizer for Demo Mode (Stage Sound Check & Audio DSP Frequency Test)
   useEffect(() => {
     let synthTimer: any = null;
     let stepIndex = 0;
@@ -2773,8 +2933,8 @@ export default function App() {
         ctx.resume().catch(() => {});
       }
 
-      const bpm = 112;
-      const stepTime = (60 / bpm) / 4; // 16th note duration (~0.134s)
+      const bpm = 108; // Crisp, energetic stage sound check tempo
+      const stepTime = (60 / bpm) / 4; // 16th note step (~0.138s)
 
       const playSynthStep = () => {
         if (!audioContextRef.current || audioContextRef.current.state !== 'running') return;
@@ -2783,33 +2943,70 @@ export default function App() {
         if (!destinationNode) return;
 
         const now = ac.currentTime;
-        const currentStep = stepIndex % 16;
+        const currentStep = stepIndex % 64; // 4-bar soundcheck test cycle (64 steps)
+        const bar = Math.floor(currentStep / 16);
+        const barStep = currentStep % 16;
         stepIndex++;
 
-        // 1. KICK DRUM (on steps 0, 4, 8, 12)
-        if (currentStep % 4 === 0) {
+        // Helper to create panned audio output for stereo testing
+        const createPannedNode = (panVal: number) => {
+          if (ac.createStereoPanner) {
+            const panner = ac.createStereoPanner();
+            panner.pan.value = Math.max(-1, Math.min(1, panVal));
+            panner.connect(destinationNode);
+            return panner;
+          }
+          return destinationNode;
+        };
+
+        // 1. SUB-BASS & WOOFER SWEEP TEST (20Hz - 180Hz)
+        // Active on Bar 0, 2, 3 (steps 0, 6, 10, 14 in pattern)
+        if ([0, 6, 10, 14].includes(barStep)) {
           try {
-            const kickOsc = ac.createOscillator();
-            const kickGain = ac.createGain();
-            kickOsc.type = 'sine';
-            kickOsc.frequency.setValueAtTime(130, now);
-            kickOsc.frequency.exponentialRampToValueAtTime(32, now + 0.12);
+            const isHeavySub = barStep === 0 || barStep === 10;
+            const subOsc = ac.createOscillator();
+            const subGain = ac.createGain();
+            subOsc.type = 'sine';
 
-            kickGain.gain.setValueAtTime(0.9, now);
-            kickGain.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
+            // Frequency drop sweep: 180Hz down to 32Hz sub bass
+            const startFreq = isHeavySub ? 190 : 130;
+            const endFreq = isHeavySub ? 32 : 40;
+            subOsc.frequency.setValueAtTime(startFreq, now);
+            subOsc.frequency.exponentialRampToValueAtTime(endFreq, now + 0.26);
 
-            kickOsc.connect(kickGain);
-            kickGain.connect(destinationNode);
+            subGain.gain.setValueAtTime(isHeavySub ? 0.95 : 0.75, now);
+            subGain.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
 
-            kickOsc.start(now);
-            kickOsc.stop(now + 0.15);
+            subOsc.connect(subGain);
+            subGain.connect(destinationNode);
+
+            subOsc.start(now);
+            subOsc.stop(now + 0.30);
+
+            // Punchy click transient on speaker driver kick
+            const clickOsc = ac.createOscillator();
+            const clickGain = ac.createGain();
+            clickOsc.type = 'triangle';
+            clickOsc.frequency.setValueAtTime(850, now);
+            clickOsc.frequency.exponentialRampToValueAtTime(110, now + 0.015);
+            clickGain.gain.setValueAtTime(0.35, now);
+            clickGain.gain.exponentialRampToValueAtTime(0.001, now + 0.015);
+            clickOsc.connect(clickGain);
+            clickGain.connect(destinationNode);
+            clickOsc.start(now);
+            clickOsc.stop(now + 0.018);
           } catch (e) {}
         }
 
-        // 2. SNARE DRUM (on steps 4, 12)
-        if (currentStep === 4 || currentStep === 12) {
+        // 2. SNARE / RIMSHOT STEREO PANNING TEST
+        // Tests Left vs Right speaker channel balance
+        if (barStep === 4 || barStep === 12 || (bar === 1 && barStep % 2 === 0)) {
           try {
-            const bufferSize = ac.sampleRate * 0.12;
+            const isRoll = bar === 1 && (barStep === 8 || barStep === 9 || barStep === 10 || barStep === 11);
+            const panPos = isRoll ? (barStep % 2 === 0 ? -0.85 : 0.85) : (barStep === 4 ? -0.5 : 0.5);
+            const panDest = createPannedNode(panPos);
+
+            const bufferSize = ac.sampleRate * 0.15;
             const noiseBuffer = ac.createBuffer(1, bufferSize, ac.sampleRate);
             const output = noiseBuffer.getChannelData(0);
             for (let i = 0; i < bufferSize; i++) {
@@ -2819,39 +3016,42 @@ export default function App() {
             whiteNoise.buffer = noiseBuffer;
 
             const noiseFilter = ac.createBiquadFilter();
-            noiseFilter.type = 'highpass';
-            noiseFilter.frequency.value = 800;
+            noiseFilter.type = 'bandpass';
+            noiseFilter.frequency.value = isRoll ? 3400 : 2200;
+            noiseFilter.Q.value = 1.6;
 
             const snareGain = ac.createGain();
-            snareGain.gain.setValueAtTime(0.6, now);
-            snareGain.gain.exponentialRampToValueAtTime(0.001, now + 0.12);
+            snareGain.gain.setValueAtTime(isRoll ? 0.45 : 0.65, now);
+            snareGain.gain.exponentialRampToValueAtTime(0.001, now + (isRoll ? 0.07 : 0.14));
 
             whiteNoise.connect(noiseFilter);
             noiseFilter.connect(snareGain);
-            snareGain.connect(destinationNode);
-
+            snareGain.connect(panDest);
             whiteNoise.start(now);
 
-            const snareOsc = ac.createOscillator();
+            // Tonal wooden rimshot
+            const snareTone = ac.createOscillator();
             const snareToneGain = ac.createGain();
-            snareOsc.type = 'triangle';
-            snareOsc.frequency.setValueAtTime(180, now);
-            snareOsc.frequency.exponentialRampToValueAtTime(80, now + 0.08);
-
+            snareTone.type = 'triangle';
+            snareTone.frequency.setValueAtTime(isRoll ? 280 : 210, now);
+            snareTone.frequency.exponentialRampToValueAtTime(90, now + 0.08);
             snareToneGain.gain.setValueAtTime(0.4, now);
             snareToneGain.gain.exponentialRampToValueAtTime(0.001, now + 0.08);
 
-            snareOsc.connect(snareToneGain);
-            snareToneGain.connect(destinationNode);
-
-            snareOsc.start(now);
-            snareOsc.stop(now + 0.1);
+            snareTone.connect(snareToneGain);
+            snareToneGain.connect(panDest);
+            snareTone.start(now);
+            snareTone.stop(now + 0.09);
           } catch (e) {}
         }
 
-        // 3. HI-HAT (on 16th notes)
+        // 3. HIGH-FREQUENCY TWEETER SHIMMER & HI-HAT TEST
         try {
-          const bufferSize = ac.sampleRate * 0.04;
+          const isAccentHat = barStep % 2 === 0;
+          const isHighShimmer = barStep === 15;
+          const hatDuration = isHighShimmer ? 0.22 : 0.038;
+
+          const bufferSize = Math.floor(ac.sampleRate * hatDuration);
           const noiseBuffer = ac.createBuffer(1, bufferSize, ac.sampleRate);
           const output = noiseBuffer.getChannelData(0);
           for (let i = 0; i < bufferSize; i++) {
@@ -2862,83 +3062,121 @@ export default function App() {
 
           const hatFilter = ac.createBiquadFilter();
           hatFilter.type = 'highpass';
-          hatFilter.frequency.value = 6000;
+          hatFilter.frequency.value = isHighShimmer ? 9500 : (isAccentHat ? 7500 : 6000);
 
           const hatGain = ac.createGain();
-          const isAccent = currentStep % 2 === 1;
-          const hatVol = isAccent ? 0.25 : 0.12;
+          const hatVol = isHighShimmer ? 0.30 : (isAccentHat ? 0.18 : 0.08);
 
           hatGain.gain.setValueAtTime(hatVol, now);
-          hatGain.gain.exponentialRampToValueAtTime(0.001, now + 0.04);
+          hatGain.gain.exponentialRampToValueAtTime(0.001, now + hatDuration);
+
+          // Alternating subtle pan for hats
+          const hatPan = createPannedNode(isAccentHat ? 0.35 : -0.35);
 
           hatNoise.connect(hatFilter);
           hatFilter.connect(hatGain);
-          hatGain.connect(destinationNode);
-
+          hatGain.connect(hatPan);
           hatNoise.start(now);
         } catch (e) {}
 
-        // 4. BASS SYNTH (Synthwave 16th note pattern)
-        try {
-          const bar = Math.floor(stepIndex / 16) % 4;
-          const rootFreqs = [55.00, 43.65, 65.41, 49.00]; // A1, F1, C2, G1
-          const freq = rootFreqs[bar];
-
-          const bassOsc = ac.createOscillator();
-          bassOsc.type = 'sawtooth';
-          bassOsc.frequency.setValueAtTime(freq, now);
-
-          const bassFilter = ac.createBiquadFilter();
-          bassFilter.type = 'lowpass';
-          bassFilter.Q.value = 4.0;
-          bassFilter.frequency.setValueAtTime(1200, now);
-          bassFilter.frequency.exponentialRampToValueAtTime(200, now + stepTime * 0.9);
-
-          const bassGain = ac.createGain();
-          bassGain.gain.setValueAtTime(0.35, now);
-          bassGain.gain.exponentialRampToValueAtTime(0.01, now + stepTime * 0.9);
-
-          bassOsc.connect(bassFilter);
-          bassFilter.connect(bassGain);
-          bassGain.connect(destinationNode);
-
-          bassOsc.start(now);
-          bassOsc.stop(now + stepTime * 0.95);
-        } catch (e) {}
-
-        // 5. SYNTH LEAD / CHORD PLUCK
-        if ([0, 3, 6, 10, 12].includes(currentStep)) {
+        // 4. "MIC CHECK 1, 2" FORMANT VOICE SYNTHESIS TEST (Bar 0 & 2)
+        if ((bar === 0 || bar === 2) && [0, 4, 8, 12].includes(barStep)) {
           try {
-            const bar = Math.floor(stepIndex / 16) % 4;
-            const chordOffsets = [
-              [220.00, 261.63, 329.63], // A3, C4, E4
-              [174.61, 220.00, 261.63], // F3, A3, C4
-              [261.63, 329.63, 392.00], // C4, E4, G4
-              [196.00, 246.94, 293.66], // G3, B3, D4
+            // Formant filter frequencies simulating "Check" (F1 ~ 500Hz, F2 ~ 1800Hz), "One" (F1 ~ 300Hz, F2 ~ 900Hz), "Two" (F1 ~ 400Hz, F2 ~ 2200Hz)
+            const formantSets = [
+              { f1: 520, f2: 1750, label: 'Check' },
+              { f1: 320, f2: 920, label: 'One' },
+              { f1: 420, f2: 2100, label: 'Two' },
+              { f1: 480, f2: 1850, label: 'Testing' },
             ];
-            const freqs = chordOffsets[bar];
+            const formant = formantSets[[0, 4, 8, 12].indexOf(barStep)] || formantSets[0];
 
-            freqs.forEach((f, idx) => {
-              const synthOsc = ac.createOscillator();
-              synthOsc.type = 'square';
-              synthOsc.frequency.setValueAtTime(f * (currentStep === 12 ? 2 : 1), now);
+            // Sawtooth voice oscillator
+            const voiceOsc = ac.createOscillator();
+            voiceOsc.type = 'sawtooth';
+            voiceOsc.frequency.setValueAtTime(130.81, now); // C3 pitch
 
-              const synthFilter = ac.createBiquadFilter();
-              synthFilter.type = 'lowpass';
-              synthFilter.Q.value = 2.0;
-              synthFilter.frequency.setValueAtTime(2400, now);
-              synthFilter.frequency.exponentialRampToValueAtTime(400, now + 0.25);
+            // Formant Bandpass Filters
+            const f1Filter = ac.createBiquadFilter();
+            f1Filter.type = 'bandpass';
+            f1Filter.frequency.setValueAtTime(formant.f1, now);
+            f1Filter.Q.value = 4.5;
 
-              const synthGain = ac.createGain();
-              synthGain.gain.setValueAtTime(0.08, now + idx * 0.01);
-              synthGain.gain.exponentialRampToValueAtTime(0.001, now + 0.25);
+            const f2Filter = ac.createBiquadFilter();
+            f2Filter.type = 'bandpass';
+            f2Filter.frequency.setValueAtTime(formant.f2, now);
+            f2Filter.Q.value = 5.0;
 
-              synthOsc.connect(synthFilter);
-              synthFilter.connect(synthGain);
-              synthGain.connect(destinationNode);
+            const voiceGain = ac.createGain();
+            voiceGain.gain.setValueAtTime(0.18, now);
+            voiceGain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
 
-              synthOsc.start(now + idx * 0.01);
-              synthOsc.stop(now + 0.28);
+            voiceOsc.connect(f1Filter);
+            voiceOsc.connect(f2Filter);
+            f1Filter.connect(voiceGain);
+            f2Filter.connect(voiceGain);
+            voiceGain.connect(destinationNode);
+
+            voiceOsc.start(now);
+            voiceOsc.stop(now + 0.24);
+          } catch (e) {}
+        }
+
+        // 5. FREQUENCY SPECTRUM SWEEP CHORDS & TEST TONES (Bar 2 & 3)
+        // Sweeps through 250Hz, 500Hz, 1kHz, 2kHz, 4kHz, 8kHz to test visualizer EQ bars!
+        if (bar >= 2 && [0, 3, 6, 9, 12].includes(barStep)) {
+          try {
+            const freqSweep = [261.63, 523.25, 1046.50, 2093.00, 4186.01]; // C4, C5, C6, C7, C8
+            const idx = [0, 3, 6, 9, 12].indexOf(barStep);
+            const freq = freqSweep[idx % freqSweep.length];
+
+            const sweepOsc = ac.createOscillator();
+            sweepOsc.type = 'triangle';
+            sweepOsc.frequency.setValueAtTime(freq, now);
+
+            const sweepFilter = ac.createBiquadFilter();
+            sweepFilter.type = 'lowpass';
+            sweepFilter.frequency.setValueAtTime(freq * 1.8, now);
+
+            const sweepGain = ac.createGain();
+            sweepGain.gain.setValueAtTime(0.08, now);
+            sweepGain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+
+            sweepOsc.connect(sweepFilter);
+            sweepFilter.connect(sweepGain);
+            sweepGain.connect(destinationNode);
+
+            sweepOsc.start(now);
+            sweepOsc.stop(now + 0.24);
+          } catch (e) {}
+        }
+
+        // 6. SYNTH REASONANT FILTER SWEEP (Bar 3 Full Soundcheck Drop)
+        if (bar === 3 && [0, 4, 8, 12].includes(barStep)) {
+          try {
+            const chord = [130.81, 164.81, 196.00, 246.94]; // Cmaj7 (C3, E3, G3, B3)
+            chord.forEach((f) => {
+              const osc = ac.createOscillator();
+              osc.type = 'sawtooth';
+              osc.frequency.setValueAtTime(f, now);
+
+              const filter = ac.createBiquadFilter();
+              filter.type = 'lowpass';
+              filter.Q.value = 6.0; // High resonance for sweep effect
+              filter.frequency.setValueAtTime(300, now);
+              filter.frequency.exponentialRampToValueAtTime(3200, now + 0.18);
+              filter.frequency.exponentialRampToValueAtTime(400, now + 0.35);
+
+              const g = ac.createGain();
+              g.gain.setValueAtTime(0.06, now);
+              g.gain.exponentialRampToValueAtTime(0.001, now + 0.38);
+
+              osc.connect(filter);
+              filter.connect(g);
+              g.connect(destinationNode);
+
+              osc.start(now);
+              osc.stop(now + 0.40);
             });
           } catch (e) {}
         }
@@ -2954,13 +3192,6 @@ export default function App() {
     };
   }, [isPlaying, audioTrack.file, audioTrack.objectUrl]);
 
-  // Handle Drag & Drop uploading processes
-  const handleShareClick = () => {
-    if (canvasRef.current) {
-      setShareThumbnail(canvasRef.current.toDataURL('image/jpeg', 0.5));
-    }
-    setIsShareModalOpen(true);
-  };
 
   const handleDragOver = (e: React.DragEvent) => {
     e.preventDefault();
@@ -2973,6 +3204,12 @@ export default function App() {
 
   const loadAudioFile = (file: File) => {
     initAudioSystem();
+
+    // Revoke previous audio object URL to prevent browser memory leaks
+    if (audioTrack.objectUrl) {
+      URL.revokeObjectURL(audioTrack.objectUrl);
+    }
+
     const url = URL.createObjectURL(file);
     
     // Attempt parsing artist/title from filename
@@ -3123,7 +3360,7 @@ export default function App() {
         // Measure size to compute correct aspect ratio
         const tempImg = new Image();
         tempImg.onload = () => {
-          const aspect = tempImg.width / tempImg.height || 1.0;
+          const aspect = (tempImg.width > 0 && tempImg.height > 0) ? (tempImg.width / tempImg.height) : 1.0;
           const newId = `img_${Date.now()}`;
           
           const newImage: OverlayImage = {
@@ -3180,6 +3417,7 @@ export default function App() {
   };
 
   const handleCanvasMouseDown = (e: React.MouseEvent<HTMLCanvasElement>) => {
+    canvasClickStartRef.current = { x: e.clientX, y: e.clientY, time: Date.now() };
     const canvas = canvasRef.current;
     if (!canvas || activeTab !== 'overlay') return;
 
@@ -3257,7 +3495,7 @@ export default function App() {
 
     // Calculate dimensions
     const scalePct = visuals.overlayScale !== undefined ? visuals.overlayScale / 100 : 0.5;
-    const videoAspect = (overlayVideoRef.current && overlayVideoRef.current.readyState >= 2)
+    const videoAspect = (overlayVideoRef.current && overlayVideoRef.current.readyState >= 2 && overlayVideoRef.current.videoHeight > 0)
       ? (overlayVideoRef.current.videoWidth / overlayVideoRef.current.videoHeight)
       : 16/9;
     const mode = visuals.overlayScaleMode || 'fit';
@@ -3432,7 +3670,7 @@ export default function App() {
     }
 
     const scalePct = visuals.overlayScale !== undefined ? visuals.overlayScale / 100 : 0.5;
-    const videoAspect = (overlayVideoRef.current && overlayVideoRef.current.readyState >= 2)
+    const videoAspect = (overlayVideoRef.current && overlayVideoRef.current.readyState >= 2 && overlayVideoRef.current.videoHeight > 0)
       ? (overlayVideoRef.current.videoWidth / overlayVideoRef.current.videoHeight)
       : 16/9;
     const mode = visuals.overlayScaleMode || 'fit';
@@ -3483,17 +3721,45 @@ export default function App() {
     }
   };
 
-  const handleCanvasMouseUp = () => {
+  const handleCanvasMouseUp = (e?: React.MouseEvent | React.TouchEvent) => {
+    let isClick = false;
+    if (canvasClickStartRef.current) {
+      let clientX = 0;
+      let clientY = 0;
+      if (e && 'clientX' in e) {
+        clientX = (e as React.MouseEvent).clientX;
+        clientY = (e as React.MouseEvent).clientY;
+      } else if (e && 'changedTouches' in e && (e as React.TouchEvent).changedTouches.length > 0) {
+        clientX = (e as React.TouchEvent).changedTouches[0].clientX;
+        clientY = (e as React.TouchEvent).changedTouches[0].clientY;
+      }
+      const dx = Math.abs(clientX - canvasClickStartRef.current.x);
+      const dy = Math.abs(clientY - canvasClickStartRef.current.y);
+      const dt = Date.now() - canvasClickStartRef.current.time;
+      if (dx < 8 && dy < 8 && dt < 450) {
+        isClick = true;
+      }
+    }
+
+    const wasDraggingSticker = dragRef.current !== null;
+
     dragRef.current = null;
+    canvasClickStartRef.current = null;
+
     const canvas = canvasRef.current;
     if (canvas) {
       canvas.style.cursor = 'default';
+    }
+
+    if (isClick && !wasDraggingSticker) {
+      handleTogglePlayback();
     }
   };
 
   const handleCanvasTouchStart = (e: React.TouchEvent<HTMLCanvasElement>) => {
     if (e.touches.length === 0) return;
     const touch = e.touches[0];
+    canvasClickStartRef.current = { x: touch.clientX, y: touch.clientY, time: Date.now() };
     const canvas = canvasRef.current;
     if (!canvas || activeTab !== 'overlay') return;
 
@@ -3566,7 +3832,7 @@ export default function App() {
 
     // Calculate dimensions
     const scalePct = visuals.overlayScale !== undefined ? visuals.overlayScale / 100 : 0.5;
-    const videoAspect = (overlayVideoRef.current && overlayVideoRef.current.readyState >= 2)
+    const videoAspect = (overlayVideoRef.current && overlayVideoRef.current.readyState >= 2 && overlayVideoRef.current.videoHeight > 0)
       ? (overlayVideoRef.current.videoWidth / overlayVideoRef.current.videoHeight)
       : 16/9;
     const mode = visuals.overlayScaleMode || 'fit';
@@ -3776,8 +4042,9 @@ export default function App() {
   };
 
   const handleResetParticlesTab = () => {
+    const initP = MAIN_PRESETS[0]?.particles;
     setParticlesSet({
-      enabled: false,
+      enabled: initP?.enabled ?? true,
       type: 'stars' as ParticleType,
       count: 60,
       minSize: 3,
@@ -4061,6 +4328,15 @@ export default function App() {
     setEqMid(0);
     setEqTreble(0);
     setEqBands([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
+    setSelectedEqPreset('flat');
+  };
+
+  const applyEqPreset = (presetKey: string) => {
+    initAudioSystem();
+    setSelectedEqPreset(presetKey);
+    if (presetKey !== 'custom' && EQ_PRESETS[presetKey]) {
+      setEqBands([...EQ_PRESETS[presetKey].bands]);
+    }
   };
 
   const handleResetExportTab = () => {
@@ -4099,6 +4375,53 @@ export default function App() {
         alert("Unsupported file format! Please upload an image (PNG, JPG, JPEG, WEBP) or video (MP4, WebM, MOV).");
       }
     }
+  };
+
+  const handleAddSlideshowMedia = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const files = e.target.files;
+    if (!files || files.length === 0) return;
+
+    const newItems: SlideshowItem[] = [];
+
+    Array.from(files).forEach((file: File) => {
+      const isVid = file.type.startsWith('video/') || file.type === 'video/quicktime' || file.name.toLowerCase().endsWith('.mov');
+      const url = URL.createObjectURL(file);
+      resourceManager.registerBlobUrl(url);
+
+      const newItem: SlideshowItem = {
+        id: 'slide_' + Date.now() + '_' + Math.random().toString(36).substring(2, 6),
+        type: isVid ? 'video' : 'image',
+        url,
+        name: file.name
+      };
+
+      newItems.push(newItem);
+
+      if (isVid) {
+        resourceManager.loadVideo(url, { loop: true, muted: true, playsInline: true }).then((vid) => {
+          if (vid) slideshowMediaMapRef.current.set(newItem.id, vid);
+        });
+      } else {
+        resourceManager.loadImage(url).then((img) => {
+          if (img) slideshowMediaMapRef.current.set(newItem.id, img);
+        });
+      }
+    });
+
+    setBackground(prev => {
+      const currentSS = prev.slideshow || DEFAULT_SLIDESHOW_SETTINGS;
+      return {
+        ...prev,
+        type: 'slideshow',
+        slideshow: {
+          ...currentSS,
+          enabled: true,
+          items: [...currentSS.items, ...newItems]
+        }
+      };
+    });
+
+    e.target.value = '';
   };
 
   const handleWatermarkUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -4190,6 +4513,7 @@ export default function App() {
     beatIntensity: number;
   } | null>(null);
   const lastBeatTimeSecondsRef = useRef<number>(0);
+  const lastFreqDataRef = useRef<Uint8Array | null>(null);
   const exportTimerWorkerRef = useRef<Worker | null>(null);
   const ffmpegRef = useRef<any>(null);
 
@@ -4323,9 +4647,11 @@ export default function App() {
     let lastAutoRotateTime = performance.now();
     let currentDuckingFactor = 1.0;
 
-    // Persistent interpolation arrays for motion smoothing
+    // Persistent interpolation arrays for motion smoothing & buffer reuse across 60FPS frames
     let smoothAnalyser: Float32Array | null = null;
     let smoothWaveform: Float32Array | null = null;
+    let persistentAnalyserBuffer: Uint8Array | null = null;
+    let persistentWaveformDataBuffer: Uint8Array | null = null;
     let fxSmoothLevels = new Array(10).fill(0);
     let fxOverallPeakSmooth = 0;
 
@@ -4350,9 +4676,16 @@ export default function App() {
         }
       }
 
-      // Read audio spectrum buffer if audio systems are initialized
-      let analyserData = new Uint8Array(visualsRef.current.fftSize / 2);
-      let waveformData = new Uint8Array(visualsRef.current.fftSize / 2);
+      // Read audio spectrum buffer if audio systems are initialized (reusing buffers to prevent 60FPS GC pressure)
+      const targetBufferLen = Math.max(1, Math.floor((visualsRef.current.fftSize || 512) / 2));
+      if (!persistentAnalyserBuffer || persistentAnalyserBuffer.length !== targetBufferLen) {
+        persistentAnalyserBuffer = new Uint8Array(targetBufferLen);
+      }
+      if (!persistentWaveformDataBuffer || persistentWaveformDataBuffer.length !== targetBufferLen) {
+        persistentWaveformDataBuffer = new Uint8Array(targetBufferLen);
+      }
+      let analyserData = persistentAnalyserBuffer;
+      let waveformData = persistentWaveformDataBuffer;
 
       let isBeat = false;
       let beatIntensity = 0;
@@ -4372,6 +4705,7 @@ export default function App() {
       } else if (analyserRef.current) {
         analyserRef.current.getByteFrequencyData(analyserData);
         analyserRef.current.getByteTimeDomainData(waveformData);
+        lastFreqDataRef.current = analyserData;
 
         if (isBeatLocked) {
           if (timeNow - lastBeatTime >= bpmInterval) {
@@ -4563,7 +4897,8 @@ export default function App() {
 
         let targetDucking = 1.0;
         if (normVal > threshold) {
-          const excess = (normVal - threshold) / (1.0 - threshold);
+          const denom = Math.max(0.001, 1.0 - threshold);
+          const excess = (normVal - threshold) / denom;
           targetDucking = 1.0 - (excess * strength);
         }
 
@@ -4706,7 +5041,10 @@ export default function App() {
         bgImageRef.current,
         bgVideoRef.current,
         activeBgBeatPulse,
-        isBgBeatReactEnabled
+        isBgBeatReactEnabled,
+        slideshowMediaMapRef.current,
+        audioTrack.audioElement?.currentTime ?? (Date.now() * 0.001),
+        audioTrack.audioElement?.duration ?? 180
       );
 
       // 2. Compute and Draw Particles
@@ -5086,7 +5424,7 @@ export default function App() {
 
             let scalePct = visualsRef.current.overlayScale !== undefined ? visualsRef.current.overlayScale / 100 : 0.5;
             scalePct *= pulseScaleFactor;
-            const videoAspect = overlayVid.videoWidth / overlayVid.videoHeight || 16/9;
+            const videoAspect = (overlayVid.videoWidth > 0 && overlayVid.videoHeight > 0) ? (overlayVid.videoWidth / overlayVid.videoHeight) : (16/9);
             const mode = visualsRef.current.overlayScaleMode || 'fit';
 
             let targetWidth = 0;
@@ -6194,38 +6532,7 @@ export default function App() {
         }
       }
 
-      // Master Color Grading Filter (LUT-like) applied globally to the entire rendered canvas buffer before output
-      const masterLUT = visualsRef.current.masterColorGrading || 'none';
-      if (masterLUT !== 'none') {
-        ctx.save();
-        let lutFilterStr = '';
-        switch (masterLUT) {
-          case 'film-look':
-            lutFilterStr = 'contrast(120%) saturate(92%) sepia(12%) hue-rotate(-5deg) brightness(102%)';
-            break;
-          case 'bw-noir':
-            lutFilterStr = 'grayscale(100%) contrast(175%) brightness(92%)';
-            break;
-          case 'sepia':
-            lutFilterStr = 'sepia(85%) contrast(110%) brightness(96%)';
-            break;
-          case 'vintage-warm':
-            lutFilterStr = 'sepia(40%) contrast(108%) saturate(125%) hue-rotate(-10deg)';
-            break;
-          case 'cyberpunk-teal':
-            lutFilterStr = 'contrast(140%) saturate(165%) hue-rotate(135deg)';
-            break;
-          case 'kodak-gold':
-            lutFilterStr = 'saturate(145%) contrast(112%) sepia(22%) hue-rotate(-8deg)';
-            break;
-        }
-        if (lutFilterStr) {
-          ctx.filter = lutFilterStr;
-          ctx.drawImage(canvas, 0, 0);
-          ctx.filter = 'none';
-        }
-        ctx.restore();
-      }
+
     };
 
     const scheduleBackup = () => {
@@ -6297,14 +6604,19 @@ export default function App() {
       scale = 1280 / 1920; // 720p scaling (1280x720)
     }
 
-    // Performance Optimization: Scale down internal canvas resolution by 50% during live preview
-    // to keep rendering completely smooth and prevent any main-thread lag or jitter.
-    // Full resolution is dynamically restored when active exporting is running!
+    // Dynamic Resolution Scaling (DPR Optimization):
+    // On high-DPI mobile/tablet touch devices, dynamically scale down internal canvas pixel buffer
+    // during live preview to maintain 60 FPS and prevent overheating / battery drain on mobile GPUs.
+    const isMobileDevice = typeof window !== 'undefined' && (
+      /Android|webOS|iPhone|iPad|iPod|BlackBerry|IEMobile|Opera Mini/i.test(navigator.userAgent) ||
+      (window.innerWidth < 1024 && ('ontouchstart' in window || navigator.maxTouchPoints > 0))
+    );
+
     if (!isExporting) {
       if (visuals.highResolutionPreview) {
-        scale *= 1.0; // Suggestion 1: High-resolution rendering toggle (doubles the default 0.5 preview scale)
+        scale *= isMobileDevice ? 0.75 : 1.0;
       } else {
-        scale *= 0.5;
+        scale *= isMobileDevice ? 0.4 : 0.5;
       }
     }
 
@@ -6315,10 +6627,21 @@ export default function App() {
     particlesPoolRef.current = initParticles(particlesSet, canvas.width, canvas.height);
   }, [exportSettings.aspectRatio, exportSettings.resolution, isExporting, particlesSet, visuals.highResolutionPreview]);
 
+  const simulatedAnalyserRef = useRef<Uint8Array | null>(null);
+  const simulatedWaveformRef = useRef<Uint8Array | null>(null);
+
   // Helper to generate beautifully simulated electronic music audio spectrum and waveform when synth or no file is loaded
   const generateRhythmicSimulatedData = (currentTime: number, fftSize: number) => {
-    const analyserData = new Uint8Array(fftSize / 2);
-    const waveformData = new Uint8Array(fftSize / 2);
+    const targetSize = Math.max(1, Math.floor(fftSize / 2));
+    if (!simulatedAnalyserRef.current || simulatedAnalyserRef.current.length !== targetSize) {
+      simulatedAnalyserRef.current = new Uint8Array(targetSize);
+    }
+    if (!simulatedWaveformRef.current || simulatedWaveformRef.current.length !== targetSize) {
+      simulatedWaveformRef.current = new Uint8Array(targetSize);
+    }
+
+    const analyserData = simulatedAnalyserRef.current;
+    const waveformData = simulatedWaveformRef.current;
 
     const bpm = 112; // matching synth BPM
     const beatInterval = 60 / bpm;
@@ -6431,6 +6754,9 @@ export default function App() {
   // Handle Video EXPORTS using Canvas Frame Captures & standard MediaRecorder Playback Stitching
   const handleStartExport = async () => {
     if (isExporting) return;
+    if (exportedVideoUrl) {
+      URL.revokeObjectURL(exportedVideoUrl);
+    }
     setIsExporting(true);
     setExportProgress(0);
     setExportedVideoUrl(null);
@@ -6592,7 +6918,7 @@ export default function App() {
 
       if (useOfflineEngine) {
         const totalFrames = Math.ceil(totalDuration * fps);
-        setExportTimeRemaining("Offline Step Engine: Decoding audio and calculating exact 60 FPS FFT slices...");
+        setExportTimeRemaining(`Offline Step Engine: Decoding audio and calculating exact ${fps} FPS FFT slices...`);
 
         const offlineAudioResult = await generateOfflineAudioDataCache(fps, totalFrames);
         const offlineCache = offlineAudioResult?.cache || null;
@@ -7142,8 +7468,27 @@ export default function App() {
     setCurrentTrackIndex(0);
   };
 
+  const handleNextTrack = () => {
+    if (playlist.length > 0 && currentTrackIndex < playlist.length - 1) {
+      const nextIndex = currentTrackIndex + 1;
+      setCurrentTrackIndex(nextIndex);
+      loadAudioFile(playlist[nextIndex]);
+    }
+  };
+
+  const handlePrevTrack = () => {
+    if (playlist.length > 0 && currentTrackIndex > 0) {
+      const prevIndex = currentTrackIndex - 1;
+      setCurrentTrackIndex(prevIndex);
+      loadAudioFile(playlist[prevIndex]);
+    }
+  };
+
   const clearAudioTrack = () => {
     handleStopPlayback();
+    if (audioTrack.objectUrl) {
+      URL.revokeObjectURL(audioTrack.objectUrl);
+    }
     setAudioTrack({
       name: 'Demo Rhythmic Cyber-Beat',
       artist: 'Procedural Synthesizer Engine',
@@ -10343,28 +10688,7 @@ export default function App() {
                           </div>
                         </div>
 
-                        {/* MASTER COLOR GRADING FILTER (LUT-LIKE) */}
-                        <div className="flex flex-col gap-2 p-3.5 bg-[#07070a]/80 rounded border border-zinc-950/60 mt-3 text-left">
-                          <div>
-                            <span className="font-semibold text-zinc-350 block font-sans text-[11px] uppercase">Master Color Grading (LUT)</span>
-                            <span className="text-[10px] text-zinc-500 block font-sans mt-0.5">Apply a global cinematic grade preset to the entire rendered canvas buffer</span>
-                          </div>
-                          <div className="pt-2">
-                            <select
-                              value={visuals.masterColorGrading || 'none'}
-                              onChange={(e) => setVisuals(prev => ({ ...prev, masterColorGrading: e.target.value as any }))}
-                              className="w-full bg-[#050508] border border-zinc-850 rounded-lg p-2 text-zinc-300 text-xs focus:outline-none focus:border-brand-green font-medium cursor-pointer"
-                            >
-                              <option value="none">None (Standard Passthrough)</option>
-                              <option value="film-look">Film Look (High-Contrast Warm Teal/Orange)</option>
-                              <option value="bw-noir">Black & White Noir (Monochrome Drama)</option>
-                              <option value="sepia">Sepia (Classic Vintage Warmth)</option>
-                              <option value="vintage-warm">Vintage Warm (Retro Analog Gold)</option>
-                              <option value="cyberpunk-teal">Cyberpunk Teal (Neon Magenta Split Tone)</option>
-                              <option value="kodak-gold">Kodak Gold (Rich Saturated Film Warmth)</option>
-                            </select>
-                          </div>
-                        </div>
+
                       </div>
 
                     </div>
@@ -10557,7 +10881,8 @@ export default function App() {
                         { id: 'frenchcore-spark', name: 'Frenchcore Spark' },
                         { id: 'cosmic-starfield-3d', name: 'Starfield 3D' },
                         { id: 'raindrops-on-glass', name: 'Raindrops Glass' },
-                        { id: 'ambient-bokeh-bubbles', name: 'Bokeh Bubbles' }
+                        { id: 'ambient-bokeh-bubbles', name: 'Bokeh Bubbles' },
+                        { id: 'vortex', name: 'Vortex' }
                       ].map((item) => (
                         <button
                           key={item.id}
@@ -11784,13 +12109,23 @@ export default function App() {
                         { id: 'gradient', name: 'Linear Gradient' },
                         { id: 'image', name: 'Image Backdrop' },
                         { id: 'video', name: 'Video Loop Backdrop' },
+                        { id: 'slideshow', name: '🎬 Media Presentation / Slideshow' },
                       ].map((item) => (
                         <button
                           key={item.id}
-                          onClick={() => setBackground(prev => ({ ...prev, type: item.id as any }))}
+                          onClick={() => {
+                            if (item.id === 'slideshow') {
+                              const currentSS = background.slideshow || DEFAULT_SLIDESHOW_SETTINGS;
+                              setBackground(prev => ({ ...prev, type: 'slideshow', slideshow: { ...currentSS, enabled: true } }));
+                            } else {
+                              setBackground(prev => ({ ...prev, type: item.id as any }));
+                            }
+                          }}
                           className={`py-2 px-3 rounded text-left transition-all cursor-pointer ${
+                            item.id === 'slideshow' ? 'col-span-2' : ''
+                          } ${
                             background.type === item.id
-                              ? 'bg-brand-green/10 border border-brand-green text-white font-medium'
+                              ? 'bg-brand-green/10 border border-brand-green text-white font-medium shadow-sm'
                               : 'bg-zinc-900 border border-zinc-900 text-zinc-400 hover:bg-zinc-850'
                           }`}
                         >
@@ -11798,6 +12133,435 @@ export default function App() {
                         </button>
                       ))}
                     </div>
+                  </div>
+
+                  {/* Presentation / Slideshow Activation & Control Block */}
+                  <div className={`p-4 rounded-xl border transition-all ${
+                    background.type === 'slideshow' || background.slideshow?.enabled
+                      ? 'bg-gradient-to-b from-brand-green/10 via-zinc-900 to-zinc-950 border-brand-green/40 shadow-lg'
+                      : 'bg-zinc-900/80 border-zinc-800'
+                  }`}>
+                    <div className="flex items-center justify-between mb-3">
+                      <div className="flex items-center space-x-2.5">
+                        <div className={`p-2 rounded-lg ${
+                          background.type === 'slideshow' || background.slideshow?.enabled
+                            ? 'bg-brand-green text-black font-bold'
+                            : 'bg-zinc-800 text-zinc-400'
+                        }`}>
+                          <Images className="w-4 h-4" />
+                        </div>
+                        <div>
+                          <h4 className="text-xs font-semibold text-white font-sans flex items-center gap-1.5">
+                            <span>Media Presentation / Slideshow Mode</span>
+                            {background.type === 'slideshow' && (
+                              <span className="px-1.5 py-0.5 rounded text-[9px] bg-brand-green/20 text-brand-green font-mono uppercase tracking-wider font-bold border border-brand-green/30">
+                                Active
+                              </span>
+                            )}
+                          </h4>
+                          <p className="text-[10px] text-zinc-400 font-sans mt-0.5">
+                            Play multiple photos & video loops in sequence with custom timing, beat sync, and cinematic transitions.
+                          </p>
+                        </div>
+                      </div>
+
+                      {/* Activation Toggle Switch */}
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const isCurrentlyActive = background.type === 'slideshow' || background.slideshow?.enabled;
+                          const targetSlideshow = background.slideshow || DEFAULT_SLIDESHOW_SETTINGS;
+                          setBackground(prev => ({
+                            ...prev,
+                            type: isCurrentlyActive ? 'image' : 'slideshow',
+                            slideshow: {
+                              ...targetSlideshow,
+                              enabled: !isCurrentlyActive
+                            }
+                          }));
+                        }}
+                        className={`relative inline-flex h-5.5 w-10 shrink-0 cursor-pointer rounded-full border-2 border-transparent transition-colors duration-200 ease-in-out focus:outline-none ${
+                          background.type === 'slideshow' || background.slideshow?.enabled ? 'bg-brand-green' : 'bg-zinc-800'
+                        }`}
+                      >
+                        <span
+                          className={`pointer-events-none inline-block h-4.5 w-4.5 transform rounded-full bg-white shadow-lg ring-0 transition duration-200 ease-in-out ${
+                            background.type === 'slideshow' || background.slideshow?.enabled ? 'translate-x-4.5' : 'translate-x-0'
+                          }`}
+                        />
+                      </button>
+                    </div>
+
+                    {(background.type === 'slideshow' || background.slideshow?.enabled) && (
+                      <div className="space-y-4 pt-3 border-t border-zinc-800/80">
+                        
+                        {/* 1. Timing & Duration Control */}
+                        <div className="bg-zinc-950/80 border border-zinc-850 p-3.5 rounded-lg space-y-3">
+                          <label className="block text-[10px] font-semibold text-zinc-400 font-mono uppercase">
+                            Slide Timing & Duration Mode
+                          </label>
+                          
+                          <div className="grid grid-cols-3 gap-2 text-[11px]">
+                            {[
+                              { id: 'fixed', label: 'Fixed Duration', desc: 'Custom sec per slide' },
+                              { id: 'track-fit', label: 'Fit Music Track', desc: 'Auto-divide track length' },
+                              { id: 'beat-sync', label: 'Beat Synced', desc: 'Change on beat counts' }
+                            ].map(mode => (
+                              <button
+                                key={mode.id}
+                                onClick={() => {
+                                  const currentSS = background.slideshow || DEFAULT_SLIDESHOW_SETTINGS;
+                                  setBackground(prev => ({
+                                    ...prev,
+                                    slideshow: { ...currentSS, timingMode: mode.id as any }
+                                  }));
+                                }}
+                                className={`p-2 rounded text-left transition-all border cursor-pointer ${
+                                  (background.slideshow?.timingMode || 'fixed') === mode.id
+                                    ? 'bg-brand-green/15 border-brand-green text-white font-medium'
+                                    : 'bg-zinc-900 border-zinc-800 text-zinc-400 hover:bg-zinc-850'
+                                }`}
+                              >
+                                <div className="font-semibold text-[10px]">{mode.label}</div>
+                                <div className="text-[8px] text-zinc-500 font-sans leading-tight mt-0.5">{mode.desc}</div>
+                              </button>
+                            ))}
+                          </div>
+
+                          {/* Dynamic Timing Sliders */}
+                          {(background.slideshow?.timingMode || 'fixed') === 'fixed' && (
+                            <div className="space-y-1 pt-1">
+                              <div className="flex justify-between font-mono text-[9px] text-zinc-400">
+                                <span>SECONDS PER SLIDE</span>
+                                <span className="text-white font-semibold">{(background.slideshow?.slideDuration || 5)} sec</span>
+                              </div>
+                              <input
+                                type="range"
+                                min="1"
+                                max="30"
+                                step="1"
+                                value={background.slideshow?.slideDuration || 5}
+                                onChange={(e) => {
+                                  const val = parseFloat(e.target.value);
+                                  const currentSS = background.slideshow || DEFAULT_SLIDESHOW_SETTINGS;
+                                  setBackground(prev => ({
+                                    ...prev,
+                                    slideshow: { ...currentSS, slideDuration: val }
+                                  }));
+                                }}
+                                className="w-full accent-brand-green cursor-pointer"
+                              />
+                            </div>
+                          )}
+
+                          {(background.slideshow?.timingMode || 'fixed') === 'beat-sync' && (
+                            <div className="space-y-1 pt-1">
+                              <div className="flex justify-between font-mono text-[9px] text-zinc-400">
+                                <span>BEAT INTERVAL</span>
+                                <span className="text-white font-semibold">Every {(background.slideshow?.beatInterval || 8)} Beats</span>
+                              </div>
+                              <div className="grid grid-cols-5 gap-1.5 pt-1">
+                                {[2, 4, 8, 16, 32].map(b => (
+                                  <button
+                                    key={b}
+                                    onClick={() => {
+                                      const currentSS = background.slideshow || DEFAULT_SLIDESHOW_SETTINGS;
+                                      setBackground(prev => ({
+                                        ...prev,
+                                        slideshow: { ...currentSS, beatInterval: b }
+                                      }));
+                                    }}
+                                    className={`py-1 rounded text-center text-[10px] font-mono cursor-pointer border ${
+                                      (background.slideshow?.beatInterval || 8) === b
+                                        ? 'bg-brand-green text-black font-bold border-brand-green'
+                                        : 'bg-zinc-900 text-zinc-400 border-zinc-800 hover:text-white'
+                                    }`}
+                                  >
+                                    {b}B
+                                  </button>
+                                ))}
+                              </div>
+                            </div>
+                          )}
+
+                          {(background.slideshow?.timingMode || 'fixed') === 'track-fit' && (
+                            <p className="text-[10px] text-brand-green/90 font-mono bg-brand-green/5 p-2 rounded border border-brand-green/20">
+                              Slide duration automatically calculated as {(audioTrack.duration > 0 ? (audioTrack.duration / Math.max(1, (background.slideshow?.items || []).length)).toFixed(1) : '5.0')} sec per slide to match exact song duration.
+                            </p>
+                          )}
+                        </div>
+
+                        {/* 2. Transition Style Controls */}
+                        <div className="bg-zinc-950/80 border border-zinc-850 p-3.5 rounded-lg space-y-3">
+                          <label className="block text-[10px] font-semibold text-zinc-400 font-mono uppercase">
+                            Slide Transition FX & Motion
+                          </label>
+
+                          <div className="grid grid-cols-2 gap-2 text-xs">
+                            <div>
+                              <label className="block text-[9px] text-zinc-500 mb-1 font-mono">TRANSITION STYLE</label>
+                              <select
+                                value={background.slideshow?.transitionStyle || 'crossfade'}
+                                onChange={(e) => {
+                                  const val = e.target.value as any;
+                                  const currentSS = background.slideshow || DEFAULT_SLIDESHOW_SETTINGS;
+                                  setBackground(prev => ({
+                                    ...prev,
+                                    slideshow: { ...currentSS, transitionStyle: val }
+                                  }));
+                                }}
+                                className="w-full bg-zinc-900 border border-zinc-800 rounded p-2 text-zinc-300 text-xs focus:outline-none focus:border-brand-green font-medium cursor-pointer"
+                              >
+                                <option value="crossfade">Smooth Crossfade</option>
+                                <option value="fade-black">Fade through Black</option>
+                                <option value="slide-left">Slide Left</option>
+                                <option value="slide-right">Slide Right</option>
+                                <option value="ken-burns">Ken Burns Zoom & Fade</option>
+                                <option value="cut">Instant Cut (No Transition)</option>
+                              </select>
+                            </div>
+
+                            <div>
+                              <label className="block text-[9px] text-zinc-500 mb-1 font-mono">TRANSITION TIME</label>
+                              <div className="flex items-center space-x-2 bg-zinc-900 border border-zinc-800 rounded p-1.5">
+                                <input
+                                  type="range"
+                                  min="0.2"
+                                  max="3.0"
+                                  step="0.1"
+                                  value={background.slideshow?.transitionDuration ?? 1.2}
+                                  onChange={(e) => {
+                                    const val = parseFloat(e.target.value);
+                                    const currentSS = background.slideshow || DEFAULT_SLIDESHOW_SETTINGS;
+                                    setBackground(prev => ({
+                                      ...prev,
+                                      slideshow: { ...currentSS, transitionDuration: val }
+                                    }));
+                                  }}
+                                  className="w-full accent-brand-green cursor-pointer"
+                                />
+                                <span className="text-[10px] font-mono text-zinc-300 shrink-0 font-bold">
+                                  {(background.slideshow?.transitionDuration ?? 1.2).toFixed(1)}s
+                                </span>
+                              </div>
+                            </div>
+                          </div>
+
+                          {/* Ken Burns Zoom Toggle */}
+                          <div className="flex items-center justify-between pt-2 border-t border-zinc-900">
+                            <div>
+                              <span className="text-[11px] font-medium text-zinc-300 block">Ken Burns Motion Scale & Zoom</span>
+                              <span className="text-[9.5px] text-zinc-500 block">Applies cinematic subtle scaling across photo slides</span>
+                            </div>
+                            <button
+                              type="button"
+                              onClick={() => {
+                                const currentSS = background.slideshow || DEFAULT_SLIDESHOW_SETTINGS;
+                                setBackground(prev => ({
+                                  ...prev,
+                                  slideshow: { ...currentSS, kenBurnsZoom: !(currentSS.kenBurnsZoom ?? true) }
+                                }));
+                              }}
+                              className={`relative w-8 h-4.5 rounded-full transition-all cursor-pointer flex-shrink-0 ${
+                                (background.slideshow?.kenBurnsZoom ?? true) ? 'bg-brand-green' : 'bg-zinc-800'
+                              }`}
+                            >
+                              <span className={`absolute top-[2px] left-[2px] bg-zinc-100 rounded-full h-3.5 w-3.5 transition-all ${
+                                (background.slideshow?.kenBurnsZoom ?? true) ? 'translate-x-3.5' : 'translate-x-0'
+                              }`} />
+                            </button>
+                          </div>
+                        </div>
+
+                        {/* 3. Media Items Manager / Playlist */}
+                        <div className="bg-zinc-950/80 border border-zinc-850 p-3.5 rounded-lg space-y-3">
+                          <div className="flex items-center justify-between">
+                            <label className="text-[10px] font-semibold text-zinc-400 font-mono uppercase flex items-center gap-1.5">
+                              <span>Presentation Media Items</span>
+                              <span className="bg-zinc-800 text-zinc-300 px-1.5 py-0.5 rounded text-[9px] font-mono">
+                                {(background.slideshow?.items || []).length} Items
+                              </span>
+                            </label>
+
+                            <div className="flex items-center space-x-1.5">
+                              {/* Add Stock Sample Slides */}
+                              <button
+                                onClick={() => {
+                                  const currentSS = background.slideshow || DEFAULT_SLIDESHOW_SETTINGS;
+                                  const randomStock = SAMPLE_STOCK_MEDIA[Math.floor(Math.random() * SAMPLE_STOCK_MEDIA.length)];
+                                  const newItem: SlideshowItem = {
+                                    id: 'slide_sample_' + Date.now(),
+                                    type: randomStock.type,
+                                    url: randomStock.url,
+                                    name: randomStock.name
+                                  };
+                                  setBackground(prev => ({
+                                    ...prev,
+                                    slideshow: {
+                                      ...currentSS,
+                                      items: [...currentSS.items, newItem]
+                                    }
+                                  }));
+                                }}
+                                className="px-2 py-1 bg-zinc-850 hover:bg-zinc-750 text-zinc-300 text-[10px] rounded transition-all cursor-pointer flex items-center gap-1 font-mono border border-zinc-750"
+                                title="Add a sample background stock slide"
+                              >
+                                <Sparkles className="w-3 h-3 text-brand-green" />
+                                <span>+ Add Stock Slide</span>
+                              </button>
+                            </div>
+                          </div>
+
+                          {/* Upload Custom Images & Videos to Presentation */}
+                          <div className="bg-zinc-900/60 border border-dashed border-zinc-800 rounded-lg p-3 text-center relative hover:border-brand-green/40 transition-colors">
+                            <input
+                              type="file"
+                              multiple
+                              accept="image/*,video/*,video/quicktime,.mov,.mp4,.webm"
+                              onChange={handleAddSlideshowMedia}
+                              className="absolute inset-0 opacity-0 cursor-pointer w-full h-full"
+                            />
+                            <div className="flex items-center justify-center space-x-2 pointer-events-none">
+                              <Upload className="w-4 h-4 text-brand-green" />
+                              <span className="text-xs text-zinc-200 font-medium">Upload Photos or Videos to Presentation</span>
+                              <span className="text-[9px] text-zinc-500 font-mono">(Multi-select supported)</span>
+                            </div>
+                          </div>
+
+                          {/* Media Items List */}
+                          <div className="space-y-1.5 max-h-56 overflow-y-auto pr-1 scrollbar-thin">
+                            {(background.slideshow?.items || []).map((item, idx) => (
+                              <div
+                                key={item.id}
+                                className="flex items-center justify-between p-2 rounded bg-zinc-900 border border-zinc-800/80 hover:border-zinc-750 transition-all text-xs"
+                              >
+                                <div className="flex items-center space-x-2.5 overflow-hidden">
+                                  <span className="text-[10px] font-mono text-zinc-500 w-4 text-center shrink-0">
+                                    {idx + 1}
+                                  </span>
+
+                                  <div className="w-8 h-8 rounded bg-zinc-950 overflow-hidden shrink-0 border border-zinc-800 flex items-center justify-center">
+                                    {item.type === 'image' ? (
+                                      <img src={item.url} alt={item.name} className="w-full h-full object-cover" />
+                                    ) : (
+                                      <FileVideo className="w-4 h-4 text-brand-green" />
+                                    )}
+                                  </div>
+
+                                  <div className="truncate flex flex-col">
+                                    <span className="text-zinc-200 font-medium truncate text-[11px]">
+                                      {item.name || `Slide ${idx + 1}`}
+                                    </span>
+                                    <div className="flex items-center gap-1.5">
+                                      <span className={`text-[8px] px-1 rounded font-mono uppercase ${
+                                        item.type === 'image' ? 'bg-blue-500/10 text-blue-400 border border-blue-500/20' : 'bg-purple-500/10 text-purple-400 border border-purple-500/20'
+                                      }`}>
+                                        {item.type}
+                                      </span>
+                                    </div>
+                                  </div>
+                                </div>
+
+                                <div className="flex items-center space-x-1 shrink-0">
+                                  {/* Move Up */}
+                                  <button
+                                    disabled={idx === 0}
+                                    onClick={() => {
+                                      const currentSS = background.slideshow || DEFAULT_SLIDESHOW_SETTINGS;
+                                      const newItems = [...currentSS.items];
+                                      const temp = newItems[idx];
+                                      newItems[idx] = newItems[idx - 1];
+                                      newItems[idx - 1] = temp;
+                                      setBackground(prev => ({
+                                        ...prev,
+                                        slideshow: { ...currentSS, items: newItems }
+                                      }));
+                                    }}
+                                    className="p-1 text-zinc-500 hover:text-white disabled:opacity-20 cursor-pointer"
+                                    title="Move Slide Up"
+                                  >
+                                    <ChevronUp className="w-3.5 h-3.5" />
+                                  </button>
+
+                                  {/* Move Down */}
+                                  <button
+                                    disabled={idx === (background.slideshow?.items || []).length - 1}
+                                    onClick={() => {
+                                      const currentSS = background.slideshow || DEFAULT_SLIDESHOW_SETTINGS;
+                                      const newItems = [...currentSS.items];
+                                      const temp = newItems[idx];
+                                      newItems[idx] = newItems[idx + 1];
+                                      newItems[idx + 1] = temp;
+                                      setBackground(prev => ({
+                                        ...prev,
+                                        slideshow: { ...currentSS, items: newItems }
+                                      }));
+                                    }}
+                                    className="p-1 text-zinc-500 hover:text-white disabled:opacity-20 cursor-pointer"
+                                    title="Move Slide Down"
+                                  >
+                                    <ChevronDown className="w-3.5 h-3.5" />
+                                  </button>
+
+                                  {/* Remove */}
+                                  <button
+                                    onClick={() => {
+                                      const currentSS = background.slideshow || DEFAULT_SLIDESHOW_SETTINGS;
+                                      const newItems = currentSS.items.filter(i => i.id !== item.id);
+                                      setBackground(prev => ({
+                                        ...prev,
+                                        slideshow: { ...currentSS, items: newItems }
+                                      }));
+                                    }}
+                                    className="p-1 text-zinc-500 hover:text-red-400 cursor-pointer"
+                                    title="Delete Slide"
+                                  >
+                                    <Trash2 className="w-3.5 h-3.5" />
+                                  </button>
+                                </div>
+                              </div>
+                            ))}
+
+                            {(background.slideshow?.items || []).length === 0 && (
+                              <div className="p-4 text-center text-zinc-500 text-xs font-sans">
+                                No items in presentation. Click above to upload or add stock slides!
+                              </div>
+                            )}
+                          </div>
+
+                          {/* Restore Defaults and Remove All */}
+                          <div className="flex items-center justify-end space-x-3 pt-1">
+                            <button
+                              onClick={() => {
+                                const currentSS = background.slideshow || DEFAULT_SLIDESHOW_SETTINGS;
+                                setBackground(prev => ({
+                                  ...prev,
+                                  slideshow: { ...currentSS, items: [] }
+                                }));
+                              }}
+                              className="text-[9.5px] text-red-400/80 hover:text-red-400 font-mono underline cursor-pointer flex items-center gap-1"
+                              title="Remove all uploaded images and videos from presentation"
+                            >
+                              <Trash2 className="w-3 h-3" />
+                              <span>REMOVE ALL</span>
+                            </button>
+
+                            <button
+                              onClick={() => {
+                                setBackground(prev => ({
+                                  ...prev,
+                                  slideshow: { ...DEFAULT_SLIDESHOW_SETTINGS, enabled: true }
+                                }));
+                              }}
+                              className="text-[9.5px] text-zinc-500 hover:text-zinc-300 font-mono underline cursor-pointer"
+                            >
+                              Reset to Sample Presentation Slides
+                            </button>
+                          </div>
+                        </div>
+
+                      </div>
+                    )}
                   </div>
 
                   {/* Video Size & Orientation Selection Block */}
@@ -14404,21 +15168,39 @@ export default function App() {
 
                 {/* Core 10-Band Equalizer Deck */}
                 <div className="bg-zinc-950/40 p-4 rounded-xl border border-zinc-900/50 space-y-4">
-                  <div className="flex items-center justify-between">
+                  <div className="flex flex-col sm:flex-row sm:items-center justify-between gap-3 border-b border-zinc-900/60 pb-3">
                     <span className="text-[11px] font-semibold text-zinc-400 uppercase tracking-wider font-mono flex items-center space-x-2">
                       <Sliders className="w-3.5 h-3.5 text-brand-green-hover" />
                       <span>10-BAND PRO EQUALIZER</span>
                     </span>
-                    {eqBands.some(v => v !== 0) && (
-                      <button
-                        onClick={() => {
-                          setEqBands([0, 0, 0, 0, 0, 0, 0, 0, 0, 0]);
-                        }}
-                        className="text-[9px] font-mono text-brand-green-hover hover:text-lime-300 transition-colors cursor-pointer"
+
+                    <div className="flex items-center space-x-2">
+                      <label className="text-[10px] text-zinc-400 font-mono uppercase whitespace-nowrap">EQ Presets:</label>
+                      <select
+                        value={selectedEqPreset}
+                        onChange={(e) => applyEqPreset(e.target.value)}
+                        className="bg-zinc-900 border border-zinc-800 rounded px-2.5 py-1 text-[11px] text-zinc-200 font-mono cursor-pointer focus:outline-none focus:ring-1 focus:ring-brand-green"
                       >
-                        RESET
-                      </button>
-                    )}
+                        <option value="custom">Custom</option>
+                        <option value="flat">Flat (Default)</option>
+                        <option value="bass-boost">Bass Boost</option>
+                        <option value="voice-clarity">Voice Clarity</option>
+                        <option value="v-shape">V-Shape</option>
+                        <option value="electronic">Electronic / EDM</option>
+                        <option value="treble-boost">Treble Boost</option>
+                      </select>
+
+                      {eqBands.some(v => v !== 0) && (
+                        <button
+                          type="button"
+                          onClick={() => applyEqPreset('flat')}
+                          className="text-[9px] font-mono text-brand-green-hover hover:text-lime-300 transition-colors cursor-pointer px-2 py-1 rounded bg-brand-green/10 border border-brand-green/30"
+                          title="Reset EQ to Flat"
+                        >
+                          RESET
+                        </button>
+                      )}
+                    </div>
                   </div>
 
                   <div className="grid grid-cols-2 gap-2.5">
@@ -14459,6 +15241,10 @@ export default function App() {
                               const newBands = [...eqBands];
                               newBands[idx] = parseInt(e.target.value);
                               setEqBands(newBands);
+                              const matchedKey = Object.keys(EQ_PRESETS).find(key => 
+                                EQ_PRESETS[key].bands.every((v, i) => v === newBands[i])
+                              );
+                              setSelectedEqPreset(matchedKey || 'custom');
                             }}
                             className="w-full accent-brand-green h-1 cursor-pointer bg-zinc-900 rounded-lg appearance-none mt-1 relative z-10"
                           />
@@ -15540,10 +16326,11 @@ export default function App() {
                         <select
                           value={exportSettings.fps}
                           onChange={(e: any) => setExportSettings(prev => ({ ...prev, fps: parseInt(e.target.value) as any }))}
-                          className="w-full bg-zinc-950 border border-zinc-900 rounded p-1.5 text-zinc-300 font-mono text-xs focus:outline-none focus:border-brand-green"
+                          className="w-full bg-zinc-950 border border-zinc-900 rounded p-1.5 text-zinc-300 font-mono text-xs focus:outline-none focus:border-brand-green cursor-pointer"
                         >
                           <option value="30">30 Frames per Sec</option>
                           <option value="60">60 Smooth Pro FPS</option>
+                          <option value="120">120 Ultra-High FPS (Extreme Smoothness)</option>
                         </select>
                       </div>
                     </div>
@@ -15695,15 +16482,17 @@ export default function App() {
             </div>
 
           {/* Playback Mini Controls in Header */}
-          <div className="hidden sm:flex items-center space-x-3 bg-zinc-900 border border-zinc-800 px-3 py-1 rounded-full text-xs">
-            <div className="w-2 h-2 rounded-full bg-brand-green animate-pulse" />
-            <span className="text-zinc-300 font-mono font-medium truncate max-w-[150px]">
-              {audioTrack.name}
-            </span>
-            <span className="text-zinc-700">|</span>
-            <span className="text-zinc-400 font-mono">
-              {Math.floor(currentTime / 60)}:{(Math.floor(currentTime % 60)).toString().padStart(2, '0')}
-            </span>
+          <div className="hidden sm:flex items-center space-x-2">
+            <div className="flex items-center space-x-2.5 bg-zinc-900 border border-zinc-800 px-3 py-1 rounded-full text-xs">
+              <div className="w-2 h-2 rounded-full bg-brand-green animate-pulse" />
+              <span className="text-zinc-300 font-mono font-medium truncate max-w-[130px]">
+                {audioTrack.name}
+              </span>
+              <span className="text-zinc-700">|</span>
+              <span className="text-zinc-400 font-mono">
+                {Math.floor(currentTime / 60)}:{(Math.floor(currentTime % 60)).toString().padStart(2, '0')}
+              </span>
+            </div>
           </div>
 
           <div className="flex items-center space-x-2.5">
@@ -15927,7 +16716,7 @@ export default function App() {
                   className={`flex items-center space-x-1 px-2 py-0.5 rounded border transition-all text-[10px] font-mono font-bold cursor-pointer active:scale-95 shrink-0 ${
                     visuals.sensitivityBoost
                       ? 'bg-amber-500/20 text-amber-400 border-amber-500/50 shadow-[0_0_10px_rgba(245,158,11,0.35)]'
-                      : 'bg-zinc-950 text-zinc-400 border-zinc-800 hover:border-amber-500/50 hover:text-amber-400 hover:bg-amber-500/10'
+                      : 'bg-zinc-950 text-zinc-400 border border-zinc-800 hover:border-amber-500/50 hover:text-amber-400 hover:bg-amber-500/10'
                   }`}
                   title="Global Sensitivity Boost: Multiplies base Sensitivity and Sensitivity Floor by 1.5x across all presets"
                 >
@@ -15978,7 +16767,7 @@ export default function App() {
             className={`transition-all duration-300 ${
               isFullscreen || uiLayout === 'cinema'
                 ? 'fixed inset-0 z-[9990] bg-black p-0 flex flex-col justify-center items-center overflow-hidden w-screen h-screen' 
-                : 'w-full max-w-4xl'
+                : 'w-full max-w-4xl xl:static sticky top-0 z-20 bg-zinc-950/90 backdrop-blur-sm pb-1.5'
             }`}
           >
             <div className={`w-full relative overflow-hidden transition-all duration-300 ${
@@ -15998,10 +16787,16 @@ export default function App() {
                   maxWidth: (isFullscreen || uiLayout === 'cinema') ? '100vw' : '100%',
                   margin: '0 auto',
                 }}
+                onClick={(e) => {
+                  const target = e.target as HTMLElement;
+                  if (target.tagName.toLowerCase() === 'canvas') return;
+                  if (target.closest('button, input, a, select, [data-no-screen-click]')) return;
+                  handleTogglePlayback();
+                }}
               >
                 <canvas
                   ref={canvasRef}
-                  className="w-full h-full object-contain cursor-default"
+                  className="w-full h-full object-contain cursor-pointer"
                   onMouseDown={handleCanvasMouseDown}
                   onMouseMove={handleCanvasMouseMove}
                   onMouseUp={handleCanvasMouseUp}
@@ -16010,6 +16805,35 @@ export default function App() {
                   onTouchMove={handleCanvasTouchMove}
                   onTouchEnd={handleCanvasMouseUp}
                 />
+
+                {/* YouTube Style Screen Click Play/Pause Ripple / Badge Indicator */}
+                <AnimatePresence>
+                  {screenFeedback && (
+                    <motion.div
+                      key={screenFeedback.id}
+                      initial={{ opacity: 0, scale: 0.6 }}
+                      animate={{ opacity: 1, scale: 1.1 }}
+                      exit={{ opacity: 0, scale: 1.5 }}
+                      transition={{ duration: 0.45, ease: 'easeOut' }}
+                      onAnimationComplete={() => setScreenFeedback(null)}
+                      className="absolute inset-0 flex items-center justify-center pointer-events-none z-50 select-none"
+                    >
+                      <div className="w-20 h-20 sm:w-24 sm:h-24 rounded-full bg-black/60 backdrop-blur-md border border-white/25 text-white flex items-center justify-center shadow-2xl ring-4 ring-white/10">
+                        {screenFeedback.type === 'play' ? (
+                          <Play 
+                            className="w-10 h-10 sm:w-12 sm:h-12 text-brand-green fill-brand-green ml-1" 
+                            style={{ filter: 'drop-shadow(0 0 12px var(--ui-accent-color, #b8ee02))' }}
+                          />
+                        ) : (
+                          <Pause 
+                            className="w-10 h-10 sm:w-12 sm:h-12 text-brand-green fill-brand-green" 
+                            style={{ filter: 'drop-shadow(0 0 12px var(--ui-accent-color, #b8ee02))' }}
+                          />
+                        )}
+                      </div>
+                    </motion.div>
+                  )}
+                </AnimatePresence>
 
                 {/* Cinema / Zen Mode Overlay Control Deck */}
                 {uiLayout === 'cinema' && (
@@ -16159,8 +16983,22 @@ export default function App() {
                           </span>
                         </div>
 
-                        {/* Right Controls: Quality badge & Fullscreen toggle */}
+                        {/* Right Controls: Standalone Player toggle, Quality badge & Fullscreen toggle */}
                         <div className="flex items-center space-x-2 shrink-0">
+                          <button
+                            type="button"
+                            onClick={() => setIsStandalonePlayerOpen(prev => !prev)}
+                            className={`px-2.5 py-1 rounded-lg text-[10px] font-mono font-bold border transition-all cursor-pointer flex items-center gap-1.5 ${
+                              isStandalonePlayerOpen
+                                ? 'bg-brand-green text-zinc-950 border-brand-green shadow-md'
+                                : 'bg-zinc-900/90 border-zinc-800 text-zinc-300 hover:text-white hover:border-zinc-700'
+                            }`}
+                            title="Detach Player into Floating Standalone Mini-Player Mode"
+                          >
+                            <PictureInPicture2 className="w-3.5 h-3.5 shrink-0" />
+                            <span className="hidden sm:inline uppercase">{isStandalonePlayerOpen ? "MINI PLAYER ON" : "STANDALONE PLAYER"}</span>
+                          </button>
+
                           <span className="hidden sm:inline-block px-1.5 py-0.5 rounded text-[9px] font-mono font-bold bg-zinc-900/90 border border-zinc-800 text-brand-green uppercase tracking-wider">
                             {exportSettings.fps}FPS • {exportSettings.quality}
                           </span>
@@ -16292,15 +17130,96 @@ export default function App() {
 
         </div>
 
-        {/* RIGHT SIDEBAR CONTROL DECKS (Full DJ Studio Layout Mode) */}
+        {/* RIGHT SIDEBAR CONTROL DECKS (Desktop Mode >= 1280px) */}
         {uiLayout === 'studio' && (
-        <div className={`w-full xl:w-[460px] flex flex-col ${activeUIThemeConfig.panelBg} border-l ${activeUIThemeConfig.border} transition-colors duration-300`}>
-          
+        <div className={`hidden xl:flex w-[460px] flex-col ${activeUIThemeConfig.panelBg} border-l ${activeUIThemeConfig.border} transition-colors duration-300`}>
           {/* ACTIVE PANEL CONTENT WRAPPER */}
           <div className="h-[calc(100vh-110px)] overflow-y-auto pr-1 space-y-4 custom-scrollbar p-5 md:p-6 bg-zinc-950">
             {renderControlPanels()}
           </div>
+        </div>
+        )}
 
+        {/* MOBILE & TABLET AUTO-RESPONSIVE COLLAPSIBLE DRAWER (< 1280px) */}
+        {uiLayout === 'studio' && (
+        <div className="xl:hidden w-full sticky bottom-0 z-40 bg-zinc-950/95 backdrop-blur-md border-t border-zinc-800/90 shadow-2xl transition-all duration-300">
+          {/* SWIPE / TOUCH HANDLE BAR WITH EXPAND TOGGLE */}
+          <div
+            onTouchStart={handleDrawerTouchStart}
+            onTouchEnd={handleDrawerTouchEnd}
+            onClick={() => setIsMobileDrawerExpanded(prev => !prev)}
+            className="w-full flex items-center justify-between px-4 py-2.5 bg-zinc-900 border-b border-zinc-800/90 cursor-pointer select-none active:bg-zinc-850 touch-target-44"
+          >
+            <div className="flex items-center space-x-2.5">
+              <div className="w-8 h-1.5 bg-zinc-600 rounded-full shrink-0" />
+              <span className="text-xs font-mono font-bold text-zinc-200 flex items-center gap-1.5 uppercase tracking-wide">
+                <Sliders className="w-3.5 h-3.5 text-brand-green" />
+                <span>{isMobileDrawerExpanded ? "SWIPE DOWN TO COLLAPSE" : "SWIPE UP FOR CONTROLS"}</span>
+              </span>
+            </div>
+
+            <div className="flex items-center space-x-2">
+              <span className="text-[10px] font-mono text-zinc-300 bg-zinc-950 px-2 py-0.5 rounded border border-zinc-800 uppercase font-bold">
+                {activeTab}
+              </span>
+              <button
+                type="button"
+                className="p-1 text-zinc-300 hover:text-white cursor-pointer min-h-[44px] flex items-center"
+                aria-label={isMobileDrawerExpanded ? "Collapse drawer" : "Expand drawer"}
+              >
+                {isMobileDrawerExpanded ? <ChevronDown className="w-4 h-4 text-brand-green" /> : <ChevronUp className="w-4 h-4 text-brand-green" />}
+              </button>
+            </div>
+          </div>
+
+          {/* HORIZONTAL SWIPEABLE 8-TAB PILL STRIP */}
+          <div className="w-full bg-zinc-950/90 border-b border-zinc-900 px-2 py-1.5 overflow-x-auto scrollbar-hide flex space-x-1.5 select-none">
+            {[
+              { id: 'track', label: 'Track', icon: Music },
+              { id: 'background', label: 'Background', icon: Layers },
+              { id: 'visuals', label: 'Waves', icon: Sliders },
+              { id: 'particles', label: 'Particles', icon: Sparkles },
+              { id: 'sfx', label: 'FX Studio', icon: Wand2 },
+              { id: 'overlay', label: 'Overlay', icon: FileVideo },
+              { id: 'text', label: 'Text', icon: Type },
+              { id: 'export', label: 'Export', icon: Download },
+            ].map((tab) => {
+              const Icon = tab.icon;
+              const isActive = activeTab === tab.id;
+              return (
+                <button
+                  key={tab.id}
+                  onClick={() => {
+                    setActiveTab(tab.id as any);
+                    setIsMobileDrawerExpanded(true);
+                  }}
+                  className={`flex items-center space-x-1.5 px-3 py-2 rounded-lg text-xs font-mono font-medium whitespace-nowrap transition-all cursor-pointer min-h-[44px] shrink-0 ${
+                    isActive
+                      ? 'bg-brand-green text-zinc-950 font-bold shadow-md'
+                      : 'bg-zinc-900/90 text-zinc-400 hover:text-white hover:bg-zinc-850 border border-zinc-800/80'
+                  }`}
+                >
+                  <Icon className="w-3.5 h-3.5" />
+                  <span>{tab.label}</span>
+                </button>
+              );
+            })}
+          </div>
+
+          {/* EXPANDABLE / COLLAPSIBLE DRAWER BODY */}
+          <AnimatePresence>
+            {isMobileDrawerExpanded && (
+              <motion.div
+                initial={{ height: 0, opacity: 0 }}
+                animate={{ height: '55vh', opacity: 1 }}
+                exit={{ height: 0, opacity: 0 }}
+                transition={{ duration: 0.22, ease: 'easeOut' }}
+                className="w-full overflow-y-auto p-4 space-y-4 custom-scrollbar bg-zinc-950"
+              >
+                {renderControlPanels()}
+              </motion.div>
+            )}
+          </AnimatePresence>
         </div>
         )}
 
@@ -16327,83 +17246,7 @@ export default function App() {
         </footer>
       )}
 
-      {/* SHARE MODAL */}
-      <AnimatePresence>
-        {isShareModalOpen && (
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            exit={{ opacity: 0 }}
-            className="fixed inset-0 bg-black/80 backdrop-blur-sm z-[100] flex items-center justify-center p-6"
-            onClick={() => setIsShareModalOpen(false)}
-          >
-            <motion.div
-              initial={{ scale: 0.95, opacity: 0, y: 20 }}
-              animate={{ scale: 1, opacity: 1, y: 0 }}
-              exit={{ scale: 0.95, opacity: 0, y: 20 }}
-              className="bg-zinc-900 border border-zinc-800 p-6 rounded-xl shadow-2xl max-w-md w-full"
-              onClick={(e) => e.stopPropagation()}
-            >
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="text-lg font-semibold text-white font-sans flex items-center space-x-2">
-                  <Share2 className="w-5 h-5 text-green-400" />
-                  <span>Share Project</span>
-                </h3>
-                <button
-                  onClick={() => setIsShareModalOpen(false)}
-                  className="text-zinc-500 hover:text-white"
-                >
-                  <Trash2 className="w-4 h-4 opacity-0 pointer-events-none" /> {/* Placeholder for spacing if X is needed */}
-                  <span className="text-xl leading-none">&times;</span>
-                </button>
-              </div>
 
-              {shareThumbnail && (
-                <div className="mb-4 rounded-lg overflow-hidden border border-zinc-800 shadow-lg relative bg-black aspect-video flex items-center justify-center">
-                  <img src={shareThumbnail} alt="Project Thumbnail" className="w-full h-full object-contain" />
-                </div>
-              )}
-
-              <p className="text-xs text-zinc-400 mb-4">
-                Share this project configuration and visual preview.
-              </p>
-
-              <div className="flex bg-zinc-950 border border-zinc-800 rounded-lg p-2 mb-6 items-center">
-                <input
-                  type="text"
-                  readOnly
-                  value={window.location.href}
-                  className="bg-transparent flex-1 text-[11px] text-zinc-300 font-mono outline-none px-2"
-                />
-                <button
-                  onClick={() => {
-                    navigator.clipboard.writeText(window.location.href);
-                    alert("Link copied to clipboard!");
-                  }}
-                  className="bg-zinc-800 hover:bg-zinc-700 text-white px-3 py-1.5 rounded text-xs font-medium transition-colors"
-                >
-                  Copy
-                </button>
-              </div>
-
-              <div className="grid grid-cols-2 gap-3">
-                <button
-                  onClick={() => window.open(`https://twitter.com/intent/tweet?text=Check%20out%20my%20Audio%20Reactive%20Visualizer!&url=${encodeURIComponent(window.location.href)}`, '_blank')}
-                  className="flex items-center justify-center space-x-2 bg-[#1DA1F2]/10 text-[#1DA1F2] border border-[#1DA1F2]/20 hover:bg-[#1DA1F2]/20 py-2 rounded-lg text-xs font-semibold transition-colors"
-                >
-                  <span>Twitter</span>
-                </button>
-                <button
-                  onClick={() => window.open(`https://www.facebook.com/sharer/sharer.php?u=${encodeURIComponent(window.location.href)}`, '_blank')}
-                  className="flex items-center justify-center space-x-2 bg-[#4267B2]/10 text-[#4267B2] border border-[#4267B2]/20 hover:bg-[#4267B2]/20 py-2 rounded-lg text-xs font-semibold transition-colors"
-                >
-                  <span>Facebook</span>
-                </button>
-              </div>
-            </motion.div>
-          </motion.div>
-        )}
-      </AnimatePresence>
 
       {/* PWA UPDATE NOTIFICATION */}
       <AnimatePresence>
@@ -16445,6 +17288,34 @@ export default function App() {
           </motion.div>
         )}
       </AnimatePresence>
+
+      {/* STANDALONE DETACHED MINI PLAYER */}
+      <StandaloneMiniPlayer
+        isOpen={isStandalonePlayerOpen}
+        onClose={() => setIsStandalonePlayerOpen(false)}
+        isPlaying={isPlaying}
+        onTogglePlayback={handleTogglePlayback}
+        onStopPlayback={handleStopPlayback}
+        currentTime={currentTime}
+        duration={trackDuration}
+        onSeek={handleTimelineSeek}
+        audioTrack={audioTrack}
+        playlist={playlist}
+        currentTrackIndex={currentTrackIndex}
+        onPrevTrack={handlePrevTrack}
+        onNextTrack={handleNextTrack}
+        volume={monitorVolume}
+        onVolumeChange={(val) => {
+          setMonitorVolume(val);
+          setMonitorIsMuted(false);
+        }}
+        isMuted={monitorIsMuted}
+        onToggleMute={() => setMonitorIsMuted(!monitorIsMuted)}
+        bpm={visuals.beatLockBpm || 120}
+        getAnalyserNode={() => analyserRef.current}
+        getAnalyserData={() => lastFreqDataRef.current}
+        themeConfig={activeUIThemeConfig}
+      />
 
       {/* THEMED SKINS GALLERY MODAL */}
       <ThemedSkinsModal

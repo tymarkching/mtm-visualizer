@@ -32,13 +32,13 @@ export const MAIN_PRESETS: ThemedSkin[] = [
       cameraShake: 0,
     },
     background: {
-      type: 'gradient',
+      type: 'image',
       color: '#000000',
       gradientStart: '#0d001a',
       gradientEnd: '#000211',
-      imageUrl: null,
+      imageUrl: 'https://i.postimg.cc/rmn2dhkQ/Wallpaper-Green.png',
       videoUrl: null,
-      blur: 2,
+      blur: 0,
       opacity: 0.9,
     },
     title: {

@@ -140,11 +140,7 @@ export const CinemaZenOverlay: React.FC<CinemaZenOverlayProps> = ({
                 <button
                   type="button"
                   onClick={onTogglePlay}
-                  className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all cursor-pointer active:scale-95 ${
-                    isPlaying 
-                      ? 'bg-amber-500/20 text-amber-400 border border-amber-500/40 hover:bg-amber-500/30' 
-                      : `${themeConfig.buttonBg} ${themeConfig.accentGlow}`
-                  }`}
+                  className={`w-10 h-10 rounded-xl flex items-center justify-center transition-all cursor-pointer active:scale-95 ${themeConfig.buttonBg} ${themeConfig.accentGlow}`}
                 >
                   {isPlaying ? <Pause className="w-5 h-5 fill-current" /> : <Play className="w-5 h-5 fill-current ml-0.5" />}
                 </button>

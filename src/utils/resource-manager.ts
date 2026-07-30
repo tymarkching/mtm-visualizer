@@ -42,9 +42,21 @@ class MediaResourceManager {
         resolve(img);
       };
 
-      img.onerror = (err) => {
-        console.warn(`[ResourceManager] Failed to load image: ${url}`, err);
-        resolve(null);
+      img.onerror = () => {
+        // Fallback without crossOrigin header for hosts that don't support CORS preflight
+        const fallbackImg = new Image();
+        fallbackImg.onload = () => {
+          this.cacheImage(url, fallbackImg);
+          resolve(fallbackImg);
+        };
+        fallbackImg.onerror = (err) => {
+          console.warn(`[ResourceManager] Failed to load image: ${url}`, err);
+          resolve(null);
+        };
+        if (url.startsWith('blob:')) {
+          this.registerBlobUrl(url);
+        }
+        fallbackImg.src = url;
       };
 
       if (url.startsWith('blob:')) {
@@ -76,7 +88,19 @@ class MediaResourceManager {
       if (onLoad) onLoad(img);
     };
     img.onerror = () => {
-      console.warn(`[ResourceManager] Failed to load image: ${url}`);
+      // Fallback without crossOrigin
+      const fallbackImg = new Image();
+      fallbackImg.onload = () => {
+        this.cacheImage(url, fallbackImg);
+        if (onLoad) onLoad(fallbackImg);
+      };
+      fallbackImg.onerror = () => {
+        console.warn(`[ResourceManager] Failed to load image: ${url}`);
+      };
+      if (url.startsWith('blob:')) {
+        this.registerBlobUrl(url);
+      }
+      fallbackImg.src = url;
     };
 
     if (url.startsWith('blob:')) {
@@ -115,6 +139,7 @@ class MediaResourceManager {
       const onCanPlay = () => {
         video.removeEventListener('canplay', onCanPlay);
         this.cacheVideo(url, video);
+        video.play().catch(() => {});
         resolve(video);
       };
 

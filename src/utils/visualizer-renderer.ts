@@ -385,8 +385,8 @@ export function createParticle(
     const k = 128 / Math.max(1, zVal);
     x = startXVal * k + centerX;
     y = startYVal * k + centerY;
-  } else if (dir === 'spiral-vortex' || dir === 'orbital-spiral') {
-    radiusVal = randomY ? Math.random() * (Math.min(width, height) * 0.45) : (dir === 'orbital-spiral' ? 10 + Math.random() * 20 : 0);
+  } else if (settings.type === 'vortex' || dir === 'spiral-vortex' || dir === 'orbital-spiral') {
+    radiusVal = randomY ? Math.random() * (Math.max(width, height) * 0.6) + 20 : Math.max(width, height) * (0.35 + Math.random() * 0.4);
     x = centerX + Math.cos(angle) * radiusVal;
     y = centerY + Math.sin(angle) * radiusVal;
   } else if (randomY) {
@@ -900,6 +900,35 @@ export function updateParticles(
       
       const baseS = p.baseSize || settings.minSize || 2;
       p.size = Math.max(0.5, Math.min(50, baseS * k * 0.15));
+    } else if (settings.type === 'vortex') {
+      const cx = width / 2;
+      const cy = height / 2;
+      if (p.angle === undefined || p.radius === undefined) {
+        const dx = p.x - cx;
+        const dy = p.y - cy;
+        p.radius = Math.sqrt(dx * dx + dy * dy);
+        p.angle = Math.atan2(dy, dx);
+      }
+      const baseSpeed = p.speed || settings.speed || 2;
+      const rotDir = (p.baseVx && p.baseVx > 0) ? 1 : -1;
+      
+      // Rotational spinning around center
+      const spinSpeed = rotDir * (0.015 + bassIntensity * 0.08) * baseSpeed * dynamicBaseSpeedMultiplier * burstSpeedMult;
+      p.angle += spinSpeed;
+
+      // Inward pull spiraling toward center based on bass frequency intensity
+      const inwardPull = (0.8 + bassIntensity * 5.0) * baseSpeed * dynamicBaseSpeedMultiplier * burstSpeedMult;
+      p.radius -= inwardPull;
+
+      // Reset to outer perimeter when reaching center
+      if (p.radius <= 8) {
+        p.radius = Math.max(width, height) * (0.45 + Math.random() * 0.35);
+        p.angle = Math.random() * Math.PI * 2;
+        p.life = p.maxLife;
+      }
+
+      p.x = cx + Math.cos(p.angle) * p.radius;
+      p.y = cy + Math.sin(p.angle) * p.radius;
     } else if (settings.emittingDirection === 'spiral-vortex' || settings.emittingDirection === 'orbital-spiral') {
       const rotDir = (p.baseVx && p.baseVx > 0) ? 1 : -1;
       const angleStep = rotDir * (p.speed || settings.speed || 1) * 0.02 * dynamicBaseSpeedMultiplier * burstSpeedMult;
@@ -1122,6 +1151,104 @@ export function updateParticles(
   return result;
 }
 
+function renderMediaCover(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  height: number,
+  element: HTMLImageElement | HTMLVideoElement,
+  filterPreset?: string,
+  blur?: number,
+  zoomScale: number = 1.0,
+  offsetX: number = 0,
+  offsetY: number = 0,
+  animSpeed: number = 1.0
+) {
+  let elemWidth = 0;
+  let elemHeight = 0;
+
+  const isVideo = element instanceof HTMLVideoElement;
+
+  if (element instanceof HTMLImageElement) {
+    if (!element.complete || element.naturalWidth === 0) return;
+    elemWidth = element.naturalWidth;
+    elemHeight = element.naturalHeight;
+  } else if (isVideo) {
+    const vid = element as HTMLVideoElement & { _lastPlayAttempt?: number };
+    if (vid.readyState < 2) return; // Wait for HAVE_CURRENT_DATA to avoid frame stutter
+    if (vid.paused) {
+      const now = Date.now();
+      if (!vid._lastPlayAttempt || now - vid._lastPlayAttempt > 1000) {
+        vid._lastPlayAttempt = now;
+        vid.muted = true;
+        vid.playsInline = true;
+        vid.play().catch(() => {});
+      }
+    }
+    try {
+      const targetRate = Math.max(0.25, Math.min(3.0, animSpeed));
+      if (Math.abs(vid.playbackRate - targetRate) > 0.05) {
+        vid.playbackRate = targetRate;
+      }
+    } catch (e) {}
+    elemWidth = vid.videoWidth || 1920;
+    elemHeight = vid.videoHeight || 1080;
+  }
+
+  if (elemWidth <= 0 || elemHeight <= 0) return;
+
+  const mediaRatio = elemWidth / elemHeight;
+  const canvasRatio = width / height;
+  let dWidth = width;
+  let dHeight = height;
+  let dx = 0;
+  let dy = 0;
+
+  if (mediaRatio > canvasRatio) {
+    dWidth = height * mediaRatio;
+    dx = (width - dWidth) / 2;
+  } else {
+    dHeight = width / mediaRatio;
+    dy = (height - dHeight) / 2;
+  }
+
+  if (zoomScale !== 1.0 || offsetX !== 0 || offsetY !== 0) {
+    dWidth *= zoomScale;
+    dHeight *= zoomScale;
+    dx = (width - dWidth) / 2 + offsetX;
+    dy = (height - dHeight) / 2 + offsetY;
+  }
+
+  // Subpixel rounding for HTMLVideoElement eliminates GPU rasterization jitter
+  const drawX = isVideo ? Math.round(dx) : dx;
+  const drawY = isVideo ? Math.round(dy) : dy;
+  const drawW = isVideo ? Math.round(dWidth) : dWidth;
+  const drawH = isVideo ? Math.round(dHeight) : dHeight;
+
+  let filterStr = 'none';
+  if (filterPreset && filterPreset !== 'none') {
+    switch (filterPreset) {
+      case 'grayscale': filterStr = 'grayscale(100%)'; break;
+      case 'sepia': filterStr = 'sepia(100%)'; break;
+      case 'invert': filterStr = 'invert(100%)'; break;
+      case 'hue-rotate': filterStr = 'hue-rotate(180deg)'; break;
+      case 'contrast': filterStr = 'contrast(175%)'; break;
+    }
+  }
+  if (blur && blur > 0) {
+    if (filterStr === 'none') filterStr = `blur(${blur}px)`;
+    else filterStr += ` blur(${blur}px)`;
+  }
+
+  const needsFilter = filterStr !== 'none' && filterStr !== '';
+  if (needsFilter) {
+    ctx.filter = filterStr;
+    ctx.drawImage(element, drawX, drawY, drawW, drawH);
+    ctx.filter = 'none';
+  } else {
+    ctx.drawImage(element, drawX, drawY, drawW, drawH);
+  }
+}
+
 // DRAW BACKGROUND
 export function drawBackground(
   ctx: CanvasRenderingContext2D,
@@ -1131,13 +1258,17 @@ export function drawBackground(
   bgImgElement: HTMLImageElement | null,
   bgVidElement: HTMLVideoElement | null,
   beatIntensity?: number,
-  enableBeatPulse?: boolean
+  enableBeatPulse?: boolean,
+  slideshowMediaMap?: Map<string, HTMLImageElement | HTMLVideoElement> | null,
+  audioCurrentTime?: number,
+  audioDuration?: number,
+  beatCount?: number
 ) {
   ctx.save();
 
   const animSpeed = settings.animationSpeed !== undefined ? settings.animationSpeed : 1.0;
 
-  if (settings.parallaxSway && settings.parallaxSway > 0 && (settings.type === 'image' || settings.type === 'video')) {
+  if (settings.parallaxSway && settings.parallaxSway > 0 && (settings.type === 'image' || settings.type === 'video' || settings.type === 'slideshow')) {
     const time = Date.now() * 0.0005 * animSpeed;
     const amp = settings.parallaxSway * 10 * (1 + (beatIntensity || 0));
     const swayX = Math.sin(time) * amp;
@@ -1156,7 +1287,115 @@ export function drawBackground(
     ctx.translate(-width / 2, -height / 2);
   }
   
-  if (settings.type === 'color') {
+  if (settings.type === 'slideshow' || (settings.slideshow && settings.slideshow.enabled)) {
+    const slideshow = settings.slideshow;
+    const items = slideshow?.items || [];
+
+    if (items.length > 0) {
+      const N = items.length;
+      const timingMode = slideshow?.timingMode || 'fixed';
+      const slideDuration = Math.max(1.0, slideshow?.slideDuration ?? 5.0);
+      const beatInterval = Math.max(1, slideshow?.beatInterval ?? 8);
+      const transitionDuration = Math.max(0.1, slideshow?.transitionDuration ?? 1.2);
+      const transitionStyle = slideshow?.transitionStyle || 'crossfade';
+      const kenBurnsZoom = slideshow?.kenBurnsZoom ?? true;
+
+      // 1. Calculate duration per item in seconds
+      let itemDuration = slideDuration;
+      if (timingMode === 'track-fit' && audioDuration && audioDuration > 0) {
+        itemDuration = Math.max(1.0, audioDuration / N);
+      } else if (timingMode === 'beat-sync') {
+        itemDuration = Math.max(1.0, beatInterval * 0.5); // ~120 BPM base interval
+      }
+
+      // 2. Elapsed time in seconds
+      const elapsed = audioCurrentTime !== undefined && audioCurrentTime >= 0
+        ? audioCurrentTime
+        : (Date.now() * 0.001 * animSpeed);
+
+      const totalCycle = itemDuration * N;
+      const loopTime = elapsed % totalCycle;
+
+      const currIdx = Math.floor(loopTime / itemDuration) % N;
+      const nextIdx = (currIdx + 1) % N;
+      const timeInItem = loopTime % itemDuration;
+
+      // Transition factor (0 to 1)
+      let alpha = 0;
+      if (timeInItem >= (itemDuration - transitionDuration) && N > 1) {
+        alpha = (timeInItem - (itemDuration - transitionDuration)) / transitionDuration;
+        alpha = Math.max(0, Math.min(1, alpha));
+      }
+
+      const currItem = items[currIdx];
+      const nextItem = items[nextIdx];
+
+      const currElem = (currItem && slideshowMediaMap) ? slideshowMediaMap.get(currItem.id) || null : null;
+      const nextElem = (nextItem && slideshowMediaMap) ? slideshowMediaMap.get(nextItem.id) || null : null;
+
+      const fallbackElem = currElem || bgImgElement || bgVidElement;
+
+      // Progress ratio inside item (0 to 1)
+      const itemProgress = timeInItem / itemDuration;
+      const currZoom = kenBurnsZoom ? (1.0 + 0.06 * itemProgress) : 1.0;
+
+      if (fallbackElem) {
+        renderMediaCover(ctx, width, height, fallbackElem, settings.filterPreset, settings.blur, currZoom, 0, 0, animSpeed);
+      } else {
+        ctx.fillStyle = '#0a0a0f';
+        ctx.fillRect(0, 0, width, height);
+      }
+
+      // If transitioning to next slide
+      if (alpha > 0 && N > 1 && transitionStyle !== 'cut') {
+        const nextZoom = kenBurnsZoom ? 1.0 : 1.0;
+        const targetElem = nextElem || bgImgElement || bgVidElement;
+
+        if (targetElem) {
+          if (transitionStyle === 'crossfade') {
+            ctx.save();
+            ctx.globalAlpha = alpha;
+            renderMediaCover(ctx, width, height, targetElem, settings.filterPreset, settings.blur, nextZoom, 0, 0, animSpeed);
+            ctx.restore();
+          } else if (transitionStyle === 'fade-black') {
+            ctx.save();
+            if (alpha <= 0.5) {
+              ctx.fillStyle = `rgba(0, 0, 0, ${alpha * 2})`;
+              ctx.fillRect(0, 0, width, height);
+            } else {
+              ctx.globalAlpha = (alpha - 0.5) * 2;
+              renderMediaCover(ctx, width, height, targetElem, settings.filterPreset, settings.blur, nextZoom, 0, 0, animSpeed);
+              ctx.restore();
+            }
+          } else if (transitionStyle === 'slide-left') {
+            ctx.save();
+            ctx.translate(-alpha * width, 0);
+            if (fallbackElem) renderMediaCover(ctx, width, height, fallbackElem, settings.filterPreset, settings.blur, currZoom, 0, 0, animSpeed);
+            renderMediaCover(ctx, width, height, targetElem, settings.filterPreset, settings.blur, nextZoom, width, 0, animSpeed);
+            ctx.restore();
+          } else if (transitionStyle === 'slide-right') {
+            ctx.save();
+            ctx.translate(alpha * width, 0);
+            if (fallbackElem) renderMediaCover(ctx, width, height, fallbackElem, settings.filterPreset, settings.blur, currZoom, 0, 0, animSpeed);
+            renderMediaCover(ctx, width, height, targetElem, settings.filterPreset, settings.blur, nextZoom, -width, 0, animSpeed);
+            ctx.restore();
+          } else if (transitionStyle === 'ken-burns') {
+            ctx.save();
+            ctx.globalAlpha = alpha;
+            renderMediaCover(ctx, width, height, targetElem, settings.filterPreset, settings.blur, 1.0 + 0.03 * alpha, 0, 0, animSpeed);
+            ctx.restore();
+          }
+        }
+      }
+
+      // Dim Overlay
+      ctx.fillStyle = `rgba(0, 0, 0, ${1 - settings.opacity})`;
+      ctx.fillRect(0, 0, width, height);
+    } else {
+      ctx.fillStyle = settings.color || '#0a0a0f';
+      ctx.fillRect(0, 0, width, height);
+    }
+  } else if (settings.type === 'color') {
     ctx.fillStyle = settings.color;
     ctx.fillRect(0, 0, width, height);
   } else if (settings.type === 'gradient') {
@@ -1214,49 +1453,64 @@ export function drawBackground(
     ctx.fillStyle = `rgba(0, 0, 0, ${1 - settings.opacity})`;
     ctx.fillRect(0, 0, width, height);
   } else if (settings.type === 'video' && bgVidElement) {
-    if (bgVidElement.paused) {
-      bgVidElement.play().catch(() => {});
-    }
-    try {
-      const targetRate = Math.max(0.25, Math.min(3.0, animSpeed));
-      if (Math.abs(bgVidElement.playbackRate - targetRate) > 0.05) {
-        bgVidElement.playbackRate = targetRate;
+    if (bgVidElement.readyState >= 2) {
+      const vid = bgVidElement as HTMLVideoElement & { _lastPlayAttempt?: number };
+      if (vid.paused) {
+        const now = Date.now();
+        if (!vid._lastPlayAttempt || now - vid._lastPlayAttempt > 1000) {
+          vid._lastPlayAttempt = now;
+          vid.muted = true;
+          vid.playsInline = true;
+          vid.play().catch(() => {});
+        }
       }
-    } catch (e) {}
+      try {
+        const targetRate = Math.max(0.25, Math.min(3.0, animSpeed));
+        if (Math.abs(vid.playbackRate - targetRate) > 0.05) {
+          vid.playbackRate = targetRate;
+        }
+      } catch (e) {}
 
-    // Video covering
-    const vidRatio = bgVidElement.videoWidth / bgVidElement.videoHeight;
-    const canvasRatio = width / height;
-    let dWidth = width;
-    let dHeight = height;
-    let dx = 0;
-    let dy = 0;
+      // Video covering
+      const vidRatio = (vid.videoWidth || 1920) / (vid.videoHeight || 1080);
+      const canvasRatio = width / height;
+      let dWidth = width;
+      let dHeight = height;
+      let dx = 0;
+      let dy = 0;
 
-    if (vidRatio > canvasRatio) {
-      dWidth = height * vidRatio;
-      dx = (width - dWidth) / 2;
-    } else {
-      dHeight = width / vidRatio;
-      dy = (height - dHeight) / 2;
-    }
+      if (vidRatio > canvasRatio) {
+        dWidth = height * vidRatio;
+        dx = (width - dWidth) / 2;
+      } else {
+        dHeight = width / vidRatio;
+        dy = (height - dHeight) / 2;
+      }
 
-    let vidFilterStr = 'none';
-    if (settings.filterPreset && settings.filterPreset !== 'none') {
-      switch (settings.filterPreset) {
-        case 'grayscale': vidFilterStr = 'grayscale(100%)'; break;
-        case 'sepia': vidFilterStr = 'sepia(100%)'; break;
-        case 'invert': vidFilterStr = 'invert(100%)'; break;
-        case 'hue-rotate': vidFilterStr = 'hue-rotate(180deg)'; break;
-        case 'contrast': vidFilterStr = 'contrast(175%)'; break;
+      let vidFilterStr = 'none';
+      if (settings.filterPreset && settings.filterPreset !== 'none') {
+        switch (settings.filterPreset) {
+          case 'grayscale': vidFilterStr = 'grayscale(100%)'; break;
+          case 'sepia': vidFilterStr = 'sepia(100%)'; break;
+          case 'invert': vidFilterStr = 'invert(100%)'; break;
+          case 'hue-rotate': vidFilterStr = 'hue-rotate(180deg)'; break;
+          case 'contrast': vidFilterStr = 'contrast(175%)'; break;
+        }
+      }
+      if (settings.blur > 0) {
+        if (vidFilterStr === 'none') vidFilterStr = `blur(${settings.blur}px)`;
+        else vidFilterStr += ` blur(${settings.blur}px)`;
+      }
+
+      const needsFilter = vidFilterStr !== 'none' && vidFilterStr !== '';
+      if (needsFilter) {
+        ctx.filter = vidFilterStr;
+        ctx.drawImage(vid, Math.round(dx), Math.round(dy), Math.round(dWidth), Math.round(dHeight));
+        ctx.filter = 'none';
+      } else {
+        ctx.drawImage(vid, Math.round(dx), Math.round(dy), Math.round(dWidth), Math.round(dHeight));
       }
     }
-    if (settings.blur > 0) {
-      if (vidFilterStr === 'none') vidFilterStr = `blur(${settings.blur}px)`;
-      else vidFilterStr += ` blur(${settings.blur}px)`;
-    }
-    ctx.filter = vidFilterStr;
-
-    ctx.drawImage(bgVidElement, dx, dy, dWidth, dHeight);
 
     // Dim Overlay
     ctx.filter = 'none';
@@ -2264,6 +2518,33 @@ export function drawParticles(
       ctx.globalAlpha = finalAlpha * 0.35;
       ctx.beginPath();
       ctx.arc(p.x, p.y, activeSize, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    } else if (settings.type === 'vortex') {
+      ctx.save();
+      ctx.translate(p.x, p.y);
+      // Tangent direction along spiral path towards center
+      const tangentAngle = (p.angle || 0) + Math.PI / 2;
+      ctx.rotate(tangentAngle);
+
+      // Tail length responds dynamically to bass beat intensity
+      const tailLen = Math.max(8, p.size * 3.5 * (1 + (beatIntensity || 0) * 2.0));
+      const grad = ctx.createLinearGradient(-tailLen, 0, p.size * 1.5, 0);
+      grad.addColorStop(0, 'rgba(0, 0, 0, 0)');
+      grad.addColorStop(0.6, finalColor);
+      grad.addColorStop(1, '#ffffff');
+
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.ellipse(0, 0, tailLen, Math.max(1.2, p.size * 0.8), 0, 0, Math.PI * 2);
+      ctx.fill();
+
+      // Core white glow point
+      ctx.fillStyle = '#ffffff';
+      ctx.shadowBlur = 12;
+      ctx.shadowColor = finalColor;
+      ctx.beginPath();
+      ctx.arc(0, 0, Math.max(1, p.size * 0.6), 0, Math.PI * 2);
       ctx.fill();
       ctx.restore();
     }

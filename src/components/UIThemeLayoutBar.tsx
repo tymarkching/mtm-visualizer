@@ -20,8 +20,8 @@ export const UIThemeLayoutBar: React.FC<UIThemeLayoutBarProps> = ({
 
   return (
     <div className={`w-full bg-zinc-950/80 border-b border-zinc-900/80 px-4 py-2 flex flex-wrap items-center justify-between gap-3 text-xs font-sans backdrop-blur-md transition-all duration-500 ease-in-out`}>
-      {/* Left: UI Themes Selector (1, 2, 3, 4, 5) */}
-      <div className="flex items-center space-x-2 overflow-x-auto scrollbar-hide py-1">
+      {/* Left: UI Themes Selector */}
+      <div className="flex items-center space-x-2 overflow-x-auto scrollbar-hide [scrollbar-width:none] [-ms-overflow-style:none] [&::-webkit-scrollbar]:hidden py-1">
         <div className="flex items-center space-x-1.5 text-[11px] font-mono text-zinc-400 shrink-0 mr-1">
           <Palette className={`w-3.5 h-3.5 ${activeThemeConfig.accentText} transition-colors duration-500 ease-in-out`} />
           <span className="font-semibold uppercase tracking-wider hidden sm:inline">UI Theme:</span>

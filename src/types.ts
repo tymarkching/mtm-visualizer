@@ -69,7 +69,8 @@ export type ParticleType =
   | 'frenchcore-spark'
   | 'cosmic-starfield-3d'
   | 'raindrops-on-glass'
-  | 'ambient-bokeh-bubbles';
+  | 'ambient-bokeh-bubbles'
+  | 'vortex';
 
 export interface VisualizerSettings {
   style: VisualizerStyle;
@@ -222,7 +223,6 @@ export interface VisualizerSettings {
   chromaticAberration?: boolean;
   overlayEdgeLighting?: boolean;
   overlayStabilization?: boolean;
-  masterColorGrading?: 'none' | 'film-look' | 'bw-noir' | 'sepia' | 'vintage-warm' | 'cyberpunk-teal' | 'kodak-gold';
   earthquakeCameraShake?: boolean;
   phosphorTrails?: number;
   clippingThreshold?: number;
@@ -333,13 +333,34 @@ export interface TitleOverlaySettings {
   colorBlendMode?: 'normal' | 'screen' | 'overlay' | 'multiply' | 'color-dodge' | 'difference';
 }
 
+export interface SlideshowItem {
+  id: string;
+  type: 'image' | 'video';
+  url: string;
+  name?: string;
+  customDuration?: number; // optional custom duration override in seconds
+}
+
+export interface SlideshowSettings {
+  enabled: boolean;
+  items: SlideshowItem[];
+  timingMode: 'fixed' | 'track-fit' | 'beat-sync';
+  slideDuration: number; // in seconds (for fixed mode)
+  beatInterval: number; // e.g. 2, 4, 8, 16 beats (for beat-sync mode)
+  transitionStyle: 'crossfade' | 'fade-black' | 'slide-left' | 'slide-right' | 'ken-burns' | 'cut';
+  transitionDuration: number; // in seconds, e.g. 1.0
+  loop: boolean;
+  kenBurnsZoom?: boolean;
+}
+
 export interface BackgroundSettings {
-  type: 'color' | 'image' | 'video' | 'gradient';
+  type: 'color' | 'image' | 'video' | 'gradient' | 'slideshow';
   color: string;
   gradientStart: string;
   gradientEnd: string;
   imageUrl: string | null;
   videoUrl: string | null;
+  slideshow?: SlideshowSettings;
   blur: number; // in pixels
   opacity: number; // background dimming / darkness
   scale?: number; // scale / zoom multiplier of the background artwork
@@ -452,7 +473,7 @@ export interface ExportSettings {
   format: 'mp4' | 'mov' | 'webm' | 'gif';
   aspectRatio: '16:9' | '9:16' | '1:1';
   resolution: '2160p' | '1080p' | '720p';
-  fps: 30 | 60;
+  fps: 30 | 60 | 120;
   engine?: 'offline' | 'realtime';
 }
 
@@ -465,7 +486,10 @@ export type UITheme =
   | '4-synthwave-retro'
   | '5-midnight-aurora'
   | '6-scarlet-pulse'
-  | '7-frosted-glass';
+  | '7-frosted-glass'
+  | '8-solar-gold'
+  | '9-toxic-emerald'
+  | '10-cosmic-ultramarine';
 
 export type UILayout = 
   | 'studio'
